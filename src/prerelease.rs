@@ -39,7 +39,7 @@ pub fn plan(repo: &Repo, package: &str, level: Option<BumpLevel>) -> Result<Plan
 
 /// Create the rc branch from `<remote>/<target>`, push it, open or update
 /// the PR against `target`.
-pub fn open(repo: &Repo, package: &str, target: &str, level: Option<BumpLevel>, remote: &str, gh: Gh) -> Result<(PlannedRelease, PullRequest), Error> {
+pub fn open(repo: &Repo, package: &str, target: &str, level: Option<BumpLevel>, remote: &str, dry_run: bool, gh: Gh) -> Result<(PlannedRelease, PullRequest), Error> {
     let release = plan(repo, package, level)?;
     let branch = branch_name(repo, package);
     let start = format!("{remote}/{target}");
@@ -51,7 +51,7 @@ pub fn open(repo: &Repo, package: &str, target: &str, level: Option<BumpLevel>, 
         apply::apply_with(worktree, &repo.config, &dependencies, &repo.changesets, std::slice::from_ref(&release), &release, false)?;
         Ok(())
     })?;
-    git::run(&repo.root, &["push", "--force", "--quiet", remote, &format!("{branch}:{branch}")])?;
+    git::write(&repo.root, dry_run, &["push", "--force", "--quiet", remote, &format!("{branch}:{branch}")])?;
 
     let label = repo.config.release_label.as_str();
     let title = format!("pre-release: {package} {}", release.to);

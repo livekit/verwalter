@@ -21,6 +21,16 @@ pub fn run(root: &Path, args: &[&str]) -> Result<String, Error> {
     Ok(String::from_utf8(out.stdout)?.trim().to_string())
 }
 
+/// A git command that changes the remote or the refs. With `dry_run` it
+/// is printed instead of run.
+pub fn write(root: &Path, dry_run: bool, args: &[&str]) -> Result<String, Error> {
+    if dry_run {
+        println!("dry-run: git {}", args.join(" "));
+        return Ok(String::new());
+    }
+    run(root, args)
+}
+
 pub fn is_repo(root: &Path) -> bool {
     output(root, &["rev-parse", "--git-dir"]).map(|o| o.status.success()).unwrap_or(false)
 }

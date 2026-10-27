@@ -38,8 +38,32 @@ pub struct PullRequest {
 
 pub const MARKER: &str = "<!-- verwalter release -->";
 
+/// Wraps a gh runner so that every write (`pr create|edit|close|comment`,
+/// `release create|delete|edit`, `label create`, `api -X ...`) is printed
+/// and faked, while reads go through.
+pub fn dry_run_gh(mut inner: impl FnMut(&[&str]) -> Result<String, Error>) -> impl FnMut(&[&str]) -> Result<String, Error> {
+    move |args: &[&str]| {
+        let is_write = matches!(
+            args,
+            ["pr", "create" | "edit" | "close" | "comment", ..]
+                | ["release", "create" | "delete" | "edit", ..]
+                | ["label", "create", ..]
+                | ["api", "-X", ..]
+        );
+        if !is_write {
+            return inner(args);
+        }
+        let shown: Vec<&str> = args.iter().map(|a| if a.contains('\n') { "<body>" } else { *a }).collect();
+        println!("dry-run: gh {}", shown.join(" "));
+        Ok(match args {
+            ["pr", "create", ..] => "https://dry-run/pull/0".to_string(),
+            _ => String::new(),
+        })
+    }
+}
+
 /// Push every branch and make GitHub match the plan.
-pub fn sync(repo: &Repo, plan: &[PlannedRelease], branches: &[Branch], remote: &str, gh: Gh) -> Result<Vec<PullRequest>, Error> {
+pub fn sync(repo: &Repo, plan: &[PlannedRelease], branches: &[Branch], remote: &str, dry_run: bool, gh: Gh) -> Result<Vec<PullRequest>, Error> {
     let label = repo.config.release_label.as_str();
     gh(&["label", "create", label, "--force", "--color", "0E8A16", "--description", "Release PR managed by verwalter"])?;
 
@@ -49,7 +73,7 @@ pub fn sync(repo: &Repo, plan: &[PlannedRelease], branches: &[Branch], remote: &
 
     let mut result = Vec::new();
     for (release, branch) in plan.iter().zip(branches) {
-        git::run(&repo.root, &["push", "--force", "--quiet", remote, &format!("{}:{}", branch.name, branch.name)])?;
+        git::write(&repo.root, dry_run, &["push", "--force", "--quiet", remote, &format!("{}:{}", branch.name, branch.name)])?;
 
         let parent = release.stacked_on.as_deref().and_then(|p| result.iter().find(|pr: &&PullRequest| pr.head == format!("{}{p}", repo.config.release_branch_prefix)));
         let title = format!("release: {} {}", release.package, release.to);

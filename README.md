@@ -90,4 +90,7 @@ PRs trigger CI, which the default `github.token` does not.
 | `verwalter check --pr <n>` | Changeset check for a contributor PR, with comment. |
 | `verwalter pre-release <package> [--target <branch>] [--level <l>]` | Open an rc PR for one package. Changesets stay pending. |
 
-All commands take `--config <file>` and an optional checkout path.
+All commands take `--config <file>` and an optional checkout path. `pr`,
+`release`, `pre-release` and `check` take `--dry-run`: every push, tag and
+GitHub write is printed instead of done (the action input is `dry-run: true`).
+Local release branches are still regenerated.

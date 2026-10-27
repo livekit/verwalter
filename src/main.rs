@@ -2,7 +2,7 @@ use std::{path::PathBuf, process::ExitCode};
 
 use verwalter::{branches, check, github, plan::plan, prerelease, release, repo::Repo, version::BumpLevel};
 
-const USAGE: &str = "usage: verwalter <plan|branches|pr> [--config <file>] [--base <ref>] [--remote <name>] [<checkout>]\n       verwalter release [--asset <file>]... [--abandon <tag>] [--remote <name>] [<checkout>]\n       verwalter check --pr <number> [--config <file>] [<checkout>]\n       verwalter pre-release <package> [--target <branch>] [--level major|minor|patch] [--remote <name>] [<checkout>]";
+const USAGE: &str = "usage: verwalter <plan|branches|pr> [--config <file>] [--base <ref>] [--remote <name>] [--dry-run] [<checkout>]\n       verwalter release [--asset <file>]... [--abandon <tag>] [--remote <name>] [--dry-run] [<checkout>]\n       verwalter check --pr <number> [--config <file>] [--dry-run] [<checkout>]\n       verwalter pre-release <package> [--target <branch>] [--level major|minor|patch] [--remote <name>] [--dry-run] [<checkout>]";
 
 fn main() -> ExitCode {
     match run() {
@@ -29,6 +29,7 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut abandon: Option<String> = None;
     let mut target: Option<String> = None;
     let mut level: Option<BumpLevel> = None;
+    let mut dry_run = false;
     let mut root = PathBuf::from(".");
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -39,6 +40,7 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             "--asset" => assets.push(args.next().ok_or(USAGE)?),
             "--abandon" => abandon = Some(args.next().ok_or(USAGE)?),
             "--target" => target = Some(args.next().ok_or(USAGE)?),
+            "--dry-run" => dry_run = true,
             "--level" => {
                 level = Some(match args.next().ok_or(USAGE)?.as_str() {
                     "major" => BumpLevel::Major,
@@ -70,8 +72,8 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         "pr" => {
             let base = base.unwrap_or_else(|| format!("{remote}/{}", repo.config.base_branch));
             let branches = branches::create(&repo, &releases, &base)?;
-            let mut gh = github::gh_cli(&repo.root);
-            for pr in github::sync(&repo, &releases, &branches, &remote, &mut gh)? {
+            let mut gh = gh(&repo, dry_run);
+            for pr in github::sync(&repo, &releases, &branches, &remote, dry_run, &mut gh)? {
                 println!("#{}  {}  on {}", pr.number, pr.head, pr.base);
             }
             Ok(())
@@ -79,14 +81,14 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         "pre-release" => {
             let package = package.ok_or(USAGE)?;
             let target = target.unwrap_or_else(|| repo.config.base_branch.clone());
-            let mut gh = github::gh_cli(&repo.root);
-            let (r, pr) = prerelease::open(&repo, &package, &target, level, &remote, &mut gh)?;
+            let mut gh = gh(&repo, dry_run);
+            let (r, pr) = prerelease::open(&repo, &package, &target, level, &remote, dry_run, &mut gh)?;
             println!("#{}  {}  {} -> {}  on {}", pr.number, pr.head, r.from, r.to, pr.base);
             Ok(())
         }
         "check" => {
             let pr = pr.ok_or(USAGE)?;
-            let mut gh = github::gh_cli(&repo.root);
+            let mut gh = gh(&repo, dry_run);
             let c = check::run(&repo.root, &repo.config, pr, &mut gh)?;
             println!("{:?}: affected {:?}, covered {:?}", c.status, c.affected, c.covered);
             if c.status == check::Status::Failed {
@@ -95,14 +97,14 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             Ok(())
         }
         "release" => {
-            let mut gh = github::gh_cli(&repo.root);
+            let mut gh = gh(&repo, dry_run);
             if let Some(tag) = abandon {
-                for r in release::abandon(&repo, &remote, &tag, &mut gh)? {
+                for r in release::abandon(&repo, &remote, &tag, dry_run, &mut gh)? {
                     println!("removed {r}");
                 }
                 return Ok(());
             }
-            let released = release::run(&repo, &remote, &assets, &mut gh)?;
+            let released = release::run(&repo, &remote, &assets, dry_run, &mut gh)?;
             for r in &released {
                 println!("{}  {}  {}  {}", r.package, r.version, r.tag, r.status);
             }
@@ -110,6 +112,18 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             Ok(())
         }
         _ => Err(USAGE.into()),
+    }
+}
+
+type GhRunner<'a> = Box<dyn FnMut(&[&str]) -> Result<String, github::Error> + 'a>;
+
+/// The gh runner, with every write printed instead of run under `--dry-run`.
+fn gh(repo: &Repo, dry_run: bool) -> GhRunner<'_> {
+    let inner = github::gh_cli(&repo.root);
+    if dry_run {
+        Box::new(github::dry_run_gh(inner))
+    } else {
+        Box::new(inner)
     }
 }
 

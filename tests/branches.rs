@@ -162,7 +162,7 @@ fn pr_sync_pushes_and_creates_updates_closes() {
             _ => String::new(),
         })
     };
-    let prs = verwalter::github::sync(&repo, &plan, &branches, "origin", &mut gh).unwrap();
+    let prs = verwalter::github::sync(&repo, &plan, &branches, "origin", false, &mut gh).unwrap();
 
     // All three branches were pushed to the remote.
     let pushed = git(root, &["ls-remote", "--heads", "origin"]);
@@ -215,7 +215,7 @@ fn release_tags_and_creates_github_releases_resumably() {
             _ => Ok(String::new()),
         }
     };
-    let released = verwalter::release::run(&repo, "origin", &[], &mut gh).unwrap();
+    let released = verwalter::release::run(&repo, "origin", &[], false, &mut gh).unwrap();
 
     assert!(git(root, &["ls-remote", "--tags", "origin"]).contains("livekit-v0.8.0"), "tag pushed");
     assert_eq!(git(root, &["rev-parse", "livekit-v0.8.0^{commit}"]), git(root, &["rev-parse", "HEAD"]));
@@ -234,7 +234,7 @@ fn release_tags_and_creates_github_releases_resumably() {
         calls.push(args.join(" "));
         Ok(if args[2] == "livekit-v0.8.0" { "true".into() } else { "false".into() })
     };
-    let again = verwalter::release::run(&repo, "origin", &[], &mut gh2).unwrap();
+    let again = verwalter::release::run(&repo, "origin", &[], false, &mut gh2).unwrap();
     assert!(!calls[before..].iter().any(|c| c.starts_with("release create")));
     assert_eq!(again.len(), 1, "the draft is reported until the workflow publishes it");
     assert_eq!(again[0].status, "drafted");
@@ -266,7 +266,7 @@ fn release_resumes_a_tag_without_github_release() {
             _ => Ok(String::new()),
         }
     };
-    let released = verwalter::release::run(&repo, "origin", &[], &mut gh).unwrap();
+    let released = verwalter::release::run(&repo, "origin", &[], false, &mut gh).unwrap();
     assert_eq!(released.len(), 1);
     assert_eq!((released[0].package.as_str(), released[0].status), ("livekit", "published"));
     assert!(calls.iter().any(|c| c.starts_with("release create livekit-v0.7.0")));
@@ -301,20 +301,20 @@ fn release_with_assets_then_abandon() {
         }
     };
     let assets = ["dist/a.tar.gz".to_string(), "dist/b.tar.gz".to_string()];
-    let released = verwalter::release::run(&repo, "origin", &assets, &mut gh).unwrap();
+    let released = verwalter::release::run(&repo, "origin", &assets, false, &mut gh).unwrap();
     assert_eq!(released.len(), 1);
     let create = calls.borrow().iter().find(|c| c.starts_with("release create livekit-v0.7.0")).cloned().unwrap();
     assert!(create.contains("--verify-tag dist/a.tar.gz dist/b.tar.gz"), "{create}");
     assert!(!create.contains("--draft"));
 
-    let removed = verwalter::release::abandon(&repo, "origin", "livekit-v0.7.0", &mut gh).unwrap();
+    let removed = verwalter::release::abandon(&repo, "origin", "livekit-v0.7.0", false, &mut gh).unwrap();
     assert_eq!(removed, ["release livekit-v0.7.0", "origin tag livekit-v0.7.0", "local tag livekit-v0.7.0"]);
     assert!(calls.borrow().iter().any(|c| c == "release delete livekit-v0.7.0 --yes"));
     assert!(!git(root, &["ls-remote", "--tags", "origin"]).contains("livekit-v0.7.0"));
     assert!(git(root, &["tag", "--list", "livekit-v0.7.0"]).is_empty());
 
     // Abandoning again finds nothing and does not fail.
-    let again = verwalter::release::abandon(&repo, "origin", "livekit-v0.7.0", &mut gh).unwrap();
+    let again = verwalter::release::abandon(&repo, "origin", "livekit-v0.7.0", false, &mut gh).unwrap();
     assert!(again.is_empty());
     let _ = fs::remove_dir_all(&remote);
 }
@@ -344,7 +344,7 @@ fn prerelease_opens_an_rc_pr_without_consuming_changesets() {
             _ => String::new(),
         })
     };
-    let (release, pr) = verwalter::prerelease::open(&repo, "livekit-protocol", "main", None, "origin", &mut gh).unwrap();
+    let (release, pr) = verwalter::prerelease::open(&repo, "livekit-protocol", "main", None, "origin", false, &mut gh).unwrap();
     assert_eq!((release.from.to_string().as_str(), release.to.to_string().as_str()), ("0.3.1", "0.4.0-rc.1"), "level from the changeset");
     assert_eq!((pr.number, pr.head.as_str(), pr.base.as_str()), (9, "release/livekit-protocol-rc", "main"));
     assert!(calls.iter().any(|c| c.starts_with("pr create --head release/livekit-protocol-rc --base main --title pre-release: livekit-protocol 0.4.0-rc.1")));
@@ -366,5 +366,43 @@ fn prerelease_opens_an_rc_pr_without_consuming_changesets() {
     assert_eq!(next.to.to_string(), "0.4.0-rc.2");
     let p = plan(&repo.packages, &repo.changesets, repo.config.dependent_bump_level);
     assert_eq!(p.iter().find(|r| r.package == "livekit-protocol").unwrap().to.to_string(), "0.4.0");
+    let _ = fs::remove_dir_all(&remote);
+}
+
+#[test]
+fn dry_run_writes_nothing() {
+    let r = fixture("dry");
+    let root = &r.0;
+    write(root, ".changeset/ndc.md", "---\nlivekit-protocol: minor\n---\nx\n");
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-q", "-m", "add changeset"]);
+    let remote = std::env::temp_dir().join(format!("verwalter-it-{}-dry-remote.git", std::process::id()));
+    let _ = fs::remove_dir_all(&remote);
+    git(root, &["init", "-q", "--bare", remote.to_str().unwrap()]);
+    git(root, &["remote", "add", "origin", remote.to_str().unwrap()]);
+    git(root, &["push", "-q", "origin", "main"]);
+
+    let repo = Repo::load(root).unwrap();
+    let plan = plan(&repo.packages, &repo.changesets, repo.config.dependent_bump_level);
+    let branches = branches::create(&repo, &plan, "main").unwrap();
+    let writes = std::cell::Cell::new(0);
+    let inner = |args: &[&str]| -> Result<String, verwalter::github::Error> {
+        if !matches!(args, ["pr", "list", ..] | ["release", "view", ..]) {
+            writes.set(writes.get() + 1);
+        }
+        Ok(match args {
+            ["pr", "list", ..] => "[]".into(),
+            ["release", "view", ..] => Err("not found")?,
+            _ => String::new(),
+        })
+    };
+    let mut gh = verwalter::github::dry_run_gh(inner);
+    let prs = verwalter::github::sync(&repo, &plan, &branches, "origin", true, &mut gh).unwrap();
+    assert_eq!(prs.len(), 3);
+    let released = verwalter::release::run(&repo, "origin", &[], true, &mut gh).unwrap();
+    assert_eq!(released.len(), 3, "reported as if tagged and created");
+    assert_eq!(writes.get(), 0, "no gh write reached the inner runner");
+    assert!(git(root, &["ls-remote", "--heads", "origin"]).lines().all(|l| l.ends_with("refs/heads/main")), "nothing pushed");
+    assert!(git(root, &["tag", "--list"]).is_empty(), "no tag created");
     let _ = fs::remove_dir_all(&remote);
 }
