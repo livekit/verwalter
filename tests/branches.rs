@@ -74,7 +74,9 @@ fn stacked_branches_from_one_changeset() {
 
     let repo = Repo::load(root).unwrap();
     let plan = plan(&repo.packages, &repo.changesets, repo.config.dependent_bump_level);
-    let branches = branches::create(&repo, &plan, "main").unwrap();
+    // Start from a remote-tracking ref, as CI does; PRs still target `main`.
+    git(root, &["update-ref", "refs/remotes/origin/main", "main"]);
+    let branches = branches::create(&repo, &plan, "origin/main").unwrap();
 
     let names: Vec<(&str, &str)> = branches.iter().map(|b| (b.name.as_str(), b.target.as_str())).collect();
     assert_eq!(

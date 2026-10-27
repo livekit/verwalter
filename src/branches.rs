@@ -22,8 +22,8 @@ pub fn branch_name(repo: &Repo, package: &str) -> String {
 }
 
 /// Create or reset one local branch per planned release. `base` is the ref
-/// the bottom of the stack starts from, usually the base branch or
-/// `origin/<base branch>`.
+/// the bottom of the stack starts from, usually `origin/<base branch>`;
+/// the PR of the bottom branch targets the configured base branch name.
 pub fn create(repo: &Repo, plan: &[PlannedRelease], base: &str) -> Result<Vec<Branch>, Error> {
     let root = repo.root.as_path();
     if !git::ref_exists(root, base) {
@@ -34,7 +34,10 @@ pub fn create(repo: &Repo, plan: &[PlannedRelease], base: &str) -> Result<Vec<Br
 
     for release in plan {
         let name = branch_name(repo, &release.package);
-        let target = release.stacked_on.as_deref().map_or(base.to_string(), |p| branch_name(repo, p));
+        let (start, target) = match release.stacked_on.as_deref() {
+            Some(p) => (branch_name(repo, p), branch_name(repo, p)),
+            None => (base.to_string(), repo.config.base_branch.clone()),
+        };
 
         // A throwaway worktree keeps the user's checkout untouched. The
         // counter keeps parallel runs in one process apart (tests).
@@ -43,7 +46,7 @@ pub fn create(repo: &Repo, plan: &[PlannedRelease], base: &str) -> Result<Vec<Br
         let worktree = std::env::temp_dir().join(format!("verwalter-{}-{n}-{}", std::process::id(), release.package.replace('/', "_")));
         let _ = fs::remove_dir_all(&worktree);
         let wt = worktree.to_str().ok_or("temp dir is not valid UTF-8")?;
-        git::run(root, &["worktree", "add", "--detach", "--force", wt, &target])?;
+        git::run(root, &["worktree", "add", "--detach", "--force", wt, &start])?;
         let result = (|| -> Result<(), Error> {
             apply::apply(&worktree, &repo.config, &dependencies, &repo.changesets, plan, release)?;
             // Packages released by the branches under this one count as

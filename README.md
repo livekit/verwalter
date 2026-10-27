@@ -72,6 +72,11 @@ changeset check on PRs, release PRs on push, release after merge.
     command: check   # check | plan | pr | release
 ```
 
+For `pr`, the repository setting "Allow GitHub Actions to create and approve
+pull requests" (Settings → Actions → General) must be on, or the job must use
+a token of a GitHub App or a PAT. The App or PAT token also lets the release
+PRs trigger CI, which the default `github.token` does not.
+
 ## Commands
 
 | Command | What it does |
