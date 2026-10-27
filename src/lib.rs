@@ -5,6 +5,7 @@
 //! the changeset format (with quoted names), the config file, dependency
 //! discovery and, later, the release plan.
 
+pub mod apply;
 pub mod changeset;
 pub mod config;
 pub mod handler;

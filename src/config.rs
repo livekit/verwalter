@@ -43,6 +43,11 @@ pub struct Config {
     pub release_label: String,
     #[serde(default = "default_dependent_bump_level")]
     pub dependent_bump_level: BumpLevel,
+    /// Files outside any package that pin every package's version: a
+    /// workspace Cargo.toml, Cargo.lock, package-lock.json. Each release
+    /// updates its own entry in each of them.
+    #[serde(default)]
+    pub pin_files: Vec<String>,
     pub packages: BTreeMap<String, Package>,
 }
 
@@ -89,6 +94,8 @@ mod tests {
     use super::*;
 
     const MONO: &str = r#"
+pin_files = ["Cargo.toml", "Cargo.lock"]
+
 [packages.livekit-protocol]
 path = "livekit-protocol"
 versioned_files = ["livekit-protocol/Cargo.toml", "Cargo.lock"]
@@ -120,6 +127,8 @@ release = "tag"
         assert_eq!(c.release_branch_prefix, "release/");
         assert_eq!(c.release_label, "release");
         assert_eq!(c.dependent_bump_level, BumpLevel::Patch);
+        assert_eq!(c.pin_files, vec!["Cargo.toml", "Cargo.lock"]);
+        assert!(Config::parse(SINGLE).unwrap().pin_files.is_empty());
     }
 
     #[test]
