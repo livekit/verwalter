@@ -1,6 +1,6 @@
 [package]
 name = "verwalter"
-version = "0.2.0"
+version = "0.3.0-rc.1"
 edition = "2021"
 description = "Changeset-based versioning for single packages and monorepos"
 license = "Apache-2.0"
