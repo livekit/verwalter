@@ -65,10 +65,12 @@ impl Repo {
 /// Spec: Changeset.released_packages, derived from git rather than stored.
 /// A bump for package P is released when the tag of P's current version
 /// contains the commit that added the changeset file. No tag, or a tag
-/// elsewhere, means not released.
+/// elsewhere, means not released. A pre-release never counts: its
+/// changesets stay pending for the final release.
 fn mark_released(root: &Path, config: &Config, packages: &[PackageState], changesets: &mut [Changeset]) {
     let tags: Vec<(&str, String)> = packages
         .iter()
+        .filter(|p| !p.version.is_prerelease())
         .map(|p| (p.name.as_str(), config.tag_for(&p.name, &p.version)))
         .filter(|(_, tag)| git::ref_exists(root, tag))
         .collect();

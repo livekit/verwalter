@@ -318,3 +318,53 @@ fn release_with_assets_then_abandon() {
     assert!(again.is_empty());
     let _ = fs::remove_dir_all(&remote);
 }
+
+#[test]
+fn prerelease_opens_an_rc_pr_without_consuming_changesets() {
+    let r = fixture("rc");
+    let root = &r.0;
+    // The current version was tagged before the changeset landed.
+    git(root, &["tag", "livekit-protocol-v0.3.1"]);
+    write(root, ".changeset/ndc.md", "---\nlivekit-protocol: minor\nlivekit: minor\n---\nx\n");
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-q", "-m", "add changeset"]);
+    let remote = std::env::temp_dir().join(format!("verwalter-it-{}-rc-remote.git", std::process::id()));
+    let _ = fs::remove_dir_all(&remote);
+    git(root, &["init", "-q", "--bare", remote.to_str().unwrap()]);
+    git(root, &["remote", "add", "origin", remote.to_str().unwrap()]);
+    git(root, &["push", "-q", "origin", "main", "--tags"]);
+
+    let repo = Repo::load(root).unwrap();
+    let mut calls: Vec<String> = Vec::new();
+    let mut gh = |args: &[&str]| -> Result<String, verwalter::github::Error> {
+        calls.push(args.join(" "));
+        Ok(match args {
+            ["pr", "list", ..] => "[]".into(),
+            ["pr", "create", ..] => "https://github.com/x/y/pull/9".into(),
+            _ => String::new(),
+        })
+    };
+    let (release, pr) = verwalter::prerelease::open(&repo, "livekit-protocol", "main", None, "origin", &mut gh).unwrap();
+    assert_eq!((release.from.to_string().as_str(), release.to.to_string().as_str()), ("0.3.1", "0.4.0-rc.1"), "level from the changeset");
+    assert_eq!((pr.number, pr.head.as_str(), pr.base.as_str()), (9, "release/livekit-protocol-rc", "main"));
+    assert!(calls.iter().any(|c| c.starts_with("pr create --head release/livekit-protocol-rc --base main --title pre-release: livekit-protocol 0.4.0-rc.1")));
+
+    // Branch content: own version and lock, changelog; no pin in api, changeset kept.
+    assert!(git(root, &["show", "release/livekit-protocol-rc:livekit-protocol/Cargo.toml"]).contains("0.4.0-rc.1"));
+    assert!(git(root, &["show", "release/livekit-protocol-rc:Cargo.lock"]).contains("name = \"livekit-protocol\"\nversion = \"0.4.0-rc.1\""));
+    assert!(git(root, &["show", "release/livekit-protocol-rc:livekit-protocol/CHANGELOG.md"]).contains("## 0.4.0-rc.1"));
+    assert!(git(root, &["show", "release/livekit-protocol-rc:livekit-api/Cargo.toml"]).contains("workspace = true"));
+    git(root, &["show", "release/livekit-protocol-rc:.changeset/ndc.md"]);
+    assert!(git(root, &["ls-remote", "--heads", "origin"]).contains("release/livekit-protocol-rc"));
+
+    // After rc.1 is merged and tagged, the next request gives rc.2 and
+    // the automatic plan promotes to the final version.
+    git(root, &["tag", "livekit-protocol-v0.4.0-rc.1", "release/livekit-protocol-rc"]);
+    git(root, &["merge", "-q", "--no-edit", "release/livekit-protocol-rc"]);
+    let repo = Repo::load(root).unwrap();
+    let next = verwalter::prerelease::plan(&repo, "livekit-protocol", None).unwrap();
+    assert_eq!(next.to.to_string(), "0.4.0-rc.2");
+    let p = plan(&repo.packages, &repo.changesets, repo.config.dependent_bump_level);
+    assert_eq!(p.iter().find(|r| r.package == "livekit-protocol").unwrap().to.to_string(), "0.4.0");
+    let _ = fs::remove_dir_all(&remote);
+}

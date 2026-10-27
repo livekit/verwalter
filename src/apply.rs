@@ -34,6 +34,20 @@ pub fn apply(
     plan: &[PlannedRelease],
     release: &PlannedRelease,
 ) -> Result<Vec<PathBuf>, Error> {
+    apply_with(root, config, dependencies, changesets, plan, release, true)
+}
+
+/// `pins = false` leaves dependents alone: a pre-release of one package
+/// is not something its dependents should pin to.
+pub fn apply_with(
+    root: &Path,
+    config: &Config,
+    dependencies: &[(String, Vec<String>)],
+    changesets: &[Changeset],
+    plan: &[PlannedRelease],
+    release: &PlannedRelease,
+    pins: bool,
+) -> Result<Vec<PathBuf>, Error> {
     let name = release.package.as_str();
     let package = config.packages.get(name).ok_or_else(|| format!("package {name} is not in verwalter.toml"))?;
     let mut written = Vec::new();
@@ -60,7 +74,7 @@ pub fn apply(
     for file in &config.pin_files {
         rewrite(file, Some(name))?;
     }
-    for dependent in dependents(dependencies, name) {
+    for dependent in dependents(dependencies, name).into_iter().filter(|_| pins) {
         if let Some(d) = config.packages.get(dependent) {
             for file in d.versioned_files.iter().filter(|f| !is_lock_file(f)) {
                 rewrite(file, Some(name))?;

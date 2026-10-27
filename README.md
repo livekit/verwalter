@@ -87,5 +87,6 @@ PRs trigger CI, which the default `github.token` does not.
 | `verwalter release [--asset <file>]...` | Tag and create GitHub releases for every untagged version, with assets. |
 | `verwalter release --abandon <tag>` | Delete a GitHub release and its tag. |
 | `verwalter check --pr <n>` | Changeset check for a contributor PR, with comment. |
+| `verwalter pre-release <package> [--target <branch>] [--level <l>]` | Open an rc PR for one package. Changesets stay pending. |
 
 All commands take `--config <file>` and an optional checkout path.

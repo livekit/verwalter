@@ -87,6 +87,13 @@ impl Config {
             .replace("{package}", package)
             .replace("{version}", &version.to_string())
     }
+
+    /// The inverse of `tag_for`: the version a tag of this package carries.
+    pub fn version_from_tag(&self, package: &str, tag: &str) -> Option<crate::Version> {
+        let template = self.tag_template(package).replace("{package}", package);
+        let (prefix, suffix) = template.split_once("{version}")?;
+        tag.strip_prefix(prefix)?.strip_suffix(suffix)?.parse().ok()
+    }
 }
 
 #[cfg(test)]
@@ -156,6 +163,10 @@ release = "tag"
         let v: crate::Version = "1.2.0".parse().unwrap();
         assert_eq!(mono.tag_for("livekit-protocol", &v), "livekit-protocol-v1.2.0");
         assert_eq!(mono.tag_for("livekit-ffi", &v), "ffi/v1.2.0");
+
+        assert_eq!(mono.version_from_tag("livekit-ffi", "ffi/v1.2.0-rc.1").unwrap().to_string(), "1.2.0-rc.1");
+        assert_eq!(mono.version_from_tag("livekit-ffi", "livekit-protocol-v1.2.0"), None);
+        assert_eq!(mono.version_from_tag("livekit-protocol", "livekit-protocol-v1.2.0"), Some(v.clone()));
 
         let single = Config::parse(SINGLE).unwrap();
         assert_eq!(single.tag_for("livekit-client", &v), "v1.2.0");

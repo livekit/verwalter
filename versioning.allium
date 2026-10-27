@@ -127,6 +127,8 @@ entity Changeset {
     summary: String
     -- Packages named in bumps that have had a final release since this
     -- changeset landed. The file stays until every named package is released.
+    -- Derived from git: the tag of the package's current final version
+    -- contains the commit that added the file. A pre-release tag never counts.
     released_packages: Set<String>
     status: pending | consumed
 
@@ -283,8 +285,10 @@ rule OpenOrUpdateReleasePullRequests {
             ChangelogUpdated(package: package, changesets: package.pending_changesets)
 }
 
--- One package, one rc PR, never stacked. Dependents are not pre-released;
--- a maintainer requests them separately, base package first if needed.
+-- One package, one rc PR, never stacked. Dependents are not pre-released
+-- and not pinned to the rc; a maintainer requests them separately, base
+-- package first if needed. The rc branch bumps the package's own files
+-- and changelog only. Branch name: <prefix><package>-rc.
 rule MaintainerRequestsPreRelease {
     when: MaintainerRequestsPreRelease(maintainer, package, target_branch)
     let next = next_prerelease_version(package.version, package.pending_changesets)
