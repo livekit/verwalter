@@ -10,6 +10,7 @@ pub mod changeset;
 pub mod config;
 pub mod handler;
 pub mod plan;
+pub mod repo;
 pub mod version;
 
 pub use knope_versioning::semver::Version;
