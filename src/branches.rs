@@ -36,8 +36,11 @@ pub fn create(repo: &Repo, plan: &[PlannedRelease], base: &str) -> Result<Vec<Br
         let name = branch_name(repo, &release.package);
         let target = release.stacked_on.as_deref().map_or(base.to_string(), |p| branch_name(repo, p));
 
-        // A throwaway worktree keeps the user's checkout untouched.
-        let worktree = std::env::temp_dir().join(format!("verwalter-{}-{}", std::process::id(), release.package.replace('/', "_")));
+        // A throwaway worktree keeps the user's checkout untouched. The
+        // counter keeps parallel runs in one process apart (tests).
+        static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let worktree = std::env::temp_dir().join(format!("verwalter-{}-{n}-{}", std::process::id(), release.package.replace('/', "_")));
         let _ = fs::remove_dir_all(&worktree);
         let wt = worktree.to_str().ok_or("temp dir is not valid UTF-8")?;
         git::run(root, &["worktree", "add", "--detach", "--force", wt, &target])?;

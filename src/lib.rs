@@ -10,6 +10,7 @@ pub mod branches;
 pub mod changeset;
 pub mod config;
 pub mod git;
+pub mod github;
 pub mod handler;
 pub mod plan;
 pub mod repo;

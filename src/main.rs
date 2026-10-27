@@ -1,8 +1,8 @@
 use std::{path::PathBuf, process::ExitCode};
 
-use verwalter::{branches, plan::plan, repo::Repo};
+use verwalter::{branches, github, plan::plan, repo::Repo};
 
-const USAGE: &str = "usage: verwalter <plan|branches> [--config <file>] [--base <ref>] [<checkout>]";
+const USAGE: &str = "usage: verwalter <plan|branches|pr> [--config <file>] [--base <ref>] [--remote <name>] [<checkout>]";
 
 fn main() -> ExitCode {
     match run() {
@@ -19,11 +19,13 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let Some(command) = args.next() else { return Err(USAGE.into()) };
     let mut config = None;
     let mut base = None;
+    let mut remote = String::from("origin");
     let mut root = PathBuf::from(".");
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--config" => config = Some(PathBuf::from(args.next().ok_or(USAGE)?)),
             "--base" => base = Some(args.next().ok_or(USAGE)?),
+            "--remote" => remote = args.next().ok_or(USAGE)?,
             _ => root = PathBuf::from(arg),
         }
     }
@@ -41,6 +43,15 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             let base = base.unwrap_or_else(|| repo.config.base_branch.clone());
             for b in branches::create(&repo, &releases, &base)? {
                 println!("{}  on {}", b.name, b.target);
+            }
+            Ok(())
+        }
+        "pr" => {
+            let base = base.unwrap_or_else(|| format!("{remote}/{}", repo.config.base_branch));
+            let branches = branches::create(&repo, &releases, &base)?;
+            let mut gh = github::gh_cli(&repo.root);
+            for pr in github::sync(&repo, &releases, &branches, &remote, &mut gh)? {
+                println!("#{}  {}  on {}", pr.number, pr.head, pr.base);
             }
             Ok(())
         }
