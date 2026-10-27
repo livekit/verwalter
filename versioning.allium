@@ -210,6 +210,9 @@ config {
     -- dependency was bumped. A changeset never has to name dependents;
     -- the changeset check only looks at packages whose own files changed.
     dependent_bump_level: BumpLevel = patch
+    -- Label of on-demand pre-releases: 1.6.0-rc.1. Spelling per file format
+    -- is the handler's job (PEP 440 in pyproject.toml: 1.6.0rc1).
+    prerelease_label: String = "rc"
     -- PRs carrying this label need no changeset.
     exempt_label: String = "internal"
     -- Release PRs are recognisable by branch prefix and label so that repo

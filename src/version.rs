@@ -45,20 +45,22 @@ pub fn next_version(current: &Version, pending: impl IntoIterator<Item = BumpLev
 /// Spec: next_prerelease_version. `1.5.1` + minor gives `1.6.0-rc.1`;
 /// with `1.6.0-rc.1` already released, `1.6.0-rc.2`. The target is bumped
 /// from the latest stable release so that a later `major` request from an
-/// rc moves to the next major, not to the rc's own target.
-pub fn next_prerelease_version(current: &Version, released: &[Version], level: BumpLevel) -> Version {
+/// rc moves to the next major, not to the rc's own target. `label` is
+/// `rc` by default (config: prerelease_label).
+pub fn next_prerelease_version(current: &Version, released: &[Version], level: BumpLevel, label: &str) -> Version {
     let base = released.iter().filter(|r| !r.is_prerelease()).max().cloned().unwrap_or_else(|| {
         if current.is_prerelease() { Version::Stable(current.stable_component()) } else { current.clone() }
     });
     let target = bump(&base, level).stable_component();
+    let marker = format!("-{label}.");
     let last = released
         .iter()
         .filter(|r| r.is_prerelease() && r.stable_component() == target)
-        .filter_map(|r| r.to_string().rsplit_once("-rc.").and_then(|(_, n)| n.parse::<u64>().ok()))
+        .filter_map(|r| r.to_string().rsplit_once(marker.as_str()).and_then(|(_, n)| n.parse::<u64>().ok()))
         .max();
     Version::Pre(PreVersion {
         stable_component: target,
-        pre_component: Prerelease::new(Label::from("rc"), last.map_or(1, |n| n + 1)),
+        pre_component: Prerelease::new(Label::from(label), last.map_or(1, |n| n + 1)),
     })
 }
 
@@ -115,14 +117,16 @@ mod tests {
     fn prerelease_sequence() {
         let released = [v("1.5.1")];
         let h = v("1.5.1");
-        assert_eq!(next_prerelease_version(&h, &released, BumpLevel::Minor), v("1.6.0-rc.1"));
+        assert_eq!(next_prerelease_version(&h, &released, BumpLevel::Minor, "rc"), v("1.6.0-rc.1"));
 
         // rc.1 merged and tagged: files say 1.6.0-rc.1, tags know 1.5.1 too.
         let released = [v("1.5.1"), v("1.6.0-rc.1")];
         let h = v("1.6.0-rc.1");
-        assert_eq!(next_prerelease_version(&h, &released, BumpLevel::Minor), v("1.6.0-rc.2"));
+        assert_eq!(next_prerelease_version(&h, &released, BumpLevel::Minor, "rc"), v("1.6.0-rc.2"));
         // A different target version restarts at rc.1.
-        assert_eq!(next_prerelease_version(&h, &released, BumpLevel::Major), v("2.0.0-rc.1"));
+        assert_eq!(next_prerelease_version(&h, &released, BumpLevel::Major, "rc"), v("2.0.0-rc.1"));
+        // Another label starts its own sequence.
+        assert_eq!(next_prerelease_version(&h, &released, BumpLevel::Minor, "beta"), v("1.6.0-beta.1"));
 
         // The final release from the rc: the pending minor resolves to 1.6.0.
         assert_eq!(next_version(&h, [BumpLevel::Minor]), v("1.6.0"));

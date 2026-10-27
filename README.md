@@ -44,6 +44,7 @@ exempt_label = "internal"       # default
 release_branch_prefix = "release/"
 release_label = "release"
 dependent_bump_level = "patch"
+prerelease_label = "rc"          # 1.6.0-rc.1; written as 1.6.0rc1 in pyproject.toml
 pin_files = ["Cargo.toml", "Cargo.lock"]   # workspace manifest and lock files
 
 [packages.livekit-protocol]

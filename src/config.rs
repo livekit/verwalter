@@ -43,6 +43,10 @@ pub struct Config {
     pub release_label: String,
     #[serde(default = "default_dependent_bump_level")]
     pub dependent_bump_level: BumpLevel,
+    /// Pre-release label: `1.6.0-rc.1`. Written as PEP 440 in pyproject.toml
+    /// (`1.6.0rc1`; `alpha` and `beta` become `a` and `b`).
+    #[serde(default = "default_prerelease_label")]
+    pub prerelease_label: String,
     /// Files outside any package that pin every package's version: a
     /// workspace Cargo.toml, Cargo.lock, package-lock.json. Each release
     /// updates its own entry in each of them.
@@ -65,6 +69,9 @@ fn default_release_label() -> String {
 }
 fn default_dependent_bump_level() -> BumpLevel {
     BumpLevel::Patch
+}
+fn default_prerelease_label() -> String {
+    "rc".into()
 }
 
 impl Config {
@@ -134,6 +141,7 @@ release = "tag"
         assert_eq!(c.release_branch_prefix, "release/");
         assert_eq!(c.release_label, "release");
         assert_eq!(c.dependent_bump_level, BumpLevel::Patch);
+        assert_eq!(c.prerelease_label, "rc");
         assert_eq!(c.pin_files, vec!["Cargo.toml", "Cargo.lock"]);
         assert!(Config::parse(SINGLE).unwrap().pin_files.is_empty());
     }

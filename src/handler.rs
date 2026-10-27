@@ -16,9 +16,66 @@ pub type Error = Box<dyn std::error::Error + Send + Sync>;
 
 const NO_TAGS: &[&str] = &[];
 
+fn is_pyproject(path: &str) -> bool {
+    path.rsplit('/').next() == Some("pyproject.toml")
+}
+
+/// PEP 440 pre-release spelling for pyproject.toml: `1.6.0-rc.1` is
+/// written as `1.6.0rc1`, `alpha`/`beta` as `a`/`b`. Other labels keep the
+/// semver form, which Python tools accept and normalise.
+pub fn to_pep440(version: &Version) -> String {
+    let s = version.to_string();
+    let Some((stable, pre)) = s.split_once('-') else { return s };
+    let Some((label, n)) = pre.rsplit_once('.') else { return s };
+    let label = match label {
+        "alpha" | "a" => "a",
+        "beta" | "b" => "b",
+        "rc" => "rc",
+        _ => return s,
+    };
+    format!("{stable}{label}{n}")
+}
+
+/// The inverse, for reading: `1.6.0rc1` back to `1.6.0-rc.1`.
+fn from_pep440(s: &str) -> String {
+    for label in ["rc", "a", "b"] {
+        if let Some((stable, n)) = s.split_once(label) {
+            if !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()) && stable.split('.').all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit())) {
+                let semver_label = match label { "a" => "alpha", "b" => "beta", _ => "rc" };
+                return format!("{stable}-{semver_label}.{n}");
+            }
+        }
+    }
+    s.to_string()
+}
+
+/// Rewrite the `version = "..."` line of a pyproject.toml to semver form so
+/// knope can parse it.
+fn normalise_pyproject(content: &str) -> String {
+    content
+        .lines()
+        .map(|line| {
+            let trimmed = line.trim_start();
+            if let Some(rest) = trimmed.strip_prefix("version") {
+                if let Some(value) = rest.trim_start().strip_prefix('=') {
+                    let value = value.trim();
+                    if let Some(inner) = value.strip_prefix('"').and_then(|v| v.strip_suffix('"')) {
+                        let indent = &line[..line.len() - trimmed.len()];
+                        return format!("{indent}version = \"{}\"", from_pep440(inner));
+                    }
+                }
+            }
+            line.to_string()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+        + if content.ends_with('\n') { "\n" } else { "" }
+}
+
 fn load(path: &str, dependency: Option<&str>, content: &str) -> Result<(VersionedFileConfig, VersionedFile), Error> {
     let config = VersionedFileConfig::new(RelativePathBuf::from(path), dependency.map(String::from), None)?;
-    let file = VersionedFile::new(&config, content.to_string(), NO_TAGS)?;
+    let content = if is_pyproject(path) { normalise_pyproject(content) } else { content.to_string() };
+    let file = VersionedFile::new(&config, content, NO_TAGS)?;
     Ok((config, file))
 }
 
@@ -52,7 +109,11 @@ pub fn write_version(path: &str, content: &str, dependency: Option<&str>, versio
             _ => None,
         })
     });
-    Ok(written.unwrap_or_else(|| content.to_string()))
+    let written = written.unwrap_or_else(|| content.to_string());
+    if is_pyproject(path) && version.is_prerelease() {
+        return Ok(written.replace(&format!("\"{version}\""), &format!("\"{}\"", to_pep440(version))));
+    }
+    Ok(written)
 }
 
 /// Spec: internal_dependencies. Which of `candidates` (the other package
@@ -180,6 +241,19 @@ dependencies = ["livekit-protocol>=1.1.0"]
     fn pyproject_toml() {
         let written = check("livekit-api/pyproject.toml", PYPROJECT, "1.2.0");
         assert_one_line_changed(PYPROJECT, &written);
+    }
+
+    #[test]
+    fn pyproject_prerelease_uses_pep440_spelling() {
+        let rc = write_version("pyproject.toml", PYPROJECT, None, &v("1.2.0-rc.1")).unwrap();
+        assert!(rc.contains("version = \"1.2.0rc1\""), "{rc}");
+        assert_eq!(read_version("pyproject.toml", &rc).unwrap(), v("1.2.0-rc.1"));
+        let beta = write_version("pyproject.toml", &rc, None, &v("1.2.0-beta.3")).unwrap();
+        assert!(beta.contains("version = \"1.2.0b3\""));
+        assert_eq!(read_version("pyproject.toml", &beta).unwrap(), v("1.2.0-beta.3"));
+        let final_ = write_version("pyproject.toml", &beta, None, &v("1.2.0")).unwrap();
+        assert!(final_.contains("version = \"1.2.0\""));
+        assert_eq!(to_pep440(&v("1.2.0-next.1")), "1.2.0-next.1", "unknown labels keep semver");
     }
 
     #[test]

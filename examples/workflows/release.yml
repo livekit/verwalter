@@ -69,8 +69,13 @@ jobs:
 
       # Replace with the registry publish for the language: cargo publish,
       # npm publish, pypa/gh-action-pypi-publish, ...
+      # cargo, pip and pub keep pre-releases away from default resolution
+      # by the version alone. npm does not: an rc published without a
+      # dist-tag becomes `latest`, so pass one.
       - name: Publish ${{ matrix.release.package }} ${{ matrix.release.version }}
-        run: echo "publish ${{ matrix.release.package }} ${{ matrix.release.version }}"
+        run: |
+          echo "publish ${{ matrix.release.package }} ${{ matrix.release.version }}"
+          # npm publish --tag ${{ matrix.release.prerelease && 'next' || 'latest' }}
 
       # Only for packages with `draft = true`: attach assets built here,
       # then publish the GitHub release.

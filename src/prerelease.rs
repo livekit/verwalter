@@ -33,7 +33,7 @@ pub fn plan(repo: &Repo, package: &str, level: Option<BumpLevel>) -> Result<Plan
     let level = level
         .or_else(|| repo.changesets.iter().filter_map(|c| c.unreleased_for(package)).max())
         .unwrap_or(BumpLevel::Patch);
-    let to = next_prerelease_version(&p.version, &released_versions(repo, package)?, level);
+    let to = next_prerelease_version(&p.version, &released_versions(repo, package)?, level, &repo.config.prerelease_label);
     Ok(PlannedRelease { package: package.to_string(), from: p.version.clone(), to, level, changesets, bumped_dependencies: Vec::new(), stacked_on: None })
 }
 
