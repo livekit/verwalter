@@ -2,6 +2,8 @@
 //! YAML front matter with one `package: level` line per bump (package names
 //! quoted or unquoted), markdown body as the summary.
 
+use std::collections::BTreeSet;
+
 use crate::version::BumpLevel;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -15,6 +17,9 @@ pub struct Changeset {
     pub file: String,
     pub bumps: Vec<Bump>,
     pub summary: String,
+    /// Spec: released_packages. Packages named in `bumps` that had a final
+    /// release since this file landed. The file stays until all are released.
+    pub released_packages: BTreeSet<String>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -62,12 +67,20 @@ impl Changeset {
             bumps.push(Bump { package_name: name.to_string(), level });
         }
 
-        Ok(Self { file: file.to_string(), bumps, summary: body.trim().to_string() })
+        Ok(Self { file: file.to_string(), bumps, summary: body.trim().to_string(), released_packages: BTreeSet::new() })
     }
 
-    /// Spec: Changeset.unreleased_for(name), without the released set.
-    pub fn names(&self, package: &str) -> bool {
-        self.bumps.iter().any(|b| b.package_name == package)
+    /// Spec: Changeset.unreleased_for(name).
+    pub fn unreleased_for(&self, package: &str) -> Option<BumpLevel> {
+        if self.released_packages.contains(package) {
+            return None;
+        }
+        self.bumps.iter().find(|b| b.package_name == package).map(|b| b.level)
+    }
+
+    /// Spec: Changeset.fully_released.
+    pub fn fully_released(&self) -> bool {
+        self.bumps.iter().all(|b| self.released_packages.contains(&b.package_name))
     }
 }
 
@@ -95,8 +108,20 @@ Add RPC round-trip latency metric.
 
         let u = Changeset::parse("b.md", UNQUOTED).unwrap();
         assert_eq!(u.bumps.len(), 2);
-        assert!(u.names("livekit-api"));
-        assert!(!u.names("livekit"));
+        assert_eq!(u.unreleased_for("livekit-api"), Some(BumpLevel::Patch));
+        assert_eq!(u.unreleased_for("livekit"), None);
+    }
+
+    // Spec: MarkPackageReleasedOnChangesets, ConsumeChangeset
+    #[test]
+    fn released_packages_hide_bumps_until_all_are_released() {
+        let mut c = Changeset::parse("b.md", UNQUOTED).unwrap();
+        c.released_packages.insert("livekit-protocol".into());
+        assert_eq!(c.unreleased_for("livekit-protocol"), None);
+        assert_eq!(c.unreleased_for("livekit-api"), Some(BumpLevel::Patch));
+        assert!(!c.fully_released());
+        c.released_packages.insert("livekit-api".into());
+        assert!(c.fully_released());
     }
 
     #[test]

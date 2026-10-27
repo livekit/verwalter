@@ -454,10 +454,11 @@ invariant PreReleaseNeverStackBase {
     ReleasePullRequests.all(r => r.stacked_on = null or r.stacked_on.kind = release)
 }
 
--- The stack is a topological order of the pending packages. A PR with two
--- pending dependencies that do not depend on each other is stacked on a
--- chain of both (fixed order: dependency depth, then name), so every open
--- PR of a dependency is an ancestor in the stack.
+-- The stack is a topological order of the pending packages (dependency
+-- depth, then name). Siblings form a tree. When a package has two pending
+-- dependencies that do not depend on each other (a diamond), the whole
+-- stack becomes one chain in that order, so every open PR of a dependency
+-- is an ancestor in the stack.
 invariant StackCoversDependencies {
     filter(ReleasePullRequests, r => r.status = open and r.kind = release).all(r =>
         r.package.dependencies.all(d =>
