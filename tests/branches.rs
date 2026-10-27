@@ -1,13 +1,13 @@
 //! End to end on a real git repository: plan, branches, stacking,
 //! changeset consumption, released_packages from tags.
 
-use std::{fs, path::PathBuf, process::Command};
+use std::{fs, path::{Path, PathBuf}, process::Command};
 
 use verwalter::{branches, plan::plan, repo::Repo};
 
 struct Repo_(PathBuf);
 
-fn git(root: &PathBuf, args: &[&str]) -> String {
+fn git(root: &Path, args: &[&str]) -> String {
     let out = Command::new("git")
         .arg("-C")
         .arg(root)
@@ -19,7 +19,7 @@ fn git(root: &PathBuf, args: &[&str]) -> String {
     String::from_utf8(out.stdout).unwrap().trim().to_string()
 }
 
-fn write(root: &PathBuf, rel: &str, content: &str) {
+fn write(root: &Path, rel: &str, content: &str) {
     let p = root.join(rel);
     fs::create_dir_all(p.parent().unwrap()).unwrap();
     fs::write(p, content).unwrap();

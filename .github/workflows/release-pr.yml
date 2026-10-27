@@ -1,0 +1,28 @@
+name: Release PR
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: release-pr
+  cancel-in-progress: true
+
+jobs:
+  pr:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          cargo run --quiet -- pr
+        env:
+          GH_TOKEN: ${{ github.token }}

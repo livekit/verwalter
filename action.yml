@@ -1,0 +1,70 @@
+name: verwalter
+description: Changeset-based versioning for single packages and monorepos. Runs one verwalter command.
+
+inputs:
+  command:
+    description: "One of: check, plan, pr, release."
+    required: true
+  pr:
+    description: Pull request number for `check`. Defaults to the event's pull request.
+    default: ${{ github.event.pull_request.number }}
+  token:
+    description: GitHub token with contents and pull-requests write for `pr` and `release`.
+    default: ${{ github.token }}
+  version:
+    description: verwalter release to run. Defaults to the version this action was checked out at.
+    default: ""
+  args:
+    description: Extra arguments passed through to verwalter.
+    default: ""
+
+outputs:
+  released:
+    description: "`release` only: true when at least one release was tagged, drafted or published."
+    value: ${{ steps.run.outputs.released }}
+  releases:
+    description: "`release` only: JSON list of {package, previous_version, version, tag, prerelease, status}."
+    value: ${{ steps.run.outputs.releases }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install verwalter
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        if [ -z "$VERSION" ]; then
+          VERSION=$(grep -m1 '^version' "$GITHUB_ACTION_PATH/Cargo.toml" | cut -d'"' -f2)
+        fi
+        case "$(uname -s)-$(uname -m)" in
+          Linux-x86_64)  TARGET=x86_64-unknown-linux-gnu ;;
+          Linux-aarch64) TARGET=aarch64-unknown-linux-gnu ;;
+          Darwin-arm64)  TARGET=aarch64-apple-darwin ;;
+          *) echo "::error::unsupported runner $(uname -s)-$(uname -m)"; exit 1 ;;
+        esac
+        DIR="$RUNNER_TEMP/verwalter-$VERSION"
+        if [ ! -x "$DIR/verwalter" ]; then
+          mkdir -p "$DIR"
+          gh release download "v$VERSION" --repo livekit/verwalter --pattern "verwalter-$TARGET.tar.gz" --output - | tar -xz -C "$DIR"
+        fi
+        echo "$DIR" >> "$GITHUB_PATH"
+
+    - name: Run verwalter ${{ inputs.command }}
+      id: run
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        COMMAND: ${{ inputs.command }}
+        PR: ${{ inputs.pr }}
+        ARGS: ${{ inputs.args }}
+      run: |
+        set -euo pipefail
+        git config --global user.name "github-actions[bot]"
+        git config --global user.email "github-actions[bot]@users.noreply.github.com"
+        case "$COMMAND" in
+          check) verwalter check --pr "$PR" $ARGS ;;
+          *)     verwalter "$COMMAND" $ARGS ;;
+        esac

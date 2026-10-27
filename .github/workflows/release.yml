@@ -1,0 +1,59 @@
+name: Release
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  tag:
+    if: github.event.pull_request.merged == true && startsWith(github.event.pull_request.head.ref, 'release/')
+    runs-on: ubuntu-latest
+    outputs:
+      released: ${{ steps.verwalter.outputs.released }}
+      releases: ${{ steps.verwalter.outputs.releases }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - id: verwalter
+        run: cargo run --quiet -- release
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+  build:
+    needs: tag
+    if: needs.tag.outputs.released == 'true'
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+          - os: macos-latest
+            target: aarch64-apple-darwin
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ fromJSON(needs.tag.outputs.releases)[0].tag }}
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo build --release --locked
+      - run: tar -C target/release -czf "verwalter-${{ matrix.target }}.tar.gz" verwalter
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ fromJSON(needs.tag.outputs.releases)[0].tag }}" "verwalter-${{ matrix.target }}.tar.gz" --clobber
+
+  publish:
+    needs: [tag, build]
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "${{ fromJSON(needs.tag.outputs.releases)[0].tag }}" --draft=false --repo "${{ github.repository }}"

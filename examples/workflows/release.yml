@@ -1,0 +1,56 @@
+# After a release PR merges: tag, create the GitHub release, then build and
+# publish. The tool stops at the tag and the release; publishing is this
+# workflow's job. The `releases` output says what to build.
+name: Release
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+permissions:
+  contents: write
+  id-token: write # trusted publishing
+
+jobs:
+  tag:
+    if: github.event.pull_request.merged == true && startsWith(github.event.pull_request.head.ref, 'release/')
+    runs-on: ubuntu-latest
+    outputs:
+      released: ${{ steps.verwalter.outputs.released }}
+      releases: ${{ steps.verwalter.outputs.releases }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - id: verwalter
+        uses: livekit/verwalter@v0.1.0
+        with:
+          command: release
+
+  publish:
+    needs: tag
+    if: needs.tag.outputs.released == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        release: ${{ fromJSON(needs.tag.outputs.releases) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.release.tag }}
+
+      # Replace with the registry publish for the language: cargo publish,
+      # npm publish, pypa/gh-action-pypi-publish, ...
+      - name: Publish ${{ matrix.release.package }} ${{ matrix.release.version }}
+        run: echo "publish ${{ matrix.release.package }} ${{ matrix.release.version }}"
+
+      # Packages with `draft = true` wait here for their assets.
+      - name: Attach assets and publish the GitHub release
+        if: matrix.release.status == 'drafted'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # gh release upload "${{ matrix.release.tag }}" dist/*
+          gh release edit "${{ matrix.release.tag }}" --draft=false
