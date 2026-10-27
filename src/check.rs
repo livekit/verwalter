@@ -1,0 +1,229 @@
+//! Spec: ChangesetCheck, rule ChangesetCheckOnContributorPullRequest and
+//! surface ContributorPullRequestCheck. The contributor sees one PR
+//! comment, updated in place and removed once the check passes.
+
+use std::{collections::BTreeSet, fs, path::Path};
+
+use crate::{changeset::Changeset, config::Config, github::Gh, repo::CHANGESET_DIR};
+
+pub type Error = Box<dyn std::error::Error + Send + Sync>;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Status {
+    Passed,
+    Failed,
+    Exempt,
+    /// A release PR consumes changesets rather than adding one.
+    ReleasePullRequest,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Check {
+    pub status: Status,
+    pub affected: BTreeSet<String>,
+    pub covered: BTreeSet<String>,
+}
+
+impl Check {
+    /// Spec: ChangesetCheck.missing_packages.
+    pub fn missing(&self) -> Vec<&str> {
+        self.affected.difference(&self.covered).map(String::as_str).collect()
+    }
+}
+
+/// The pure part. `changed` is every file the PR touches; `changesets`
+/// the parsed `.changeset/*.md` files among them.
+pub fn evaluate(config: &Config, head_branch: &str, labels: &[String], changed: &[String], changesets: &[Changeset]) -> Check {
+    let affected: BTreeSet<String> = config
+        .packages
+        .iter()
+        .filter(|(_, p)| changed.iter().any(|f| in_package(f, &p.path)))
+        .map(|(name, _)| name.clone())
+        .collect();
+    let covered: BTreeSet<String> = changesets.iter().flat_map(|c| c.bumps.iter().map(|b| b.package_name.clone())).collect();
+    let status = if head_branch.starts_with(&config.release_branch_prefix) {
+        Status::ReleasePullRequest
+    } else if labels.iter().any(|l| l == &config.exempt_label) {
+        Status::Exempt
+    } else if affected.iter().all(|a| covered.contains(a)) {
+        Status::Passed
+    } else {
+        Status::Failed
+    };
+    Check { status, affected, covered }
+}
+
+fn in_package(file: &str, package_path: &str) -> bool {
+    if file.starts_with(&format!("{CHANGESET_DIR}/")) {
+        return false;
+    }
+    let path = package_path.trim_end_matches('/');
+    path == "." || path.is_empty() || file == path || file.starts_with(&format!("{path}/"))
+}
+
+pub const MARKER: &str = "<!-- verwalter changeset-check -->";
+
+/// The PR comment for a failed check, with a link that opens GitHub's
+/// new-file page with a patch changeset for the missing packages.
+pub fn comment(check: &Check, config: &Config, repo_slug: &str, head_branch: &str, title: &str) -> String {
+    let missing = check.missing();
+    let front: String = missing.iter().map(|p| format!("{p}: patch\n")).collect();
+    let content = format!("---\n{front}---\n\n{title}\n");
+    let slug: String = title
+        .to_lowercase()
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .collect::<Vec<_>>()
+        .join("_")
+        .chars()
+        .take(60)
+        .collect();
+    let slug = if slug.is_empty() { "changeset".to_string() } else { slug };
+    let link = format!(
+        "https://github.com/{repo_slug}/new/{head_branch}?filename={CHANGESET_DIR}/{slug}.md&value={}",
+        urlencode(&content)
+    );
+    let mut out = format!("{MARKER}\n### Changeset missing\n\nThis PR changes versioned packages without a changeset for:\n\n");
+    for p in &missing {
+        out.push_str(&format!("- `{p}`\n"));
+    }
+    if !check.covered.is_empty() {
+        out.push_str("\nAlready covered: ");
+        out.push_str(&check.covered.iter().map(|p| format!("`{p}`")).collect::<Vec<_>>().join(", "));
+        out.push('\n');
+    }
+    out.push_str(&format!(
+        "\n[**Create a changeset for the missing packages**]({link}) (prefilled with `patch`; edit the bump levels as needed).\n\n\
+         If this change needs no release, add the `{}` label.\n",
+        config.exempt_label
+    ));
+    out
+}
+
+fn urlencode(s: &str) -> String {
+    let mut out = String::new();
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
+}
+
+/// Spec: the whole rule, against GitHub. Reads the PR, evaluates, upserts
+/// or deletes the comment, returns the check. Changeset contents are read
+/// from the checkout, which CI has at the PR head.
+pub fn run(root: &Path, config: &Config, pr: u64, gh: Gh) -> Result<Check, Error> {
+    #[derive(serde::Deserialize)]
+    struct Pr {
+        title: String,
+        #[serde(rename = "headRefName")]
+        head: String,
+        labels: Vec<Label>,
+        files: Vec<File>,
+    }
+    #[derive(serde::Deserialize)]
+    struct Label {
+        name: String,
+    }
+    #[derive(serde::Deserialize)]
+    struct File {
+        path: String,
+    }
+    let n = pr.to_string();
+    let pr: Pr = serde_json::from_str(&gh(&["pr", "view", &n, "--json", "title,headRefName,labels,files"])?)?;
+    let labels: Vec<String> = pr.labels.into_iter().map(|l| l.name).collect();
+    let changed: Vec<String> = pr.files.into_iter().map(|f| f.path).collect();
+
+    let mut changesets = Vec::new();
+    for f in changed.iter().filter(|f| f.starts_with(&format!("{CHANGESET_DIR}/")) && f.ends_with(".md") && !f.ends_with("README.md")) {
+        if let Ok(content) = fs::read_to_string(root.join(f)) {
+            changesets.push(Changeset::parse(f, &content)?);
+        }
+    }
+    let check = evaluate(config, &pr.head, &labels, &changed, &changesets);
+
+    let existing = gh(&[
+        "api", &format!("repos/{{owner}}/{{repo}}/issues/{n}/comments"), "--paginate", "--jq",
+        &format!(".[] | select(.body | contains(\"{MARKER}\")) | .id"),
+    ])?;
+    let existing = existing.lines().next().map(str::to_string);
+    if check.status == Status::Failed {
+        let slug = gh(&["repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"])?;
+        let body = comment(&check, config, &slug, &pr.head, &pr.title);
+        match existing {
+            Some(id) => gh(&["api", "-X", "PATCH", &format!("repos/{{owner}}/{{repo}}/issues/comments/{id}"), "-f", &format!("body={body}")])?,
+            None => gh(&["pr", "comment", &n, "--body", &body])?,
+        };
+    } else if let Some(id) = existing {
+        gh(&["api", "-X", "DELETE", &format!("repos/{{owner}}/{{repo}}/issues/comments/{id}")])?;
+    }
+    Ok(check)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const CONFIG: &str = r#"
+[packages.livekit-protocol]
+path = "livekit-protocol"
+versioned_files = ["livekit-protocol/Cargo.toml"]
+changelog = "livekit-protocol/CHANGELOG.md"
+
+[packages.livekit-api]
+path = "livekit-api"
+versioned_files = ["livekit-api/Cargo.toml"]
+changelog = "livekit-api/CHANGELOG.md"
+"#;
+
+    fn s(v: &[&str]) -> Vec<String> {
+        v.iter().map(|x| x.to_string()).collect()
+    }
+
+    // obligations: rule-success/failure ChangesetCheckOnContributorPullRequest
+    #[test]
+    fn affected_covered_and_status() {
+        let config = Config::parse(CONFIG).unwrap();
+        let cs = [Changeset::parse(".changeset/x.md", "---\nlivekit-api: patch\n---\nx\n").unwrap()];
+
+        let c = evaluate(&config, "feat", &[], &s(&["livekit-api/src/lib.rs", ".changeset/x.md"]), &cs);
+        assert_eq!(c.status, Status::Passed);
+
+        let c = evaluate(&config, "feat", &[], &s(&["livekit-api/src/lib.rs", "livekit-protocol/x.proto", ".changeset/x.md"]), &cs);
+        assert_eq!(c.status, Status::Failed);
+        assert_eq!(c.missing(), ["livekit-protocol"]);
+
+        let c = evaluate(&config, "feat", &s(&["internal"]), &s(&["livekit-protocol/x.proto"]), &[]);
+        assert_eq!(c.status, Status::Exempt);
+
+        let c = evaluate(&config, "feat", &[], &s(&["README.md", ".github/workflows/ci.yml"]), &[]);
+        assert_eq!((c.status, c.affected.len()), (Status::Passed, 0), "no versioned package touched");
+
+        let c = evaluate(&config, "release/livekit-api", &[], &s(&["livekit-api/Cargo.toml"]), &[]);
+        assert_eq!(c.status, Status::ReleasePullRequest);
+    }
+
+    #[test]
+    fn single_package_repo_path_dot_matches_everything() {
+        let config = Config::parse("[packages.x]\npath = \".\"\nversioned_files = [\"package.json\"]\nchangelog = \"CHANGELOG.md\"\n").unwrap();
+        let c = evaluate(&config, "feat", &[], &s(&["src/index.ts"]), &[]);
+        assert_eq!(c.missing(), ["x"]);
+        let c = evaluate(&config, "feat", &[], &s(&[".changeset/y.md"]), &[]);
+        assert!(c.affected.is_empty(), "a changeset alone touches no package");
+    }
+
+    #[test]
+    fn comment_lists_missing_and_prefills_link() {
+        let config = Config::parse(CONFIG).unwrap();
+        let c = evaluate(&config, "feat/x", &[], &s(&["livekit-protocol/a", "livekit-api/b", ".changeset/x.md"]),
+            &[Changeset::parse(".changeset/x.md", "---\nlivekit-api: minor\n---\nx\n").unwrap()]);
+        let body = comment(&c, &config, "livekit/rust-sdks", "feat/x", "Add thing: v2");
+        assert!(body.starts_with(MARKER));
+        assert!(body.contains("- `livekit-protocol`\n"));
+        assert!(body.contains("Already covered: `livekit-api`"));
+        assert!(body.contains("https://github.com/livekit/rust-sdks/new/feat/x?filename=.changeset/add_thing_v2.md&value=---%0Alivekit-protocol%3A%20patch%0A---"));
+        assert!(body.contains("add the `internal` label"));
+    }
+}

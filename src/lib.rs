@@ -8,6 +8,7 @@
 pub mod apply;
 pub mod branches;
 pub mod changeset;
+pub mod check;
 pub mod config;
 pub mod git;
 pub mod github;

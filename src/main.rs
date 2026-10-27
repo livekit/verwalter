@@ -1,8 +1,8 @@
 use std::{path::PathBuf, process::ExitCode};
 
-use verwalter::{branches, github, plan::plan, release, repo::Repo};
+use verwalter::{branches, check, github, plan::plan, release, repo::Repo};
 
-const USAGE: &str = "usage: verwalter <plan|branches|pr|release> [--config <file>] [--base <ref>] [--remote <name>] [<checkout>]";
+const USAGE: &str = "usage: verwalter <plan|branches|pr|release> [--config <file>] [--base <ref>] [--remote <name>] [<checkout>]\n       verwalter check --pr <number> [--config <file>] [<checkout>]";
 
 fn main() -> ExitCode {
     match run() {
@@ -20,12 +20,14 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut config = None;
     let mut base = None;
     let mut remote = String::from("origin");
+    let mut pr: Option<u64> = None;
     let mut root = PathBuf::from(".");
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--config" => config = Some(PathBuf::from(args.next().ok_or(USAGE)?)),
             "--base" => base = Some(args.next().ok_or(USAGE)?),
             "--remote" => remote = args.next().ok_or(USAGE)?,
+            "--pr" => pr = Some(args.next().ok_or(USAGE)?.parse()?),
             _ => root = PathBuf::from(arg),
         }
     }
@@ -52,6 +54,16 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             let mut gh = github::gh_cli(&repo.root);
             for pr in github::sync(&repo, &releases, &branches, &remote, &mut gh)? {
                 println!("#{}  {}  on {}", pr.number, pr.head, pr.base);
+            }
+            Ok(())
+        }
+        "check" => {
+            let pr = pr.ok_or(USAGE)?;
+            let mut gh = github::gh_cli(&repo.root);
+            let c = check::run(&repo.root, &repo.config, pr, &mut gh)?;
+            println!("{:?}: affected {:?}, covered {:?}", c.status, c.affected, c.covered);
+            if c.status == check::Status::Failed {
+                return Err(format!("changeset missing for: {}", c.missing().join(", ")).into());
             }
             Ok(())
         }
