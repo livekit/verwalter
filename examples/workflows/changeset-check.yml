@@ -17,6 +17,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: livekit/verwalter@v0.1.0
+      - uses: lukasIO/verwalter@v0.1.0
         with:
           command: check
