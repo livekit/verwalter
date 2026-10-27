@@ -213,7 +213,7 @@ fn release_tags_and_creates_github_releases_resumably() {
             _ => Ok(String::new()),
         }
     };
-    let released = verwalter::release::run(&repo, "origin", &mut gh).unwrap();
+    let released = verwalter::release::run(&repo, "origin", &[], &mut gh).unwrap();
 
     assert!(git(root, &["ls-remote", "--tags", "origin"]).contains("livekit-v0.8.0"), "tag pushed");
     assert_eq!(git(root, &["rev-parse", "livekit-v0.8.0^{commit}"]), git(root, &["rev-parse", "HEAD"]));
@@ -232,7 +232,7 @@ fn release_tags_and_creates_github_releases_resumably() {
         calls.push(args.join(" "));
         Ok(if args[2] == "livekit-v0.8.0" { "true".into() } else { "false".into() })
     };
-    let again = verwalter::release::run(&repo, "origin", &mut gh2).unwrap();
+    let again = verwalter::release::run(&repo, "origin", &[], &mut gh2).unwrap();
     assert!(!calls[before..].iter().any(|c| c.starts_with("release create")));
     assert_eq!(again.len(), 1, "the draft is reported until the workflow publishes it");
     assert_eq!(again[0].status, "drafted");
@@ -264,10 +264,55 @@ fn release_resumes_a_tag_without_github_release() {
             _ => Ok(String::new()),
         }
     };
-    let released = verwalter::release::run(&repo, "origin", &mut gh).unwrap();
+    let released = verwalter::release::run(&repo, "origin", &[], &mut gh).unwrap();
     assert_eq!(released.len(), 1);
     assert_eq!((released[0].package.as_str(), released[0].status), ("livekit", "published"));
     assert!(calls.iter().any(|c| c.starts_with("release create livekit-v0.7.0")));
     assert!(!calls.iter().any(|c| c.starts_with("release create livekit-api")));
+    let _ = fs::remove_dir_all(&remote);
+}
+
+#[test]
+fn release_with_assets_then_abandon() {
+    let r = fixture("assets");
+    let root = &r.0;
+    let remote = std::env::temp_dir().join(format!("verwalter-it-{}-assets-remote.git", std::process::id()));
+    let _ = fs::remove_dir_all(&remote);
+    git(root, &["init", "-q", "--bare", remote.to_str().unwrap()]);
+    git(root, &["remote", "add", "origin", remote.to_str().unwrap()]);
+    git(root, &["tag", "livekit-api-v0.4.3"]);
+    git(root, &["tag", "livekit-protocol-v0.3.1"]);
+    git(root, &["push", "-q", "origin", "--tags"]);
+
+    let repo = Repo::load(root).unwrap();
+    let calls = std::cell::RefCell::new(Vec::<String>::new());
+    let mut gh = |args: &[&str]| -> Result<String, verwalter::github::Error> {
+        let exists = {
+            let calls = calls.borrow();
+            calls.iter().any(|c| c.starts_with("release create")) && !calls.iter().any(|c| c.starts_with("release delete"))
+        };
+        calls.borrow_mut().push(args.join(" "));
+        match args {
+            ["release", "view", "livekit-v0.7.0", ..] if !exists => Err("not found".into()),
+            ["release", "view", ..] => Ok("false".into()),
+            _ => Ok(String::new()),
+        }
+    };
+    let assets = ["dist/a.tar.gz".to_string(), "dist/b.tar.gz".to_string()];
+    let released = verwalter::release::run(&repo, "origin", &assets, &mut gh).unwrap();
+    assert_eq!(released.len(), 1);
+    let create = calls.borrow().iter().find(|c| c.starts_with("release create livekit-v0.7.0")).cloned().unwrap();
+    assert!(create.contains("--verify-tag dist/a.tar.gz dist/b.tar.gz"), "{create}");
+    assert!(!create.contains("--draft"));
+
+    let removed = verwalter::release::abandon(&repo, "origin", "livekit-v0.7.0", &mut gh).unwrap();
+    assert_eq!(removed, ["release livekit-v0.7.0", "origin tag livekit-v0.7.0", "local tag livekit-v0.7.0"]);
+    assert!(calls.borrow().iter().any(|c| c == "release delete livekit-v0.7.0 --yes"));
+    assert!(!git(root, &["ls-remote", "--tags", "origin"]).contains("livekit-v0.7.0"));
+    assert!(git(root, &["tag", "--list", "livekit-v0.7.0"]).is_empty());
+
+    // Abandoning again finds nothing and does not fail.
+    let again = verwalter::release::abandon(&repo, "origin", "livekit-v0.7.0", &mut gh).unwrap();
+    assert!(again.is_empty());
     let _ = fs::remove_dir_all(&remote);
 }

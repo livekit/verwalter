@@ -2,7 +2,7 @@ use std::{path::PathBuf, process::ExitCode};
 
 use verwalter::{branches, check, github, plan::plan, release, repo::Repo};
 
-const USAGE: &str = "usage: verwalter <plan|branches|pr|release> [--config <file>] [--base <ref>] [--remote <name>] [<checkout>]\n       verwalter check --pr <number> [--config <file>] [<checkout>]";
+const USAGE: &str = "usage: verwalter <plan|branches|pr> [--config <file>] [--base <ref>] [--remote <name>] [<checkout>]\n       verwalter release [--asset <file>]... [--abandon <tag>] [--remote <name>] [<checkout>]\n       verwalter check --pr <number> [--config <file>] [<checkout>]";
 
 fn main() -> ExitCode {
     match run() {
@@ -21,6 +21,8 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut base = None;
     let mut remote = String::from("origin");
     let mut pr: Option<u64> = None;
+    let mut assets: Vec<String> = Vec::new();
+    let mut abandon: Option<String> = None;
     let mut root = PathBuf::from(".");
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -28,6 +30,8 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             "--base" => base = Some(args.next().ok_or(USAGE)?),
             "--remote" => remote = args.next().ok_or(USAGE)?,
             "--pr" => pr = Some(args.next().ok_or(USAGE)?.parse()?),
+            "--asset" => assets.push(args.next().ok_or(USAGE)?),
+            "--abandon" => abandon = Some(args.next().ok_or(USAGE)?),
             _ => root = PathBuf::from(arg),
         }
     }
@@ -69,7 +73,13 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         }
         "release" => {
             let mut gh = github::gh_cli(&repo.root);
-            let released = release::run(&repo, &remote, &mut gh)?;
+            if let Some(tag) = abandon {
+                for r in release::abandon(&repo, &remote, &tag, &mut gh)? {
+                    println!("removed {r}");
+                }
+                return Ok(());
+            }
+            let released = release::run(&repo, &remote, &assets, &mut gh)?;
             for r in &released {
                 println!("{}  {}  {}  {}", r.package, r.version, r.tag, r.status);
             }

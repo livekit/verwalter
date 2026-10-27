@@ -1,6 +1,7 @@
-# After a release PR merges: tag, create the GitHub release, then build and
-# publish. The tool stops at the tag and the release; publishing is this
-# workflow's job. The `releases` output says what to build.
+# After a release PR merges: build, then tag and create the GitHub release
+# with the assets, then publish to the registry. The step that cannot be
+# undone comes last. The tool stops at the tag and the release; publishing
+# is this workflow's job, driven by the `releases` output.
 name: Release
 
 on:
@@ -13,8 +14,22 @@ permissions:
   id-token: write # trusted publishing
 
 jobs:
-  tag:
+  build:
     if: github.event.pull_request.merged == true && startsWith(github.event.pull_request.head.ref, 'release/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      # Build whatever the release needs: wheels, binaries, packages.
+      - run: mkdir -p dist && echo "built" > dist/artifact.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+  release:
+    needs: build
     runs-on: ubuntu-latest
     outputs:
       released: ${{ steps.verwalter.outputs.released }}
@@ -24,31 +39,42 @@ jobs:
         with:
           ref: main
           fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
       - id: verwalter
         uses: lukasIO/verwalter@v0.1.0
         with:
           command: release
+          # Attached to the GitHub release when it is created. Leave out
+          # for packages with `draft = true`, whose assets are built later.
+          args: --asset dist/artifact.txt
 
   publish:
-    needs: tag
-    if: needs.tag.outputs.released == 'true'
+    needs: release
+    if: needs.release.outputs.released == 'true'
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        release: ${{ fromJSON(needs.tag.outputs.releases) }}
+        release: ${{ fromJSON(needs.release.outputs.releases) }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ matrix.release.tag }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
 
       # Replace with the registry publish for the language: cargo publish,
       # npm publish, pypa/gh-action-pypi-publish, ...
       - name: Publish ${{ matrix.release.package }} ${{ matrix.release.version }}
         run: echo "publish ${{ matrix.release.package }} ${{ matrix.release.version }}"
 
-      # Packages with `draft = true` wait here for their assets.
-      - name: Attach assets and publish the GitHub release
-        if: matrix.release.status == 'drafted'
+      # Only for packages with `draft = true`: attach assets built here,
+      # then publish the GitHub release.
+      - if: matrix.release.status == 'drafted'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

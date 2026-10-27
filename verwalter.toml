@@ -4,4 +4,4 @@ path = "."
 versioned_files = ["Cargo.toml", "Cargo.lock"]
 changelog = "CHANGELOG.md"
 release = "tag_and_release"
-draft = true # release.yml attaches the binaries, then publishes
+draft = false # release.yml builds first and attaches the binaries on creation

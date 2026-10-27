@@ -12,26 +12,9 @@ permissions:
   contents: write
 
 jobs:
-  tag:
-    if: github.event_name == 'workflow_dispatch' || (github.event.pull_request.merged == true && startsWith(github.event.pull_request.head.ref, 'release/'))
-    runs-on: ubuntu-latest
-    outputs:
-      released: ${{ steps.verwalter.outputs.released }}
-      releases: ${{ steps.verwalter.outputs.releases }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: main
-          fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@stable
-      - id: verwalter
-        run: cargo run --quiet -- release
-        env:
-          GH_TOKEN: ${{ github.token }}
-
+  # Build first: nothing is written anywhere until the binaries exist.
   build:
-    needs: tag
-    if: needs.tag.outputs.released == 'true'
+    if: github.event_name == 'workflow_dispatch' || (github.event.pull_request.merged == true && startsWith(github.event.pull_request.head.ref, 'release/'))
     strategy:
       matrix:
         include:
@@ -45,18 +28,29 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ fromJSON(needs.tag.outputs.releases)[0].tag }}
+          ref: main
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo build --release --locked
       - run: tar -C target/release -czf "verwalter-${{ matrix.target }}.tar.gz" verwalter
-      - env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release upload "${{ fromJSON(needs.tag.outputs.releases)[0].tag }}" "verwalter-${{ matrix.target }}.tar.gz" --clobber
+      - uses: actions/upload-artifact@v4
+        with:
+          name: verwalter-${{ matrix.target }}
+          path: verwalter-${{ matrix.target }}.tar.gz
 
-  publish:
-    needs: [tag, build]
+  # Then tag and create the release with the assets attached, in one step.
+  release:
+    needs: build
     runs-on: ubuntu-latest
     steps:
-      - env:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo run --quiet -- release --asset dist/verwalter-x86_64-unknown-linux-gnu.tar.gz --asset dist/verwalter-aarch64-unknown-linux-gnu.tar.gz --asset dist/verwalter-aarch64-apple-darwin.tar.gz
+        env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release edit "${{ fromJSON(needs.tag.outputs.releases)[0].tag }}" --draft=false --repo "${{ github.repository }}"

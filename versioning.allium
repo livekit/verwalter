@@ -420,6 +420,15 @@ rule CreateGitHubRelease {
 -- A draft the workflow never publishes is the workflow's to finish or
 -- delete. The tool neither waits for it nor blocks later releases of the
 -- package; each release gets its own tag and draft.
+-- A release whose commit turned out broken is abandoned: the GitHub
+-- release and the tag go away, the version in the files stays. The next
+-- changeset produces a new version; the registry is never touched.
+rule MaintainerAbandonsRelease {
+    when: MaintainerAbandonsRelease(maintainer, release)
+    requires: release.status != committed
+    ensures: not exists release
+}
+
 rule WorkflowPublishesDraftRelease {
     when: WorkflowPublishesRelease(workflow, release)
     requires: release.status = drafted
@@ -574,6 +583,20 @@ surface WorkflowReleaseHandoff {
 
     provides:
         WorkflowPublishesRelease(workflow, release) when release.status = drafted
+
+    @guidance
+        -- Recommended order in the workflow: build, then tag and create
+        -- the release with its assets (no draft), then publish to the
+        -- registry. The irreversible step goes last. Drafts remain for
+        -- assets that can only be built once the release exists.
+}
+
+surface ReleaseAbandon {
+    facing maintainer: Maintainer
+    context release: Release where status != committed
+
+    provides:
+        MaintainerAbandonsRelease(maintainer, release)
 }
 
 surface FileFormatPlugin {

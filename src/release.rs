@@ -27,8 +27,9 @@ pub struct Released {
 /// Finish every release that is not complete and report it. A package
 /// whose tag exists and whose GitHub release is published (or not wanted)
 /// is complete and not reported. A draft is reported on every run until
-/// the workflow publishes it.
-pub fn run(repo: &Repo, remote: &str, gh: Gh) -> Result<Vec<Released>, Error> {
+/// the workflow publishes it. `assets` are attached when a release is
+/// created, so a workflow that builds first needs no draft at all.
+pub fn run(repo: &Repo, remote: &str, assets: &[String], gh: Gh) -> Result<Vec<Released>, Error> {
     let root = repo.root.as_path();
     let head = git::run(root, &["rev-parse", "HEAD"])?;
     let mut out = Vec::new();
@@ -62,6 +63,7 @@ pub fn run(repo: &Repo, remote: &str, gh: Gh) -> Result<Vec<Released>, Error> {
                     let notes = changelog_section(&fs::read_to_string(root.join(&package.changelog)).unwrap_or_default(), &p.version.to_string());
                     let title = format!("{} {}", p.name, p.version);
                     let mut args = vec!["release", "create", &tag, "--title", &title, "--notes", &notes, "--verify-tag"];
+                    args.extend(assets.iter().map(String::as_str));
                     if package.draft {
                         args.push("--draft");
                     }
@@ -89,6 +91,27 @@ pub fn run(repo: &Repo, remote: &str, gh: Gh) -> Result<Vec<Released>, Error> {
         });
     }
     Ok(out)
+}
+
+/// Spec: MaintainerAbandonsRelease. Removes the GitHub release and the
+/// tag, locally and on the remote, for a release whose commit turned out
+/// broken. Missing pieces are skipped; the registry is not touched.
+pub fn abandon(repo: &Repo, remote: &str, tag: &str, gh: Gh) -> Result<Vec<String>, Error> {
+    let root = repo.root.as_path();
+    let mut removed = Vec::new();
+    if gh(&["release", "view", tag, "--json", "tagName"]).is_ok() {
+        gh(&["release", "delete", tag, "--yes"])?;
+        removed.push(format!("release {tag}"));
+    }
+    if remote_has_tag(root, remote, tag)? {
+        git::run(root, &["push", "--quiet", "--delete", remote, &format!("refs/tags/{tag}")])?;
+        removed.push(format!("{remote} tag {tag}"));
+    }
+    if git::ref_exists(root, tag) {
+        git::run(root, &["tag", "--delete", tag])?;
+        removed.push(format!("local tag {tag}"));
+    }
+    Ok(removed)
 }
 
 fn remote_has_tag(root: &Path, remote: &str, tag: &str) -> Result<bool, Error> {
