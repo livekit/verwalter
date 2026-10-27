@@ -1,8 +1,8 @@
 use std::{path::PathBuf, process::ExitCode};
 
-use verwalter::{branches, github, plan::plan, repo::Repo};
+use verwalter::{branches, github, plan::plan, release, repo::Repo};
 
-const USAGE: &str = "usage: verwalter <plan|branches|pr> [--config <file>] [--base <ref>] [--remote <name>] [<checkout>]";
+const USAGE: &str = "usage: verwalter <plan|branches|pr|release> [--config <file>] [--base <ref>] [--remote <name>] [<checkout>]";
 
 fn main() -> ExitCode {
     match run() {
@@ -53,6 +53,15 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             for pr in github::sync(&repo, &releases, &branches, &remote, &mut gh)? {
                 println!("#{}  {}  on {}", pr.number, pr.head, pr.base);
             }
+            Ok(())
+        }
+        "release" => {
+            let mut gh = github::gh_cli(&repo.root);
+            let released = release::run(&repo, &remote, &mut gh)?;
+            for r in &released {
+                println!("{}  {}  {}  {}", r.package, r.version, r.tag, r.status);
+            }
+            println!("{}", release::write_outputs(&released)?);
             Ok(())
         }
         _ => Err(USAGE.into()),

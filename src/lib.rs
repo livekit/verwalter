@@ -13,6 +13,7 @@ pub mod git;
 pub mod github;
 pub mod handler;
 pub mod plan;
+pub mod release;
 pub mod repo;
 pub mod version;
 

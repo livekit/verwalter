@@ -372,8 +372,9 @@ rule MaintainerClosesReleasePullRequest {
 
 -- Tagging and release creation are resumable. If either fails, the run
 -- fails and the Release stays where it is; every later run retries every
--- Release that is not complete. A tag that already exists on the release
--- commit counts as done; one on a different commit is an error.
+-- Release that is not complete. A tag that already exists, local or on the
+-- remote, counts as done wherever it points: the tool cannot tell a release
+-- made long ago from a bump that skipped tagging.
 rule TagRelease {
     when: release: Release.created
     requires: release.package.release_mode != none
