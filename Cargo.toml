@@ -1,0 +1,11 @@
+[package]
+name = "verwalter"
+version = "0.1.0"
+edition = "2021"
+description = "Changeset-based versioning for single packages and monorepos"
+license = "Apache-2.0"
+
+[dependencies]
+semver = "1"
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"

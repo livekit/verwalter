@@ -1,0 +1,584 @@
+-- allium: 3
+-- versioning.allium
+
+-- Scope: A versioning tool shared across LiveKit SDK repositories,
+--   for single packages and monorepos.
+-- Includes: Changeset files, changeset checks on contributor PRs,
+--   version bumping, dependent propagation, stacked release PRs,
+--   changelogs, git tags, GitHub releases (published or draft).
+-- Excludes:
+--   - Publishing to registries (npm, crates.io, PyPI): the repo workflow does this
+--   - Building release assets: the repo workflow does this, then attaches them
+--   - Conventional commit parsing
+-- Dependencies: Pull requests, tags and releases live in GitHub (external).
+-- Language support: each versioned file is handled by a plugin that fulfils
+--   the VersionedFileHandler contract. The tool itself knows no language.
+
+------------------------------------------------------------
+-- External Entities
+------------------------------------------------------------
+
+external entity Repository {
+    base_branch: String
+}
+
+external entity PullRequest {
+    repository: Repository
+    head_branch: String
+    base_branch: String
+    labels: Set<String>
+    changed_files: Set<String>
+}
+
+external entity GitTag {
+    name: String
+}
+
+external entity GitHubRelease {
+    tag: GitTag
+    draft: Boolean
+}
+
+------------------------------------------------------------
+-- Value Types
+------------------------------------------------------------
+
+value Version {
+    major: Integer
+    minor: Integer
+    patch: Integer
+    -- e.g. "rc.1"; absent for a final release
+    prerelease: String?
+
+    is_prerelease: prerelease != null
+}
+
+value Bump {
+    package_name: String
+    level: BumpLevel
+}
+
+------------------------------------------------------------
+-- Contracts
+------------------------------------------------------------
+
+-- Implemented once per file format (package.json, Cargo.toml, pyproject.toml, ...).
+contract VersionedFileHandler {
+    read_version: (file: String) -> Version
+    write_version: (file: String, version: Version) -> String
+    internal_dependencies: (file: String) -> Set<String>
+    -- A bump of package X must also update the pin on X in files of its
+    -- dependents (rust-sdks lists root Cargo.toml and Cargo.lock per crate).
+    write_dependency_version: (file: String, dependency: String, version: Version) -> String
+
+    @invariant Roundtrip
+        -- read_version(write_version(file, v)) = v for every supported file.
+
+    @invariant MinimalEdit
+        -- write_version changes only the version fields; formatting and
+        -- unrelated content of the file are preserved.
+}
+
+------------------------------------------------------------
+-- Enumerations
+------------------------------------------------------------
+
+enum BumpLevel { major | minor | patch }
+
+------------------------------------------------------------
+-- Entities and Variants
+------------------------------------------------------------
+
+entity Package {
+    repository: Repository
+    name: String
+    -- May mix formats (livekit-ffi lists Cargo.toml and package.json files).
+    -- Each file goes to the VersionedFileHandler for its format. Lock files
+    -- (Cargo.lock, pnpm-lock.yaml) are versioned files too, edited directly
+    -- by a handler; the tool never runs a package manager.
+    versioned_files: Set<String>
+    changelog_file: String
+    version: Version
+    dependencies: Set<Package>
+    -- Template for the tag name. Default: "v{version}" in a single-package
+    -- repo, "{package}-v{version}" in a monorepo.
+    tag_template: String
+    release_mode: none | tag | tag_and_release
+    -- When true the GitHub release stays a draft until the repo workflow
+    -- has attached its assets and publishes it.
+    release_as_draft: Boolean
+
+    changesets: Changeset with repository = this.repository
+    pending_changesets: changesets where status = pending
+    release_pull_requests: ReleasePullRequest with package = this
+    open_release_pull_request: release_pull_requests where status = open and kind = release
+    dependents: Package with dependencies.any(d => d = this)
+
+    has_pending_bump: pending_changesets.any(c => c.unreleased_for(this.name))
+}
+
+-- Exactly the changesets file format: `.changeset/<name>.md`, YAML front
+-- matter with one `package: level` line per bump (package names quoted or
+-- unquoted, level major | minor | patch), markdown body as the summary.
+entity Changeset {
+    repository: Repository
+    file: String
+    bumps: Set<Bump>
+    summary: String
+    -- Packages named in bumps that have had a final release since this
+    -- changeset landed. The file stays until every named package is released.
+    released_packages: Set<String>
+    status: pending | consumed
+
+    fully_released: bumps.all(b => b.package_name in released_packages)
+    unreleased_for(name): bumps.any(b => b.package_name = name) and not (name in released_packages)
+
+    transitions status {
+        pending -> consumed
+        terminal: consumed
+    }
+}
+
+-- The result of checking one contributor PR for changeset coverage.
+-- The contributor sees one PR comment, updated in place: the missing
+-- packages, a link that opens a prefilled changeset file on the PR branch,
+-- and the exemption label hint. The comment is removed once the check
+-- passes or the PR is exempt.
+entity ChangesetCheck {
+    pull_request: PullRequest
+    affected_packages: Set<Package>
+    covered_packages: Set<Package>
+    status: passed | failed | exempt
+
+    missing_packages: affected_packages where not (this in covered_packages)
+}
+
+-- One per package with pending bumps. In a monorepo these stack as a tree:
+-- the PR for a package that others depend on sits at the base, and the PR
+-- of each dependent targets the base PR's branch. Two packages that depend
+-- on the same base each get their own PR on top of it.
+entity ReleasePullRequest {
+    package: Package
+    pull_request: PullRequest
+    -- release: opened by the tool from pending changesets.
+    -- pre_release: opened on demand by a maintainer from the current state;
+    -- the version carries a prerelease suffix (e.g. 1.6.0-rc.1).
+    kind: release | pre_release
+    from_version: Version
+    to_version: Version
+    stacked_on: ReleasePullRequest?
+    -- absorbed: a stacked PR was merged into its base PR's branch. The base
+    -- PR now releases both packages when it merges.
+    status: open | merged | absorbed | closed
+    absorbed_into: ReleasePullRequest when status = absorbed
+
+    absorbed: ReleasePullRequest with absorbed_into = this
+
+    transitions status {
+        open -> merged
+        open -> absorbed
+        open -> closed
+        terminal: merged, absorbed, closed
+    }
+}
+
+entity Release {
+    package: Package
+    previous_version: Version
+    version: Version
+    status: committed | tagged | drafted | published
+    tag: GitTag when status = tagged | drafted | published
+    github_release: GitHubRelease when status = drafted | published
+
+    transitions status {
+        committed -> tagged
+        tagged -> drafted
+        tagged -> published
+        drafted -> published
+        terminal: published
+    }
+}
+
+------------------------------------------------------------
+-- Config
+------------------------------------------------------------
+
+config {
+    -- Bump level the tool applies itself to a package whose internal
+    -- dependency was bumped. A changeset never has to name dependents;
+    -- the changeset check only looks at packages whose own files changed.
+    dependent_bump_level: BumpLevel = patch
+    -- PRs carrying this label need no changeset.
+    exempt_label: String = "internal"
+    -- Release PRs are recognisable by branch prefix and label so that repo
+    -- workflows can gate them (approvals, registry checks). Gating itself
+    -- is a workflow concern, not the tool's.
+    release_branch_prefix: String = "release/"
+    release_label: String = "release"
+}
+
+------------------------------------------------------------
+-- Rules
+------------------------------------------------------------
+
+-- Changeset check on contributor PRs
+
+rule ChangesetCheckOnContributorPullRequest {
+    when: ContributorPullRequestUpdated(pr)
+    let affected = affected_packages(pr.changed_files)
+    let covered = covered_packages(pr.changed_files)
+    ensures:
+        if config.exempt_label in pr.labels:
+            ChangesetCheck.created(pull_request: pr, affected_packages: affected, covered_packages: covered, status: exempt)
+        else:
+            if affected.all(p => p in covered):
+                ChangesetCheck.created(pull_request: pr, affected_packages: affected, covered_packages: covered, status: passed)
+            else:
+                ChangesetCheck.created(pull_request: pr, affected_packages: affected, covered_packages: covered, status: failed)
+}
+
+-- Release PR lifecycle
+
+rule ContributorAddsChangeset {
+    when: ContributorAddsChangeset(contributor, repository, file, bumps, summary)
+    ensures: Changeset.created(repository: repository, file: file, bumps: bumps, summary: summary, released_packages: {}, status: pending)
+}
+
+rule ChangesetLandsOnBaseBranch {
+    when: changeset: Changeset.created
+    ensures: ReleasePlanRecomputed(repository: changeset.repository)
+}
+
+-- Every recompute regenerates every release branch from the current base
+-- branch, bottom of the stack first, and force-pushes it. A stacked PR never
+-- needs a manual rebase; reviewers see rewritten branches.
+rule OpenOrUpdateReleasePullRequests {
+    when: ReleasePlanRecomputed(repository)
+    -- A package whose PR was absorbed into an open base PR gets no new PR;
+    -- the base releases it.
+    for package in Packages where repository = repository and has_pending_bump and not has_absorbed_pull_request(package):
+        -- next_version of a pre-release is its final version (the promote
+        -- step): the rc already encodes the bump of the pending changesets.
+        let next = next_version(package.version, package.pending_changesets, config.dependent_bump_level)
+        ensures:
+            if package.open_release_pull_request.count = 0:
+                ReleasePullRequest.created(
+                    package: package,
+                    pull_request: release_branch_pull_request(package),
+                    kind: release,
+                    from_version: package.version,
+                    to_version: next,
+                    stacked_on: stack_base(package),
+                    status: open
+                )
+            else:
+                package.open_release_pull_request.first.to_version = next
+                package.open_release_pull_request.first.stacked_on = stack_base(package)
+            -- Changelog entry for the new version: sections per bump level,
+            -- one line per changeset with summary, PR link and author, plus
+            -- an "updated dependencies" line for bumps the tool added itself.
+            ChangelogUpdated(package: package, changesets: package.pending_changesets)
+}
+
+-- One package, one rc PR, never stacked. Dependents are not pre-released;
+-- a maintainer requests them separately, base package first if needed.
+rule MaintainerRequestsPreRelease {
+    when: MaintainerRequestsPreRelease(maintainer, package, target_branch)
+    let next = next_prerelease_version(package.version, package.pending_changesets)
+    ensures:
+        ReleasePullRequest.created(
+            package: package,
+            pull_request: release_branch_pull_request(package, target_branch),
+            kind: pre_release,
+            from_version: package.version,
+            to_version: next,
+            stacked_on: null,
+            status: open
+        )
+}
+
+-- Merging a PR at the bottom of the stack releases its package and every
+-- package whose PR was absorbed into it.
+rule MaintainerMergesReleasePullRequest {
+    when: MaintainerMergesReleasePullRequest(maintainer, rpr)
+    requires: rpr.status = open
+    requires: rpr.stacked_on = null
+    ensures:
+        rpr.status = merged
+        PackageReleased(rpr: rpr)
+        -- Dependents stacked on this PR now target the base branch.
+        ReleasePlanRecomputed(repository: rpr.package.repository)
+}
+
+-- Applies to the merged PR and, recursively, to every PR absorbed into it.
+rule ApplyRelease {
+    when: PackageReleased(rpr)
+    ensures:
+        rpr.package.version = rpr.to_version
+        Release.created(package: rpr.package, previous_version: rpr.from_version, version: rpr.to_version, status: committed)
+        for r in rpr.absorbed:
+            PackageReleased(rpr: r)
+}
+
+-- A pre-release keeps the changesets pending so the final release still
+-- lists them. A final release marks the package as released on every
+-- pending changeset that names it.
+-- Note: allium 3.2.4 does not witness bulk updates in a `for` clause, so
+-- `check` reports Changeset.consumed as unreachable. This is the intended path.
+rule MarkPackageReleasedOnChangesets {
+    when: PackageReleased(rpr)
+    requires: rpr.kind = release
+    for c in Changesets where status = pending and repository = rpr.package.repository:
+        requires: c.unreleased_for(rpr.package.name)
+        ensures: c.released_packages = c.released_packages.add(rpr.package.name)
+}
+
+-- The changeset file is deleted by the PR that releases the last package
+-- it names.
+rule ConsumeChangeset {
+    when: c: Changeset.fully_released
+    requires: c.status = pending
+    ensures: c.status = consumed
+}
+
+-- Merging a stacked PR merges it into its base PR's branch. The tool treats
+-- this as "release both together": the stacked PR is absorbed and the base
+-- PR carries both bumps. PRs that were stacked on it re-stack on the base.
+rule MaintainerMergesStackedPullRequest {
+    when: MaintainerMergesReleasePullRequest(maintainer, rpr)
+    requires: rpr.status = open
+    requires: rpr.stacked_on != null
+    ensures:
+        rpr.status = absorbed
+        rpr.absorbed_into = rpr.stacked_on
+        ReleasePlanRecomputed(repository: rpr.package.repository)
+}
+
+-- Closing has no lasting effect: the changesets stay pending, so the next
+-- recompute opens a fresh PR for the package.
+rule MaintainerClosesReleasePullRequest {
+    when: MaintainerClosesReleasePullRequest(maintainer, rpr)
+    requires: rpr.status = open
+    ensures:
+        rpr.status = closed
+        ReleasePlanRecomputed(repository: rpr.package.repository)
+}
+
+-- Tag and GitHub release
+
+-- Tagging and release creation are resumable. If either fails, the run
+-- fails and the Release stays where it is; every later run retries every
+-- Release that is not complete. A tag that already exists on the release
+-- commit counts as done; one on a different commit is an error.
+rule TagRelease {
+    when: release: Release.created
+    requires: release.package.release_mode != none
+    ensures:
+        release.status = tagged
+        release.tag = tag_for(release.package.tag_template, release.package.name, release.version)
+}
+
+rule ResumeUntaggedReleases {
+    when: ToolRunStarted(repository)
+    for release in Releases where package.repository = repository and status = committed:
+        requires: release.package.release_mode != none
+        ensures:
+            release.status = tagged
+            release.tag = tag_for(release.package.tag_template, release.package.name, release.version)
+}
+
+rule ResumeTaggedReleasesWithoutGitHubRelease {
+    when: ToolRunStarted(repository)
+    for release in Releases where package.repository = repository and status = tagged:
+        requires: release.package.release_mode = tag_and_release
+        ensures:
+            if release.package.release_as_draft:
+                release.status = drafted
+                release.github_release = github_release_for(release.tag, true)
+            else:
+                release.status = published
+                release.github_release = github_release_for(release.tag, false)
+}
+
+rule CreateGitHubRelease {
+    when: release: Release.status transitions_to tagged
+    requires: release.package.release_mode = tag_and_release
+    ensures:
+        if release.package.release_as_draft:
+            release.status = drafted
+            release.github_release = github_release_for(release.tag, true)
+        else:
+            release.status = published
+            release.github_release = github_release_for(release.tag, false)
+}
+
+-- A draft the workflow never publishes is the workflow's to finish or
+-- delete. The tool neither waits for it nor blocks later releases of the
+-- package; each release gets its own tag and draft.
+rule WorkflowPublishesDraftRelease {
+    when: WorkflowPublishesRelease(workflow, release)
+    requires: release.status = drafted
+    ensures: release.status = published
+}
+
+------------------------------------------------------------
+-- Invariants
+------------------------------------------------------------
+
+-- At most one open release PR and one open pre-release PR per package.
+-- The two can be open at the same time; the pre-release one is short-lived.
+invariant OneOpenReleasePullRequestPerPackageAndKind {
+    Packages.all(p =>
+        filter(ReleasePullRequests, r => r.package = p and r.status = open and r.kind = release).count <= 1
+        and filter(ReleasePullRequests, r => r.package = p and r.status = open and r.kind = pre_release).count <= 1)
+}
+
+invariant ReleasePullRequestsAreRecognisable {
+    ReleasePullRequests.all(r =>
+        starts_with(r.pull_request.head_branch, config.release_branch_prefix)
+        and config.release_label in r.pull_request.labels)
+}
+
+-- A final release only ever targets the repository base branch. An rc PR
+-- may target any branch, for example a maintenance branch.
+invariant FinalReleasesTargetBaseBranch {
+    ReleasePullRequests.all(r =>
+        r.kind = pre_release or r.pull_request.base_branch = r.package.repository.base_branch)
+}
+
+-- Only automatic release PRs form the stack; a pre-release PR is never a base.
+invariant PreReleaseNeverStackBase {
+    ReleasePullRequests.all(r => r.stacked_on = null or r.stacked_on.kind = release)
+}
+
+-- The stack is a topological order of the pending packages. A PR with two
+-- pending dependencies that do not depend on each other is stacked on a
+-- chain of both (fixed order: dependency depth, then name), so every open
+-- PR of a dependency is an ancestor in the stack.
+invariant StackCoversDependencies {
+    filter(ReleasePullRequests, r => r.status = open and r.kind = release).all(r =>
+        r.package.dependencies.all(d =>
+            d.open_release_pull_request.count = 0
+            or d.open_release_pull_request.first in stack_ancestors(r)))
+}
+
+------------------------------------------------------------
+-- Actor Declarations
+------------------------------------------------------------
+
+external entity GitHubUser {
+    login: String
+    is_maintainer: Boolean
+}
+
+external entity ReleaseWorkflow {
+    repository: Repository
+}
+
+actor Contributor {
+    identified_by: GitHubUser where is_maintainer = false
+}
+
+actor Maintainer {
+    identified_by: GitHubUser where is_maintainer = true
+}
+
+actor Workflow {
+    identified_by: ReleaseWorkflow where repository != null
+}
+
+------------------------------------------------------------
+-- Surfaces
+------------------------------------------------------------
+
+surface ContributorPullRequest {
+    facing contributor: Contributor
+    context pr: PullRequest
+
+    exposes:
+        pr.changed_files
+        pr.labels
+
+    provides:
+        ContributorPullRequestUpdated(pr)
+        ContributorAddsChangeset(contributor, pr.repository, file, bumps, summary)
+}
+
+surface ContributorPullRequestCheck {
+    facing contributor: Contributor
+    context check: ChangesetCheck
+
+    exposes:
+        check.status
+        check.affected_packages
+        check.covered_packages
+        check.missing_packages when check.status = failed
+        create_changeset_link(check.pull_request, check.missing_packages) when check.status = failed
+}
+
+surface ReleasePullRequestReview {
+    facing maintainer: Maintainer
+    context rpr: ReleasePullRequest where status = open
+
+    exposes:
+        rpr.package.name
+        rpr.from_version
+        rpr.to_version
+        rpr.stacked_on
+
+    provides:
+        MaintainerMergesReleasePullRequest(maintainer, rpr)
+        MaintainerClosesReleasePullRequest(maintainer, rpr)
+}
+
+surface PreReleaseRequest {
+    facing maintainer: Maintainer
+    context package: Package
+
+    exposes:
+        package.name
+        package.version
+        package.pending_changesets
+
+    provides:
+        MaintainerRequestsPreRelease(maintainer, package, target_branch)
+}
+
+-- After a merge the workflow receives every release the merge produced
+-- and decides what to build and publish. The tool runs no publish step.
+surface ToolRun {
+    facing workflow: Workflow
+    context repository: Repository
+
+    provides:
+        ToolRunStarted(repository)
+}
+
+surface WorkflowReleaseHandoff {
+    facing workflow: Workflow
+    context release: Release where status != published
+
+    exposes:
+        release.package.name
+        release.previous_version
+        release.version
+        release.version.is_prerelease
+        release.tag when release.status = tagged | drafted
+        release.status
+
+    provides:
+        WorkflowPublishesRelease(workflow, release) when release.status = drafted
+}
+
+surface FileFormatPlugin {
+    facing workflow: Workflow
+
+    contracts:
+        demands VersionedFileHandler
+}
+
+------------------------------------------------------------
+-- Open Questions
+------------------------------------------------------------
+
+
