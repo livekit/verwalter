@@ -337,7 +337,8 @@ rule MarkPackageReleasedOnChangesets {
 }
 
 -- The changeset file is deleted by the PR that releases the last package
--- it names.
+-- it names. On a stacked branch, packages released by the branches under
+-- it count as released: their PRs merge before this one can.
 rule ConsumeChangeset {
     when: c: Changeset.fully_released
     requires: c.status = pending

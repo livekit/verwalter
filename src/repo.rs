@@ -6,7 +6,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::{changeset::Changeset, config::Config, handler, plan::PackageState};
+use crate::{changeset::Changeset, config::Config, git, handler, plan::PackageState};
 
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
 
@@ -50,7 +50,10 @@ impl Repo {
             packages.push(PackageState { name: name.clone(), version, dependencies });
         }
 
-        let changesets = read_changesets(&root.join(CHANGESET_DIR))?;
+        let mut changesets = read_changesets(&root.join(CHANGESET_DIR))?;
+        if git::is_repo(root) {
+            mark_released(root, &config, &packages, &mut changesets);
+        }
         Ok(Self { root: root.to_path_buf(), config, packages, changesets })
     }
 
@@ -59,10 +62,27 @@ impl Repo {
     }
 }
 
+/// Spec: Changeset.released_packages, derived from git rather than stored.
+/// A bump for package P is released when the tag of P's current version
+/// contains the commit that added the changeset file. No tag, or a tag
+/// elsewhere, means not released.
+fn mark_released(root: &Path, config: &Config, packages: &[PackageState], changesets: &mut [Changeset]) {
+    let tags: Vec<(&str, String)> = packages
+        .iter()
+        .map(|p| (p.name.as_str(), config.tag_for(&p.name, &p.version)))
+        .filter(|(_, tag)| git::ref_exists(root, tag))
+        .collect();
+    for c in changesets {
+        let Some(added) = git::added_in(root, "HEAD", &format!("{CHANGESET_DIR}/{}", c.file)) else { continue };
+        for (name, tag) in &tags {
+            if c.bumps.iter().any(|b| b.package_name == *name) && git::is_ancestor(root, &added, tag) {
+                c.released_packages.insert(name.to_string());
+            }
+        }
+    }
+}
+
 /// Every `*.md` in the changeset directory except `README.md`.
-/// ponytail: released_packages stays empty here. It needs git: a bump is
-/// released when the package's latest tag contains the commit that added
-/// the file. Add when the release command lands.
 fn read_changesets(dir: &Path) -> Result<Vec<Changeset>, Error> {
     let Ok(entries) = fs::read_dir(dir) else { return Ok(Vec::new()) };
     let mut out = Vec::new();

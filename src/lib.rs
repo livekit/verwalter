@@ -6,8 +6,10 @@
 //! discovery and, later, the release plan.
 
 pub mod apply;
+pub mod branches;
 pub mod changeset;
 pub mod config;
+pub mod git;
 pub mod handler;
 pub mod plan;
 pub mod repo;
