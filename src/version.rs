@@ -1,7 +1,13 @@
 //! Spec: value Version, enum BumpLevel, black boxes next_version and
-//! next_prerelease_version.
+//! next_prerelease_version. Version arithmetic is knope-versioning's
+//! `PackageVersions`, built from the current file version plus git tags.
 
-use semver::{Prerelease, Version};
+use knope_versioning::{
+    package::Name,
+    release_notes::ReleaseNotes,
+    semver::{Label, PreVersion, Prerelease, Rule, StableRule, Version},
+    Package,
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -12,40 +18,53 @@ pub enum BumpLevel {
     Major,
 }
 
-/// Apply one bump level to a final version. Bumping a pre-release promotes
-/// it: `1.6.0-rc.2` becomes `1.6.0` whatever the level, because the rc
-/// already encodes the bump of the pending changesets.
-pub fn bump(v: &Version, level: BumpLevel) -> Version {
-    let base = Version::new(v.major, v.minor, v.patch);
-    if !v.pre.is_empty() {
-        return base;
+impl From<BumpLevel> for StableRule {
+    fn from(level: BumpLevel) -> Self {
+        match level {
+            BumpLevel::Patch => StableRule::Patch,
+            BumpLevel::Minor => StableRule::Minor,
+            BumpLevel::Major => StableRule::Major,
+        }
     }
-    match level {
-        BumpLevel::Major => Version::new(base.major + 1, 0, 0),
-        BumpLevel::Minor => Version::new(base.major, base.minor + 1, 0),
-        BumpLevel::Patch => Version::new(base.major, base.minor, base.patch + 1),
-    }
+}
+
+/// The version history of one package: the version in its files plus every
+/// version that has a release tag. Tags matter for pre-releases, so that
+/// `rc.2` follows `rc.1` even after the files went back to a stable version.
+/// knope only exposes version arithmetic through `Package`, so this is one.
+pub fn history(current: &Version, released: &[Version]) -> Package {
+    let tags: Vec<String> = released.iter().chain(std::iter::once(current)).map(|v| format!("v{v}")).collect();
+    Package::new(Name::Default, &tags, Vec::new(), &[], ReleaseNotes::default(), None)
+        .expect("a package without versioned files is always valid")
 }
 
 /// Spec: next_version. The highest pending level wins; no pending bump
-/// returns the version unchanged.
-pub fn next_version(current: &Version, pending: impl IntoIterator<Item = BumpLevel>) -> Version {
-    match pending.into_iter().max() {
-        Some(level) => bump(current, level),
-        None => current.clone(),
-    }
+/// returns the latest version unchanged. From a pre-release, the result is
+/// the stable version it was leading to (the promote step).
+///
+/// knope semantics for 0.x: `major` bumps the minor component and `minor`
+/// bumps the patch component. rust-sdks releases this way today.
+pub fn next_version(history: &Package, pending: impl IntoIterator<Item = BumpLevel>) -> Version {
+    let Some(level) = pending.into_iter().max() else {
+        return history.latest_version().expect("history holds the current version");
+    };
+    history.calculate_new_version(Rule::Stable(level.into())).expect("a stable rule never fails")
 }
 
-/// Spec: next_prerelease_version. From a final version, the next version
-/// as `-rc.1`. From an rc of the same next version, `rc.N+1`.
-pub fn next_prerelease_version(current: &Version, level: BumpLevel) -> Version {
-    let n = match current.pre.as_str().strip_prefix("rc.") {
-        Some(n) => n.parse::<u64>().unwrap_or(0) + 1,
-        None => 1,
-    };
-    let mut v = bump(current, level);
-    v.pre = Prerelease::new(&format!("rc.{n}")).expect("rc.N is a valid prerelease");
-    v
+/// Spec: next_prerelease_version. `1.5.1` + minor gives `1.6.0-rc.1`;
+/// with `1.6.0-rc.1` already released, `1.6.0-rc.2`. Numbering starts at 1
+/// (python-sdks convention); knope's own `Rule::Pre` starts at 0.
+pub fn next_prerelease_version(history: &Package, released: &[Version], level: BumpLevel) -> Version {
+    let target = next_version(history, [level]).stable_component();
+    let last = released
+        .iter()
+        .filter(|r| r.is_prerelease() && r.stable_component() == target)
+        .filter_map(|r| r.to_string().rsplit_once("-rc.").and_then(|(_, n)| n.parse::<u64>().ok()))
+        .max();
+    Version::Pre(PreVersion {
+        stable_component: target,
+        pre_component: Prerelease::new(Label::from("rc"), last.map_or(1, |n| n + 1)),
+    })
 }
 
 #[cfg(test)]
@@ -53,7 +72,12 @@ mod tests {
     use super::*;
 
     fn v(s: &str) -> Version {
-        Version::parse(s).unwrap()
+        s.parse().unwrap()
+    }
+
+    fn hist(current: &str, released: &[&str]) -> Package {
+        let released: Vec<Version> = released.iter().map(|t| v(t)).collect();
+        history(&v(current), &released)
     }
 
     // obligation: value-equality.Version
@@ -61,7 +85,8 @@ mod tests {
     fn version_equality_is_by_value() {
         assert_eq!(v("1.2.3"), v("1.2.3"));
         assert_ne!(v("1.2.3"), v("1.2.3-rc.1"));
-        assert!(v("1.2.3-rc.1").pre.as_str() == "rc.1");
+        assert!(v("1.2.3-rc.1").is_prerelease());
+        assert_eq!(v("1.2.3-rc.1").to_string(), "1.2.3-rc.1");
     }
 
     // obligation: enum-comparable.BumpLevel
@@ -73,28 +98,42 @@ mod tests {
 
     #[test]
     fn bump_each_level() {
-        assert_eq!(bump(&v("1.5.1"), BumpLevel::Patch), v("1.5.2"));
-        assert_eq!(bump(&v("1.5.1"), BumpLevel::Minor), v("1.6.0"));
-        assert_eq!(bump(&v("1.5.1"), BumpLevel::Major), v("2.0.0"));
+        let h = hist("1.5.1", &[]);
+        assert_eq!(next_version(&h, [BumpLevel::Patch]), v("1.5.2"));
+        assert_eq!(next_version(&h, [BumpLevel::Minor]), v("1.6.0"));
+        assert_eq!(next_version(&h, [BumpLevel::Major]), v("2.0.0"));
+    }
+
+    #[test]
+    fn zero_x_major_bumps_minor() {
+        let h = hist("0.7.3", &[]);
+        assert_eq!(next_version(&h, [BumpLevel::Major]), v("0.8.0"));
+        assert_eq!(next_version(&h, [BumpLevel::Minor]), v("0.7.4"));
     }
 
     #[test]
     fn next_version_takes_highest_pending_level() {
-        let pending = [BumpLevel::Patch, BumpLevel::Minor, BumpLevel::Patch];
-        assert_eq!(next_version(&v("1.5.1"), pending), v("1.6.0"));
-        assert_eq!(next_version(&v("1.5.1"), []), v("1.5.1"));
+        let h = hist("1.5.1", &[]);
+        assert_eq!(next_version(&h, [BumpLevel::Patch, BumpLevel::Minor, BumpLevel::Patch]), v("1.6.0"));
+        assert_eq!(next_version(&h, []), v("1.5.1"));
     }
 
     // Spec: MaintainerRequestsPreRelease. Mirrors python-sdks minor-rc,
     // next-rc and promote.
     #[test]
     fn prerelease_sequence() {
-        let rc1 = next_prerelease_version(&v("1.5.1"), BumpLevel::Minor);
-        assert_eq!(rc1, v("1.6.0-rc.1"));
-        let rc2 = next_prerelease_version(&rc1, BumpLevel::Minor);
-        assert_eq!(rc2, v("1.6.0-rc.2"));
-        // A final release from an rc drops the suffix (the promote step).
-        assert_eq!(bump(&rc2, BumpLevel::Minor), v("1.6.0"));
-        assert_eq!(next_version(&rc2, [BumpLevel::Patch]), v("1.6.0"));
+        let released = [v("1.5.1")];
+        let h = history(&v("1.5.1"), &released);
+        assert_eq!(next_prerelease_version(&h, &released, BumpLevel::Minor), v("1.6.0-rc.1"));
+
+        // rc.1 merged and tagged: files say 1.6.0-rc.1, tags know 1.5.1 too.
+        let released = [v("1.5.1"), v("1.6.0-rc.1")];
+        let h = history(&v("1.6.0-rc.1"), &released);
+        assert_eq!(next_prerelease_version(&h, &released, BumpLevel::Minor), v("1.6.0-rc.2"));
+        // A different target version restarts at rc.1.
+        assert_eq!(next_prerelease_version(&h, &released, BumpLevel::Major), v("2.0.0-rc.1"));
+
+        // The final release from the rc: the pending minor resolves to 1.6.0.
+        assert_eq!(next_version(&h, [BumpLevel::Minor]), v("1.6.0"));
     }
 }

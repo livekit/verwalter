@@ -6,6 +6,11 @@ description = "Changeset-based versioning for single packages and monorepos"
 license = "Apache-2.0"
 
 [dependencies]
-semver = "1"
+# Versioned file formats (Cargo.toml, Cargo.lock, package.json, pyproject.toml,
+# pubspec.yaml, go.mod, ...), format-preserving edits, semver with pre-releases.
+knope-versioning = "0.8"
+relative-path = "2"
 serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 toml = "0.8"
+toml_edit = "0.25"

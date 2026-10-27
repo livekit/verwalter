@@ -259,6 +259,8 @@ rule OpenOrUpdateReleasePullRequests {
     for package in Packages where repository = repository and has_pending_bump and not has_absorbed_pull_request(package):
         -- next_version of a pre-release is its final version (the promote
         -- step): the rc already encodes the bump of the pending changesets.
+        -- For 0.x versions, major bumps the minor component and minor bumps
+        -- the patch component (knope semantics, what rust-sdks does today).
         let next = next_version(package.version, package.pending_changesets, config.dependent_bump_level)
         ensures:
             if package.open_release_pull_request.count = 0:

@@ -77,7 +77,7 @@ impl Config {
     }
 
     /// Spec: black box tag_for.
-    pub fn tag_for(&self, package: &str, version: &semver::Version) -> String {
+    pub fn tag_for(&self, package: &str, version: &crate::Version) -> String {
         self.tag_template(package)
             .replace("{package}", package)
             .replace("{version}", &version.to_string())
@@ -144,7 +144,7 @@ release = "tag"
     #[test]
     fn tag_template_defaults_depend_on_package_count() {
         let mono = Config::parse(MONO).unwrap();
-        let v = semver::Version::parse("1.2.0").unwrap();
+        let v: crate::Version = "1.2.0".parse().unwrap();
         assert_eq!(mono.tag_for("livekit-protocol", &v), "livekit-protocol-v1.2.0");
         assert_eq!(mono.tag_for("livekit-ffi", &v), "ffi/v1.2.0");
 
