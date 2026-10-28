@@ -163,7 +163,7 @@ impl std::fmt::Display for Finding {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Unmanaged { name, path } => write!(f, "{name} ({path}) is publishable but not in verwalter.toml: add [packages.{name}] or list it under `ignore`"),
-            Self::Missing { name, path } => write!(f, "{name} is in verwalter.toml but {path} has no package manifest: remove it or fix `path`"),
+            Self::Missing { name, path } => write!(f, "{name} is in verwalter.toml but {path} has none of its versioned files: remove it or fix `path`"),
         }
     }
 }
@@ -174,19 +174,25 @@ pub fn check(root: &Path, config: &Config) -> Vec<Finding> {
     let ignored = |m: &Member| config.ignore.iter().any(|pat| matches(pat, &m.name) || matches(pat, &m.path));
     let mut findings = Vec::new();
     let members = members(root);
+    // Names compare normalised (PEP 503 style): a pyproject `play_py_ext`
+    // is the configured `play-py-ext`.
+    let configured = |name: &str| config.packages.keys().any(|k| normalise(k) == normalise(name));
     for m in &members {
-        if !m.private && !config.packages.contains_key(&m.name) && !ignored(m) {
+        if !m.private && !configured(&m.name) && !ignored(m) {
             findings.push(Finding::Unmanaged { name: m.name.clone(), path: m.path.clone() });
         }
     }
     for (name, p) in &config.packages {
-        let dir = root.join(&p.path);
-        let has_manifest = ["Cargo.toml", "package.json", "pyproject.toml", "pubspec.yaml", "go.mod"].iter().any(|m| dir.join(m).is_file());
-        if !has_manifest {
+        let present = root.join(&p.path).is_dir() && p.versioned_files.iter().any(|f| root.join(f.path()).is_file());
+        if !present {
             findings.push(Finding::Missing { name: name.clone(), path: p.path.clone() });
         }
     }
     findings
+}
+
+fn normalise(name: &str) -> String {
+    name.to_lowercase().split(['-', '_', '.']).filter(|s| !s.is_empty()).collect::<Vec<_>>().join("-")
 }
 
 fn matches(pattern: &str, value: &str) -> bool {

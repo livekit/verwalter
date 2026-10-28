@@ -86,6 +86,11 @@ pub fn commit_branch(root: &Path, start: &str, branch: &str, message: &str, edit
 /// package it names, counting releases already tagged and releases lower
 /// in the same stack.
 fn consumed_by(changeset: &crate::changeset::Changeset, release: &PlannedRelease, released_in_stack: &[&str]) -> bool {
+    // An empty changeset (`changeset --empty`) bumps nothing; every release
+    // branch removes it, as `changeset version` does.
+    if changeset.bumps.is_empty() {
+        return true;
+    }
     changeset.unreleased_for(&release.package).is_some()
         && changeset
             .bumps

@@ -106,10 +106,10 @@ pub fn plan(packages: &[PackageState], changesets: &[Changeset], dependent_level
     let mut parent: BTreeMap<&str, Option<&str>> =
         order.iter().map(|n| (*n, closure(n).into_iter().max_by_key(|d| position[d]))).collect();
 
-    // ponytail: a diamond (two unrelated planned dependencies) is not a tree.
-    // Fall back to one chain in stack order for the whole repo; it always
-    // satisfies StackCoversDependencies. Replace with per-diamond
-    // linearization if chains get long.
+    // A diamond (two unrelated planned dependencies) is not a tree. The
+    // connected component holding it becomes one chain in stack order,
+    // which always satisfies StackCoversDependencies; unrelated components
+    // keep their trees.
     fn ancestors<'a>(name: &str, parent: &BTreeMap<&'a str, Option<&'a str>>) -> BTreeSet<&'a str> {
         let mut out = BTreeSet::new();
         let mut cur = parent[name];
@@ -119,9 +119,26 @@ pub fn plan(packages: &[PackageState], changesets: &[Changeset], dependent_level
         }
         out
     }
-    let covered = order.iter().all(|n| closure(n).is_subset(&ancestors(n, &parent)));
-    if !covered {
-        parent = order.iter().enumerate().map(|(i, n)| (*n, i.checked_sub(1).map(|j| order[j]))).collect();
+    let mut component: BTreeMap<&str, usize> = BTreeMap::new();
+    for (id, start) in order.iter().enumerate() {
+        if component.contains_key(start) {
+            continue;
+        }
+        let mut todo = vec![*start];
+        while let Some(n) = todo.pop() {
+            if component.insert(n, id).is_none() {
+                todo.extend(planned_deps(n));
+                todo.extend(order.iter().copied().filter(|m| planned_deps(m).contains(&n)));
+            }
+        }
+    }
+    let covered = |n: &&&str| closure(n).is_subset(&ancestors(n, &parent));
+    let diamonds: BTreeSet<usize> = order.iter().filter(|n| !covered(n)).map(|n| component[*n]).collect();
+    for id in diamonds {
+        let members: Vec<&str> = order.iter().copied().filter(|n| component[n] == id).collect();
+        for (i, n) in members.iter().enumerate() {
+            parent.insert(n, i.checked_sub(1).map(|j| members[j]));
+        }
     }
 
     order
@@ -216,17 +233,19 @@ mod tests {
         assert_eq!(stack(&p), vec![("livekit-api", None)]);
     }
 
-    // Spec: invariant StackCoversDependencies, diamond case.
+    // Spec: invariant StackCoversDependencies, diamond case. Only the
+    // diamond's component is chained; an unrelated package stays a root.
     #[test]
     fn diamond_falls_back_to_a_chain() {
         let packages = vec![
             pkg("a", "1.0.0", &[]),
             pkg("b", "1.0.0", &[]),
             pkg("c", "1.0.0", &["a", "b"]),
+            pkg("z", "1.0.0", &[]),
         ];
-        let changesets = [cs("x.md", &[("a", BumpLevel::Patch), ("b", BumpLevel::Patch)])];
+        let changesets = [cs("x.md", &[("a", BumpLevel::Patch), ("b", BumpLevel::Patch), ("z", BumpLevel::Patch)])];
         let p = plan(&packages, &changesets, BumpLevel::Patch);
-        assert_eq!(stack(&p), vec![("a", None), ("b", Some("a")), ("c", Some("b"))]);
+        assert_eq!(stack(&p), vec![("a", None), ("b", Some("a")), ("z", None), ("c", Some("b"))]);
     }
 
     #[test]
