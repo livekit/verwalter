@@ -609,3 +609,35 @@ fn named_package_is_reported_even_when_complete() {
     assert_eq!((released[0].package.as_str(), released[0].status), ("livekit-api", "published"));
     let _ = fs::remove_dir_all(&remote);
 }
+
+// Spec: ChangelogUpdated, "PR link and author". The commit that added a
+// changeset names the PR; without one the commit itself is linked.
+#[test]
+fn changesets_are_attributed_to_their_pr_or_commit() {
+    let r = fixture("attribution");
+    let root = &r.0;
+    write(root, ".changeset/pr.md", "---\nlivekit-protocol: minor\n---\nFrom a PR\n");
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-q", "-m", "from a pr"]);
+    let pr_sha = git(root, &["rev-parse", "HEAD"]);
+    write(root, ".changeset/push.md", "---\nlivekit-api: patch\n---\nPushed directly\n");
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-q", "-m", "pushed"]);
+    let push_sha = git(root, &["rev-parse", "HEAD"]);
+
+    let mut repo = Repo::load(root).unwrap();
+    let mut gh = |args: &[&str]| -> Result<String, verwalter::Error> {
+        let path = args.get(1).copied().unwrap_or("");
+        Ok(if path == format!("repos/{{owner}}/{{repo}}/commits/{pr_sha}/pulls") {
+            "12\thttps://github.com/o/r/pull/12\tlukas".into()
+        } else if path == format!("repos/{{owner}}/{{repo}}/commits/{push_sha}") {
+            format!("https://github.com/o/r/commit/{push_sha}\tbot")
+        } else {
+            String::new()
+        })
+    };
+    verwalter::github::attribute(&mut repo, &mut gh);
+    let by_file = |f: &str| repo.changesets.iter().find(|c| c.file == f).unwrap().attribution.clone().unwrap();
+    assert_eq!(by_file("pr.md"), "- [#12](https://github.com/o/r/pull/12) ([@lukas](https://github.com/lukas))");
+    assert_eq!(by_file("push.md"), format!("- [`{}`](https://github.com/o/r/commit/{push_sha}) ([@bot](https://github.com/bot))", &push_sha[..7]));
+}

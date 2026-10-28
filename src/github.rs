@@ -79,6 +79,27 @@ pub fn dry_run_gh(mut inner: impl FnMut(&[&str]) -> Result<String, Error>) -> im
 }
 
 /// Push every branch and make GitHub match the plan.
+/// Spec: ChangelogUpdated, "PR link and author". For each changeset, the
+/// commit that added it names the PR (via `commits/{sha}/pulls`) and its
+/// author; a commit without a PR links the commit itself. Lookups that
+/// fail leave the line without a suffix rather than block the release.
+pub fn attribute(repo: &mut Repo, gh: Gh) {
+    let root = repo.root.clone();
+    for c in &mut repo.changesets {
+        let Some(sha) = git::added_in(&root, "HEAD", &format!("{}/{}", crate::repo::CHANGESET_DIR, c.file)) else { continue };
+        let user = |login: &str| if login.is_empty() { String::new() } else { format!(" ([@{login}](https://github.com/{login}))") };
+        let pulls = gh(&["api", &format!("repos/{{owner}}/{{repo}}/commits/{sha}/pulls"), "--jq", r#".[0] | select(. != null) | "\(.number)\t\(.html_url)\t\(.user.login)""#]);
+        let mut commit = || gh(&["api", &format!("repos/{{owner}}/{{repo}}/commits/{sha}"), "--jq", r#""\(.html_url)\t\(.author.login // "")""#]);
+        c.attribution = match pulls.ok().filter(|s| !s.is_empty()).map(|s| s.splitn(3, '\t').map(String::from).collect::<Vec<_>>()) {
+            Some(parts) if parts.len() == 3 => Some(format!("- [#{}]({}){}", parts[0], parts[1], user(&parts[2]))),
+            _ => match commit().ok().filter(|s| !s.is_empty()).map(|s| s.splitn(2, '\t').map(String::from).collect::<Vec<_>>()) {
+                Some(parts) if parts.len() == 2 => Some(format!("- [`{}`]({}){}", &sha[..7.min(sha.len())], parts[0], user(&parts[1]))),
+                _ => None,
+            },
+        };
+    }
+}
+
 pub fn sync(repo: &Repo, plan: &[PlannedRelease], branches: &[Branch], remote: &str, dry_run: bool, gh: Gh) -> Result<Vec<PullRequest>, Error> {
     let label = repo.config.release_label.as_str();
     gh(&["label", "create", label, "--force", "--color", "0E8A16", "--description", "Release PR managed by verwalter"])?;
@@ -200,8 +221,19 @@ mod tests {
                 PackageState { name: "a".into(), version: "1.0.0".parse().unwrap(), dependencies: vec![] },
                 PackageState { name: "b".into(), version: "2.0.0".parse().unwrap(), dependencies: vec!["a".into()] },
             ],
-            changesets: vec![Changeset::parse("x.md", "---\na: minor\n---\nAdd thing\n").unwrap()],
+            changesets: vec![Changeset::parse("x.md", "---\na: minor\n---\nAdd thing\nmore detail\n").unwrap()],
         }
+    }
+
+    // Spec: ChangelogUpdated, PR link and author in livekit form. The
+    // suffix sits on the first line; continuation lines keep their indent.
+    #[test]
+    fn attribution_follows_the_first_summary_line() {
+        let mut r = repo();
+        r.changesets[0].attribution = Some("- [#12](https://github.com/o/r/pull/12) ([@lukas](https://github.com/lukas))".into());
+        let plan = crate::plan::plan(&r.packages, &r.changesets, crate::version::BumpLevel::Patch);
+        let a = body(&plan[0], &r, &plan, None);
+        assert!(a.contains("- Add thing - [#12](https://github.com/o/r/pull/12) ([@lukas](https://github.com/lukas))\n  more detail"), "{a}");
     }
 
     #[test]

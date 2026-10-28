@@ -20,6 +20,10 @@ pub struct Changeset {
     /// Spec: released_packages. Packages named in `bumps` that had a final
     /// release since this file landed. The file stays until all are released.
     pub released_packages: BTreeSet<String>,
+    /// Changelog suffix naming the PR (or commit) and author that added
+    /// the file, in the livekit changesets-changelog-github form:
+    /// `- [#12](pr url) ([@user](profile url))`. Set by github::attribute.
+    pub attribution: Option<String>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -67,7 +71,7 @@ impl Changeset {
             bumps.push(Bump { package_name: name.to_string(), level });
         }
 
-        Ok(Self { file: file.to_string(), bumps, summary: body.trim().to_string(), released_packages: BTreeSet::new() })
+        Ok(Self { file: file.to_string(), bumps, summary: body.trim().to_string(), released_packages: BTreeSet::new(), attribution: None })
     }
 
     /// Spec: Changeset.unreleased_for(name).

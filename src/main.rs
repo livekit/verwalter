@@ -1,4 +1,4 @@
-use std::{path::PathBuf, process::ExitCode};
+use std::{path::{Path, PathBuf}, process::ExitCode};
 
 use verwalter::{branches, check, github, plan::plan, prerelease, release, repo::Repo, status, version::BumpLevel, workspace, Error};
 
@@ -56,7 +56,7 @@ fn run() -> Result<(), Error> {
             _ => root = PathBuf::from(arg),
         }
     }
-    let repo = match config {
+    let mut repo = match config {
         Some(c) => Repo::load_with_config(&root, &c)?,
         None => Repo::load(&root)?,
     };
@@ -83,8 +83,9 @@ fn run() -> Result<(), Error> {
         }
         "pr" => {
             let base = base.unwrap_or_else(|| format!("{remote}/{}", repo.config.base_branch));
+            github::attribute(&mut repo, &mut gh(&root, &remote, dry_run));
             let branches = branches::create(&repo, &releases, &base)?;
-            let mut gh = gh(&repo, &remote, dry_run);
+            let mut gh = gh(&repo.root, &remote, dry_run);
             let prs = github::sync(&repo, &releases, &branches, &remote, dry_run, &mut gh)
                 .map_err(|e| format!("{e}\nresume with: verwalter pr  (branches are regenerated, PRs updated in place; --dry-run shows the steps)"))?;
             for pr in prs {
@@ -93,7 +94,7 @@ fn run() -> Result<(), Error> {
             Ok(())
         }
         "status" => {
-            let mut gh = gh(&repo, &remote, dry_run);
+            let mut gh = gh(&repo.root, &remote, dry_run);
             let rows = status::status(&repo, &remote, &mut gh)?;
             let w = rows.iter().map(|r| r.package.len()).max().unwrap_or(0);
             for r in &rows {
@@ -107,7 +108,8 @@ fn run() -> Result<(), Error> {
         "pre-release" => {
             let package = package.ok_or(USAGE)?;
             let target = target.unwrap_or_else(|| repo.config.base_branch.clone());
-            let mut gh = gh(&repo, &remote, dry_run);
+            github::attribute(&mut repo, &mut gh(&root, &remote, dry_run));
+            let mut gh = gh(&repo.root, &remote, dry_run);
             let (r, pr) = prerelease::open(&repo, &package, &target, level, &remote, dry_run, &mut gh)
                 .map_err(|e| format!("{e}\nresume with: verwalter pre-release {package} --target {target}  (the rc branch and PR are updated in place)"))?;
             println!("#{}  {}  {} -> {}  on {}", pr.number, pr.head, r.from, r.to, pr.base);
@@ -115,7 +117,7 @@ fn run() -> Result<(), Error> {
         }
         "check" => {
             let pr = pr.ok_or(USAGE)?;
-            let mut gh = gh(&repo, &remote, dry_run);
+            let mut gh = gh(&repo.root, &remote, dry_run);
             let c = check::run(&repo.root, &repo.config, pr, &mut gh)?;
             println!("{:?}: affected {:?}, covered {:?}", c.status, c.affected, c.covered);
             if c.status == check::Status::Failed {
@@ -124,7 +126,7 @@ fn run() -> Result<(), Error> {
             Ok(())
         }
         "release" => {
-            let mut gh = gh(&repo, &remote, dry_run);
+            let mut gh = gh(&repo.root, &remote, dry_run);
             if let Some(tag) = abandon {
                 for r in release::abandon(&repo, &remote, &tag, dry_run, &mut gh)? {
                     println!("removed {r}");
@@ -146,8 +148,8 @@ fn run() -> Result<(), Error> {
 type GhRunner<'a> = Box<dyn FnMut(&[&str]) -> Result<String, Error> + 'a>;
 
 /// The gh runner, with every write printed instead of run under `--dry-run`.
-fn gh<'a>(repo: &'a Repo, remote: &str, dry_run: bool) -> GhRunner<'a> {
-    let inner = github::gh_cli(&repo.root, remote);
+fn gh<'a>(root: &'a Path, remote: &str, dry_run: bool) -> GhRunner<'a> {
+    let inner = github::gh_cli(root, remote);
     if dry_run {
         Box::new(github::dry_run_gh(inner))
     } else {

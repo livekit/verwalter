@@ -100,7 +100,7 @@ pub fn render_entry(release: &PlannedRelease, changesets: &[Changeset], plan: &[
         let mut lines: Vec<String> = changesets
             .iter()
             .filter(|c| c.unreleased_for(&release.package) == Some(level))
-            .map(|c| bullet(&c.summary))
+            .map(|c| bullet(&c.summary, c.attribution.as_deref()))
             .collect();
         if level == BumpLevel::Patch && !release.bumped_dependencies.is_empty() {
             let deps: Vec<String> = release
@@ -118,11 +118,14 @@ pub fn render_entry(release: &PlannedRelease, changesets: &[Changeset], plan: &[
     out
 }
 
-fn bullet(summary: &str) -> String {
+fn bullet(summary: &str, attribution: Option<&str>) -> String {
     let mut lines = summary.lines();
     let first = lines.next().unwrap_or("");
     let rest: String = lines.map(|l| format!("\n  {l}")).collect();
-    format!("- {first}{rest}")
+    match attribution {
+        Some(a) => format!("- {first} {a}{rest}"),
+        None => format!("- {first}{rest}"),
+    }
 }
 
 /// Put the entry under the top-level heading, above older entries.
