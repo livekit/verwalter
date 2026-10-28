@@ -22,7 +22,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0 # tags decide which changesets are already released
-      - uses: lukasIO/verwalter@v0.5.0
+      - uses: lukasIO/verwalter@v0.6.0
         with:
           command: pr
           # A token of a GitHub App or PAT lets the release PRs trigger
