@@ -1,6 +1,6 @@
 use std::{path::PathBuf, process::ExitCode};
 
-use verwalter::{branches, check, github, plan::plan, prerelease, release, repo::Repo, status, version::BumpLevel, workspace};
+use verwalter::{branches, check, github, plan::plan, prerelease, release, repo::Repo, status, version::BumpLevel, workspace, Error};
 
 const USAGE: &str = "usage: verwalter <status|plan|branches|pr> [--config <file>] [--base <ref>] [--remote <name>] [--dry-run] [<checkout>]\n       verwalter release [--asset <file>]... [--package <name>] [--publish] [--abandon <tag>] [--remote <name>] [--dry-run] [<checkout>]\n       verwalter check --pr <number> [--config <file>] [--dry-run] [<checkout>]\n       verwalter pre-release <package> [--target <branch>] [--level major|minor|patch] [--remote <name>] [--dry-run] [<checkout>]";
 
@@ -14,7 +14,7 @@ fn main() -> ExitCode {
     }
 }
 
-fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+fn run() -> Result<(), Error> {
     let mut args = std::env::args().skip(1);
     let Some(command) = args.next() else { return Err(USAGE.into()) };
     let mut package = None;
@@ -143,7 +143,7 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     }
 }
 
-type GhRunner<'a> = Box<dyn FnMut(&[&str]) -> Result<String, github::Error> + 'a>;
+type GhRunner<'a> = Box<dyn FnMut(&[&str]) -> Result<String, Error> + 'a>;
 
 /// The gh runner, with every write printed instead of run under `--dry-run`.
 fn gh<'a>(repo: &'a Repo, remote: &str, dry_run: bool) -> GhRunner<'a> {

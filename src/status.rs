@@ -13,9 +13,8 @@ use crate::{
     plan::plan,
     prerelease, release,
     repo::Repo,
+    Error,
 };
-
-pub type Error = Box<dyn std::error::Error + Send + Sync>;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct PackageStatus {

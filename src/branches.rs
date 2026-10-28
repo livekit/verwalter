@@ -5,9 +5,7 @@
 
 use std::{fs, path::Path};
 
-use crate::{apply, git, plan::PlannedRelease, repo::Repo};
-
-pub type Error = Box<dyn std::error::Error + Send + Sync>;
+use crate::{apply, git, plan::PlannedRelease, repo::Repo, Error};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Branch {
@@ -29,7 +27,6 @@ pub fn create(repo: &Repo, plan: &[PlannedRelease], base: &str) -> Result<Vec<Br
     if !git::ref_exists(root, base) {
         return Err(format!("base ref {base} does not exist").into());
     }
-    let dependencies = repo.dependencies();
     let mut branches = Vec::new();
 
     for release in plan {
@@ -40,7 +37,7 @@ pub fn create(repo: &Repo, plan: &[PlannedRelease], base: &str) -> Result<Vec<Br
         };
 
         commit_branch(root, &start, &name, &format!("release: {} {}", release.package, release.to), |worktree| {
-            apply::apply(worktree, &repo.config, &dependencies, &repo.changesets, plan, release)?;
+            apply::apply(worktree, &repo.config, &repo.packages, &repo.changesets, plan, release, true)?;
             // Packages released by the branches under this one count as
             // released: their PRs merge before this one can.
             let mut released: Vec<&str> = vec![&release.package];

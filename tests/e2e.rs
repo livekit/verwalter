@@ -154,7 +154,7 @@ fn pr_sync_pushes_and_creates_updates_closes() {
     let branches = branches::create(&repo, &plan, "main").unwrap();
 
     let mut calls: Vec<String> = Vec::new();
-    let mut gh = |args: &[&str]| -> Result<String, verwalter::github::Error> {
+    let mut gh = |args: &[&str]| -> Result<String, verwalter::Error> {
         calls.push(args.join(" "));
         Ok(match args {
             ["pr", "list", ..] => r#"[{"number":40,"headRefName":"release/livekit-protocol","baseRefName":"main"},{"number":41,"headRefName":"release/livekit-api","baseRefName":"main"},{"number":99,"headRefName":"release/old-package","baseRefName":"main"}]"#.into(),
@@ -204,7 +204,7 @@ fn pr_sync_links_a_chain_as_a_github_stack() {
     let plan = plan(&repo.packages, &repo.changesets, repo.config.dependent_bump_level);
     let branches = branches::create(&repo, &plan, "main").unwrap();
     let mut calls: Vec<String> = Vec::new();
-    let mut gh = |args: &[&str]| -> Result<String, verwalter::github::Error> {
+    let mut gh = |args: &[&str]| -> Result<String, verwalter::Error> {
         calls.push(args.join(" "));
         Ok(match args {
             ["pr", "list", ..] => "[]".into(),
@@ -240,7 +240,7 @@ fn release_tags_and_creates_github_releases_resumably() {
 
     let repo = Repo::load(root).unwrap();
     let mut calls: Vec<String> = Vec::new();
-    let mut gh = |args: &[&str]| -> Result<String, verwalter::github::Error> {
+    let mut gh = |args: &[&str]| -> Result<String, verwalter::Error> {
         calls.push(args.join(" "));
         match args {
             // Older tags already have releases; the new one does not yet.
@@ -264,7 +264,7 @@ fn release_tags_and_creates_github_releases_resumably() {
 
     // Second run: nothing to tag, nothing to create.
     let before = calls.len();
-    let mut gh2 = |args: &[&str]| -> Result<String, verwalter::github::Error> {
+    let mut gh2 = |args: &[&str]| -> Result<String, verwalter::Error> {
         calls.push(args.join(" "));
         Ok(if args[2] == "livekit-v0.8.0" { r#"{"isDraft":true,"assets":[]}"#.into() } else { r#"{"isDraft":false,"assets":[]}"#.into() })
     };
@@ -292,7 +292,7 @@ fn release_resumes_a_tag_without_github_release() {
     git(root, &["commit", "-qm", "later"]);
     let repo = Repo::load(root).unwrap();
     let mut calls: Vec<String> = Vec::new();
-    let mut gh = |args: &[&str]| -> Result<String, verwalter::github::Error> {
+    let mut gh = |args: &[&str]| -> Result<String, verwalter::Error> {
         calls.push(args.join(" "));
         match args {
             ["release", "view", "livekit-v0.7.0", ..] => Err("not found".into()),
@@ -322,7 +322,7 @@ fn release_with_assets_then_abandon() {
 
     let repo = Repo::load(root).unwrap();
     let calls = std::cell::RefCell::new(Vec::<String>::new());
-    let mut gh = |args: &[&str]| -> Result<String, verwalter::github::Error> {
+    let mut gh = |args: &[&str]| -> Result<String, verwalter::Error> {
         let exists = {
             let calls = calls.borrow();
             calls.iter().any(|c| c.starts_with("release create")) && !calls.iter().any(|c| c.starts_with("release delete"))
@@ -370,7 +370,7 @@ fn prerelease_opens_an_rc_pr_without_consuming_changesets() {
 
     let repo = Repo::load(root).unwrap();
     let mut calls: Vec<String> = Vec::new();
-    let mut gh = |args: &[&str]| -> Result<String, verwalter::github::Error> {
+    let mut gh = |args: &[&str]| -> Result<String, verwalter::Error> {
         calls.push(args.join(" "));
         Ok(match args {
             ["pr", "list", ..] => "[]".into(),
@@ -420,7 +420,7 @@ fn dry_run_writes_nothing() {
     let plan = plan(&repo.packages, &repo.changesets, repo.config.dependent_bump_level);
     let branches = branches::create(&repo, &plan, "main").unwrap();
     let writes = std::cell::Cell::new(0);
-    let inner = |args: &[&str]| -> Result<String, verwalter::github::Error> {
+    let inner = |args: &[&str]| -> Result<String, verwalter::Error> {
         if !matches!(args, ["pr", "list", ..] | ["release", "view", ..]) {
             writes.set(writes.get() + 1);
         }
@@ -457,7 +457,7 @@ fn release_finishes_a_partial_release_for_one_package() {
 
     let repo = Repo::load(root).unwrap();
     let calls = std::cell::RefCell::new(Vec::<String>::new());
-    let mut gh = |args: &[&str]| -> Result<String, verwalter::github::Error> {
+    let mut gh = |args: &[&str]| -> Result<String, verwalter::Error> {
         let published = calls.borrow().iter().any(|c| c.starts_with("release edit livekit-v0.7.0 --draft=false"));
         calls.borrow_mut().push(args.join(" "));
         match args {
@@ -484,7 +484,7 @@ fn release_error_names_the_resume_command() {
     let root = &r.0;
     // No remote: the tag push fails.
     let repo = Repo::load(root).unwrap();
-    let mut gh = |_: &[&str]| -> Result<String, verwalter::github::Error> { Ok(String::new()) };
+    let mut gh = |_: &[&str]| -> Result<String, verwalter::Error> { Ok(String::new()) };
     let err = verwalter::release::run(&repo, "origin", &verwalter::release::Options { assets: vec!["dist/x".into()], ..Default::default() }, &mut gh).unwrap_err().to_string();
     assert!(err.contains("resume with: verwalter release --package livekit-protocol --asset dist/x"), "{err}");
 }
@@ -507,7 +507,7 @@ fn status_reports_state_and_next_step() {
     git(root, &["commit", "-q", "-m", "cs"]);
 
     let repo = Repo::load(root).unwrap();
-    let mut gh = |args: &[&str]| -> Result<String, verwalter::github::Error> {
+    let mut gh = |args: &[&str]| -> Result<String, verwalter::Error> {
         match args {
             ["pr", "list", ..] => Ok(r#"[{"number":12,"headRefName":"release/livekit","baseRefName":"main"}]"#.into()),
             ["release", "view", "livekit-protocol-v0.3.1", ..] => Ok(r#"{"isDraft":false,"assets":[{"name":"a"},{"name":"b"}]}"#.into()),
@@ -547,7 +547,7 @@ fn release_runs_in_dependency_order_and_stops_at_the_first_failure() {
     // All three untagged: protocol first, then its dependents by name.
     let repo = Repo::load(root).unwrap();
     let calls = std::cell::RefCell::new(Vec::<String>::new());
-    let mut gh = |args: &[&str]| -> Result<String, verwalter::github::Error> {
+    let mut gh = |args: &[&str]| -> Result<String, verwalter::Error> {
         calls.borrow_mut().push(args.join(" "));
         match args {
             ["release", "view", ..] => Err("not found".into()),
@@ -565,7 +565,7 @@ fn release_runs_in_dependency_order_and_stops_at_the_first_failure() {
     let r2 = fixture("order-fail");
     let root2 = &r2.0;
     let repo2 = Repo::load(root2).unwrap();
-    let mut gh2 = |args: &[&str]| -> Result<String, verwalter::github::Error> {
+    let mut gh2 = |args: &[&str]| -> Result<String, verwalter::Error> {
         match args {
             ["release", "view", ..] => Err("not found".into()),
             ["release", "create", tag, ..] if tag.starts_with("livekit-protocol") => Err("boom".into()),
@@ -597,7 +597,7 @@ fn named_package_is_reported_even_when_complete() {
     git(root, &["tag", "livekit-api-v0.4.3"]);
     git(root, &["push", "-q", "origin", "--tags"]);
     let repo = Repo::load(root).unwrap();
-    let mut gh = |args: &[&str]| -> Result<String, verwalter::github::Error> {
+    let mut gh = |args: &[&str]| -> Result<String, verwalter::Error> {
         match args {
             ["release", "view", ..] => Ok(r#"{"isDraft":false,"assets":[{"name":"a"}]}"#.into()),
             other => panic!("unexpected write {other:?}"),

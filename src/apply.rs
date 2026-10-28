@@ -8,9 +8,14 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::{changeset::Changeset, config::Config, handler, plan::PlannedRelease, version::BumpLevel};
-
-pub type Error = Box<dyn std::error::Error + Send + Sync>;
+use crate::{
+    changeset::Changeset,
+    config::Config,
+    handler,
+    plan::{PackageState, PlannedRelease},
+    version::BumpLevel,
+    Error,
+};
 
 const LOCK_FILES: &[&str] = &["Cargo.lock", "package-lock.json", "deno.lock"];
 
@@ -18,31 +23,19 @@ fn is_lock_file(path: &str) -> bool {
     LOCK_FILES.contains(&path.rsplit('/').next().unwrap_or(path))
 }
 
-/// Which planned packages depend on `release` (for the pins).
-fn dependents<'a>(dependencies: &'a [(String, Vec<String>)], package: &str) -> Vec<&'a str> {
-    dependencies.iter().filter(|(_, deps)| deps.iter().any(|d| d == package)).map(|(name, _)| name.as_str()).collect()
+/// Which packages depend on `package` (for the pins).
+fn dependents<'a>(packages: &'a [PackageState], package: &str) -> Vec<&'a str> {
+    packages.iter().filter(|p| p.dependencies.iter().any(|d| d == package)).map(|p| p.name.as_str()).collect()
 }
 
-/// Write one release into the working tree under `root`. `dependencies`
-/// is `(package, its in-repo dependencies)` for every package in the repo.
-/// Returns the paths whose content changed.
+/// Write one release into the working tree under `root`. `packages` is
+/// every package in the repo, for the pins in dependents. `pins = false`
+/// leaves dependents alone: a pre-release of one package is not something
+/// its dependents should pin to. Returns the paths whose content changed.
 pub fn apply(
     root: &Path,
     config: &Config,
-    dependencies: &[(String, Vec<String>)],
-    changesets: &[Changeset],
-    plan: &[PlannedRelease],
-    release: &PlannedRelease,
-) -> Result<Vec<PathBuf>, Error> {
-    apply_with(root, config, dependencies, changesets, plan, release, true)
-}
-
-/// `pins = false` leaves dependents alone: a pre-release of one package
-/// is not something its dependents should pin to.
-pub fn apply_with(
-    root: &Path,
-    config: &Config,
-    dependencies: &[(String, Vec<String>)],
+    packages: &[PackageState],
     changesets: &[Changeset],
     plan: &[PlannedRelease],
     release: &PlannedRelease,
@@ -74,7 +67,7 @@ pub fn apply_with(
     for file in &config.pin_files {
         rewrite(file, None, Some(name))?;
     }
-    for dependent in dependents(dependencies, name).into_iter().filter(|_| pins) {
+    for dependent in dependents(packages, name).into_iter().filter(|_| pins) {
         if let Some(d) = config.packages.get(dependent) {
             for file in d.versioned_files.iter().filter(|f| !is_lock_file(f.path())) {
                 rewrite(file.path(), file.regex(), Some(name))?;
@@ -148,7 +141,7 @@ fn insert_entry(changelog: &str, entry: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::plan::{plan, PackageState};
+    use crate::plan::plan;
 
     const CONFIG: &str = r#"
 pin_files = ["Cargo.toml", "Cargo.lock"]
@@ -195,19 +188,11 @@ changelog = "livekit-api/CHANGELOG.md"
         }
     }
 
-    fn deps() -> Vec<(String, Vec<String>)> {
-        vec![("livekit-protocol".into(), vec![]), ("livekit-api".into(), vec!["livekit-protocol".into()])]
-    }
-
     fn state() -> Vec<PackageState> {
-        deps()
-            .into_iter()
-            .map(|(name, dependencies)| PackageState {
-                version: if name == "livekit-api" { "0.4.3" } else { "0.3.1" }.parse().unwrap(),
-                name,
-                dependencies,
-            })
-            .collect()
+        vec![
+            PackageState { name: "livekit-protocol".into(), version: "0.3.1".parse().unwrap(), dependencies: vec![] },
+            PackageState { name: "livekit-api".into(), version: "0.4.3".parse().unwrap(), dependencies: vec!["livekit-protocol".into()] },
+        ]
     }
 
     #[test]
@@ -217,7 +202,7 @@ changelog = "livekit-api/CHANGELOG.md"
         let changesets = [Changeset::parse("a.md", "---\nlivekit-protocol: minor\n---\nNegotiated data channels\nwith details\n").unwrap()];
         let p = plan(&state(), &changesets, BumpLevel::Patch);
 
-        let written = apply(&repo.0, &config, &deps(), &changesets, &p, &p[0]).unwrap();
+        let written = apply(&repo.0, &config, &state(), &changesets, &p, &p[0], true).unwrap();
         let names: Vec<String> = written.iter().map(|w| w.strip_prefix(&repo.0).unwrap().display().to_string()).collect();
         // livekit-api inherits the pin via `workspace = true`, so its manifest stays as is.
         assert_eq!(names, ["livekit-protocol/Cargo.toml", "Cargo.toml", "Cargo.lock", "livekit-protocol/CHANGELOG.md"]);
@@ -241,7 +226,7 @@ changelog = "livekit-api/CHANGELOG.md"
         let p = plan(&state(), &changesets, BumpLevel::Patch);
         let api = p.iter().find(|r| r.package == "livekit-api").unwrap();
 
-        apply(&repo.0, &config, &deps(), &changesets, &p, api).unwrap();
+        apply(&repo.0, &config, &state(), &changesets, &p, api, true).unwrap();
         assert!(repo.read("livekit-api/Cargo.toml").contains("version = \"0.4.4\""));
         // Created from scratch: no changelog existed.
         assert_eq!(
