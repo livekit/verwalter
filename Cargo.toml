@@ -4,6 +4,18 @@ version = "0.3.0"
 edition = "2021"
 description = "Changeset-based versioning for single packages and monorepos"
 license = "Apache-2.0"
+repository = "https://github.com/lukasIO/verwalter"
+readme = "README.md"
+keywords = ["changesets", "versioning", "release", "monorepo", "semver"]
+categories = ["development-tools", "command-line-utilities"]
+# The crate is the tool; the spec, the action and the workflows stay in git.
+include = ["/src/**", "/Cargo.toml", "/README.md", "/CHANGELOG.md"]
+
+# cargo binstall picks the binaries the release workflow attaches.
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/{ name }-{ target }.tar.gz"
+bin-dir = "{ bin }{ binary-ext }"
+pkg-fmt = "tgz"
 
 [dependencies]
 # Versioned file formats (Cargo.toml, Cargo.lock, package.json, pyproject.toml,

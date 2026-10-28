@@ -6,6 +6,16 @@ creates GitHub releases. Publishing to a registry stays in your workflow.
 
 The behaviour is specified in [versioning.allium](versioning.allium).
 
+## Install
+
+```bash
+cargo install verwalter
+```
+
+or, without a Rust toolchain, `cargo binstall verwalter` or the binaries on
+the [releases page](https://github.com/lukasIO/verwalter/releases). In GitHub
+Actions use the action below.
+
 ## How it works
 
 1. A contributor adds a `.changeset/<name>.md` file to their PR
