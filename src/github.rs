@@ -9,9 +9,7 @@ use std::{path::Path, process::Command};
 
 use serde::Deserialize;
 
-use crate::{apply::render_entry, branches::Branch, git, plan::PlannedRelease, repo::Repo};
-
-pub type Error = Box<dyn std::error::Error + Send + Sync>;
+use crate::{apply::render_entry, branches::Branch, git, plan::PlannedRelease, repo::Repo, Error};
 
 /// Runs `gh` with the given arguments and returns stdout. Injected so
 /// tests can fake GitHub.
@@ -104,27 +102,8 @@ pub fn sync(repo: &Repo, plan: &[PlannedRelease], branches: &[Branch], remote: &
         let title = format!("release: {} {}", release.package, release.to);
         let body = body(release, repo, plan, parent);
 
-        let pr = match open.iter().find(|pr| pr.head == branch.name) {
-            Some(existing) => {
-                let n = existing.number.to_string();
-                gh(&["pr", "edit", &n, "--title", &title, "--body", &body, "--add-label", label])?;
-                // GitHub refuses a base change on a PR that is part of a
-                // stack; `gh stack link` below corrects the chain instead.
-                if existing.base != branch.target {
-                    if let Err(e) = gh(&["pr", "edit", &n, "--base", &branch.target]) {
-                        if !e.to_string().contains("part of a stack") {
-                            return Err(e);
-                        }
-                    }
-                }
-                PullRequest { number: existing.number, head: branch.name.clone(), base: branch.target.clone() }
-            }
-            None => {
-                let out = gh(&["pr", "create", "--head", &branch.name, "--base", &branch.target, "--title", &title, "--body", &body, "--label", label])?;
-                PullRequest { number: number_from_url(&out)?, head: branch.name.clone(), base: branch.target.clone() }
-            }
-        };
-        result.push(pr);
+        let existing = open.iter().find(|pr| pr.head == branch.name);
+        result.push(upsert_pr(gh, existing, &branch.name, &branch.target, &title, &body, label)?);
     }
 
     // Spec: a package with nothing left to release has no open release PR.
@@ -164,6 +143,29 @@ fn linear_chain(plan: &[PlannedRelease]) -> Option<Vec<&str>> {
         prev = Some(&r.package);
     }
     Some(plan.iter().map(|r| r.package.as_str()).collect())
+}
+
+/// Open a PR for `head` against `base`, or bring `existing` (the open PR
+/// on `head`) up to date: title, body, label and base.
+pub fn upsert_pr(gh: Gh, existing: Option<&PullRequest>, head: &str, base: &str, title: &str, body: &str, label: &str) -> Result<PullRequest, Error> {
+    let number = match existing {
+        Some(existing) => {
+            let n = existing.number.to_string();
+            gh(&["pr", "edit", &n, "--title", title, "--body", body, "--add-label", label])?;
+            // GitHub refuses a base change on a PR that is part of a
+            // stack; `gh stack link` in `sync` corrects the chain instead.
+            if existing.base != base {
+                if let Err(e) = gh(&["pr", "edit", &n, "--base", base]) {
+                    if !e.to_string().contains("part of a stack") {
+                        return Err(e);
+                    }
+                }
+            }
+            existing.number
+        }
+        None => number_from_url(&gh(&["pr", "create", "--head", head, "--base", base, "--title", title, "--body", body, "--label", label])?)?,
+    };
+    Ok(PullRequest { number, head: head.to_string(), base: base.to_string() })
 }
 
 fn number_from_url(url: &str) -> Result<u64, Error> {

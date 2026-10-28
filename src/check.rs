@@ -4,9 +4,7 @@
 
 use std::{collections::BTreeSet, fs, path::Path};
 
-use crate::{changeset::Changeset, config::Config, github::Gh, repo::CHANGESET_DIR};
-
-pub type Error = Box<dyn std::error::Error + Send + Sync>;
+use crate::{changeset::Changeset, config::Config, github::Gh, repo::CHANGESET_DIR, Error};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Status {

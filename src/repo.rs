@@ -6,9 +6,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::{changeset::Changeset, config::Config, git, handler, plan::PackageState};
-
-pub type Error = Box<dyn std::error::Error + Send + Sync>;
+use crate::{changeset::Changeset, config::Config, git, handler, plan::PackageState, Error};
 
 pub const CONFIG_FILE: &str = "verwalter.toml";
 pub const CHANGESET_DIR: &str = ".changeset";
@@ -56,10 +54,6 @@ impl Repo {
             mark_released(root, &config, &packages, &mut changesets);
         }
         Ok(Self { root: root.to_path_buf(), config, packages, changesets })
-    }
-
-    pub fn dependencies(&self) -> Vec<(String, Vec<String>)> {
-        self.packages.iter().map(|p| (p.name.clone(), p.dependencies.clone())).collect()
     }
 }
 

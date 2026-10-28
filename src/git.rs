@@ -6,7 +6,7 @@ use std::{
     process::{Command, Output},
 };
 
-pub type Error = Box<dyn std::error::Error + Send + Sync>;
+use crate::Error;
 
 fn output(root: &Path, args: &[&str]) -> Result<Output, Error> {
     Ok(Command::new("git").arg("-C").arg(root).args(args).output()?)

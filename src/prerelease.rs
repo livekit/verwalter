@@ -6,14 +6,12 @@
 
 use crate::{
     apply, branches, git,
-    github::{Gh, PullRequest, MARKER},
+    github::{upsert_pr, Gh, PullRequest, MARKER},
     plan::PlannedRelease,
     repo::Repo,
     version::{next_prerelease_version, BumpLevel},
-    Version,
+    Error, Version,
 };
-
-pub type Error = Box<dyn std::error::Error + Send + Sync>;
 
 pub fn branch_name(repo: &Repo, package: &str) -> String {
     format!("{}{package}-rc", repo.config.release_branch_prefix)
@@ -46,9 +44,8 @@ pub fn open(repo: &Repo, package: &str, target: &str, level: Option<BumpLevel>, 
     if !git::ref_exists(&repo.root, &start) {
         return Err(format!("{start} does not exist; fetch it first").into());
     }
-    let dependencies = repo.dependencies();
     branches::commit_branch(&repo.root, &start, &branch, &format!("pre-release: {} {}", package, release.to), |worktree| {
-        apply::apply_with(worktree, &repo.config, &dependencies, &repo.changesets, std::slice::from_ref(&release), &release, false)?;
+        apply::apply(worktree, &repo.config, &repo.packages, &repo.changesets, std::slice::from_ref(&release), &release, false)?;
         Ok(())
     })?;
     git::write(&repo.root, dry_run, &["push", "--force", "--quiet", remote, &format!("{branch}:{branch}")])?;
@@ -63,16 +60,6 @@ pub fn open(repo: &Repo, package: &str, target: &str, level: Option<BumpLevel>, 
         apply::render_entry(&release, &repo.changesets, std::slice::from_ref(&release)).trim_start_matches(|c| c != '\n').trim_start()
     );
     let open: Vec<PullRequest> = serde_json::from_str(&gh(&["pr", "list", "--state", "open", "--head", &branch, "--json", "number,headRefName,baseRefName"])?)?;
-    let pr = match open.first() {
-        Some(existing) => {
-            gh(&["pr", "edit", &existing.number.to_string(), "--base", target, "--title", &title, "--body", &body, "--add-label", label])?;
-            PullRequest { number: existing.number, head: branch, base: target.to_string() }
-        }
-        None => {
-            let out = gh(&["pr", "create", "--head", &branch, "--base", target, "--title", &title, "--body", &body, "--label", label])?;
-            let number = out.trim().rsplit('/').next().and_then(|n| n.parse().ok()).ok_or("unexpected `gh pr create` output")?;
-            PullRequest { number, head: branch, base: target.to_string() }
-        }
-    };
+    let pr = upsert_pr(gh, open.first(), &branch, target, &title, &body, label)?;
     Ok((release, pr))
 }

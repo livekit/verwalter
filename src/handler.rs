@@ -10,9 +10,7 @@ use knope_versioning::{
 use relative_path::RelativePathBuf;
 use toml_edit::DocumentMut;
 
-use crate::Version;
-
-pub type Error = Box<dyn std::error::Error + Send + Sync>;
+use crate::{Error, Version};
 
 const NO_TAGS: &[&str] = &[];
 

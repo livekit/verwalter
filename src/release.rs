@@ -8,9 +8,7 @@ use std::{fs, path::Path};
 
 use serde::Serialize;
 
-use crate::{config::ReleaseMode, git, github::Gh, repo::Repo};
-
-pub type Error = Box<dyn std::error::Error + Send + Sync>;
+use crate::{config::ReleaseMode, git, github::Gh, repo::Repo, Error};
 
 /// One line of the handoff to the publish workflow.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
