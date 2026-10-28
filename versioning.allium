@@ -53,6 +53,14 @@ value Version {
     is_prerelease: prerelease != null
 }
 
+-- A file without a known format (gradle.properties, a .podspec, a version
+-- constant in source) names a regex whose `version` group holds the version.
+-- Only that group is rewritten. Such a file carries no dependency pins.
+value VersionedFile {
+    path: String
+    regex: String?
+}
+
 value Bump {
     package_name: String
     level: BumpLevel
@@ -96,7 +104,7 @@ entity Package {
     -- Each file goes to the VersionedFileHandler for its format. Lock files
     -- (Cargo.lock, pnpm-lock.yaml) are versioned files too, edited directly
     -- by a handler; the tool never runs a package manager.
-    versioned_files: Set<String>
+    versioned_files: Set<VersionedFile>
     changelog_file: String
     version: Version
     dependencies: Set<Package>

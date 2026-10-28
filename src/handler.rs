@@ -72,16 +72,18 @@ fn normalise_pyproject(content: &str) -> String {
         + if content.ends_with('\n') { "\n" } else { "" }
 }
 
-fn load(path: &str, dependency: Option<&str>, content: &str) -> Result<(VersionedFileConfig, VersionedFile), Error> {
-    let config = VersionedFileConfig::new(RelativePathBuf::from(path), dependency.map(String::from), None)?;
+fn load(path: &str, regex: Option<&str>, dependency: Option<&str>, content: &str) -> Result<(VersionedFileConfig, VersionedFile), Error> {
+    let regex = regex.map(|r| vec![r.to_string()]);
+    let config = VersionedFileConfig::new(RelativePathBuf::from(path), dependency.map(String::from), regex)?;
     let content = if is_pyproject(path) { normalise_pyproject(content) } else { content.to_string() };
     let file = VersionedFile::new(&config, content, NO_TAGS)?;
     Ok((config, file))
 }
 
-/// The package version in a manifest. Lock files have none.
-pub fn read_version(path: &str, content: &str) -> Result<Version, Error> {
-    Ok(load(path, None, content)?.1.version()?)
+/// The package version in a manifest. Lock files have none. `regex` picks
+/// the version out of a file knope has no format for (config::VersionedFile).
+pub fn read_version(path: &str, regex: Option<&str>, content: &str) -> Result<Version, Error> {
+    Ok(load(path, regex, None, content)?.1.version()?)
 }
 
 /// Spec: write_version (`dependency` = None) and write_dependency_version
@@ -92,7 +94,11 @@ pub fn read_version(path: &str, content: &str) -> Result<Version, Error> {
 /// Invariant MinimalEdit holds for TOML (toml_edit). package.json is
 /// re-serialized with two-space indentation, which is what prettier
 /// produces in node-sdks.
-pub fn write_version(path: &str, content: &str, dependency: Option<&str>, version: &Version) -> Result<String, Error> {
+pub fn write_version(path: &str, regex: Option<&str>, content: &str, dependency: Option<&str>, version: &Version) -> Result<String, Error> {
+    if regex.is_some() && dependency.is_some() {
+        // A regex file carries one version, its own. Nothing to pin.
+        return Ok(content.to_string());
+    }
     if let (true, Some(dep)) = (path.rsplit('/').next() == Some("Cargo.toml"), dependency) {
         // A `workspace = true` dependency takes its version from the root
         // [workspace.dependencies]; cargo rejects a `version` next to it.
@@ -110,7 +116,7 @@ pub fn write_version(path: &str, content: &str, dependency: Option<&str>, versio
         // package's own version instead.
         return Ok(pyproject_pin(content, dep, version));
     }
-    let (config, file) = load(path, dependency, content)?;
+    let (config, file) = load(path, regex, dependency, content)?;
     let mut package = Package::new(
         Name::from(dependency.unwrap_or("package")),
         NO_TAGS,
@@ -240,9 +246,9 @@ mod tests {
     // MinimalEdit for one sample file.
     fn check(path: &str, sample: &str, next: &str) -> String {
         let next = v(next);
-        assert_ne!(read_version(path, sample).unwrap(), next);
-        let written = write_version(path, sample, None, &next).unwrap();
-        assert_eq!(read_version(path, &written).unwrap(), next, "Roundtrip");
+        assert_ne!(read_version(path, None, sample).unwrap(), next);
+        let written = write_version(path, None, sample, None, &next).unwrap();
+        assert_eq!(read_version(path, None, &written).unwrap(), next, "Roundtrip");
         written
     }
 
@@ -273,7 +279,7 @@ serde = "1"
         let deps = internal_dependencies("livekit-api/Cargo.toml", CARGO, &["livekit-protocol", "livekit", "serde"]).unwrap();
         assert_eq!(deps, vec!["livekit-protocol", "serde"]);
 
-        let pinned = write_version("livekit-api/Cargo.toml", CARGO, Some("livekit-protocol"), &v("0.4.0")).unwrap();
+        let pinned = write_version("livekit-api/Cargo.toml", None, CARGO, Some("livekit-protocol"), &v("0.4.0")).unwrap();
         assert_one_line_changed(CARGO, &pinned);
         assert!(pinned.contains(r#"livekit-protocol = { version = "0.4.0""#));
     }
@@ -290,13 +296,13 @@ serde = "1"
 
     #[test]
     fn cargo_workspace_inherited_dependency_is_not_pinned() {
-        let out = write_version("livekit-ffi/Cargo.toml", CARGO_WORKSPACE_DEP, Some("webrtc-sys"), &v("0.3.52")).unwrap();
+        let out = write_version("livekit-ffi/Cargo.toml", None, CARGO_WORKSPACE_DEP, Some("webrtc-sys"), &v("0.3.52")).unwrap();
         assert_eq!(out, CARGO_WORKSPACE_DEP, "version comes from [workspace.dependencies]");
         let deps = internal_dependencies("livekit-ffi/Cargo.toml", CARGO_WORKSPACE_DEP, &["webrtc-sys", "livekit"]).unwrap();
         assert_eq!(deps, vec!["webrtc-sys", "livekit"], "still a dependency for stacking and bumps");
         // The root manifest is where the pin lives.
         let root = "[workspace]\nmembers = [\"livekit-ffi\"]\n\n[workspace.dependencies]\nwebrtc-sys = { version = \"0.3.51\", path = \"webrtc-sys\" }\n";
-        let pinned = write_version("Cargo.toml", root, Some("webrtc-sys"), &v("0.3.52")).unwrap();
+        let pinned = write_version("Cargo.toml", None, root, Some("webrtc-sys"), &v("0.3.52")).unwrap();
         assert!(pinned.contains(r#"webrtc-sys = { version = "0.3.52""#));
     }
 
@@ -314,7 +320,7 @@ version = "1.0.228"
 
     #[test]
     fn cargo_lock_needs_the_package_as_dependency() {
-        let written = write_version("Cargo.lock", CARGO_LOCK, Some("livekit-api"), &v("0.5.0")).unwrap();
+        let written = write_version("Cargo.lock", None, CARGO_LOCK, Some("livekit-api"), &v("0.5.0")).unwrap();
         assert_one_line_changed(CARGO_LOCK, &written);
         assert!(written.contains("version = \"0.5.0\""));
         assert!(written.contains("version = \"1.0.228\""));
@@ -364,36 +370,59 @@ dev = ["livekit-test-utils~=0.3"]
         let deps = internal_dependencies("livekit-api/pyproject.toml", PYPROJECT, &["livekit-protocol", "livekit-rtc", "livekit-test-utils", "aiohttp", "livekit"]).unwrap();
         assert_eq!(deps, vec!["livekit-protocol", "livekit-rtc", "livekit-test-utils", "aiohttp"]);
 
-        let pinned = write_version("livekit-api/pyproject.toml", PYPROJECT, Some("livekit-protocol"), &v("1.2.0")).unwrap();
+        let pinned = write_version("livekit-api/pyproject.toml", None, PYPROJECT, Some("livekit-protocol"), &v("1.2.0")).unwrap();
         assert!(pinned.contains(r#""livekit-protocol>=1.2.0,<2.0.0", # keep in sync"#), "{pinned}");
         assert!(pinned.contains(r#"version = "1.1.1""#), "own version untouched");
         assert_one_line_changed(PYPROJECT, &pinned);
 
-        let rc = write_version("livekit-api/pyproject.toml", PYPROJECT, Some("livekit-rtc"), &v("1.3.0-rc.1")).unwrap();
+        let rc = write_version("livekit-api/pyproject.toml", None, PYPROJECT, Some("livekit-rtc"), &v("1.3.0-rc.1")).unwrap();
         assert!(rc.contains(r#"'Livekit_RTC[extra] == 1.3.0rc1; python_version >= "3.9"'"#), "{rc}");
 
-        let tilde = write_version("livekit-api/pyproject.toml", PYPROJECT, Some("livekit-test-utils"), &v("0.4.0")).unwrap();
+        let tilde = write_version("livekit-api/pyproject.toml", None, PYPROJECT, Some("livekit-test-utils"), &v("0.4.0")).unwrap();
         assert!(tilde.contains(r#""livekit-test-utils~=0.4.0""#));
 
-        let none = write_version("livekit-api/pyproject.toml", PYPROJECT, Some("nope"), &v("9.9.9")).unwrap();
+        let none = write_version("livekit-api/pyproject.toml", None, PYPROJECT, Some("nope"), &v("9.9.9")).unwrap();
         assert_eq!(none, PYPROJECT);
     }
 
     #[test]
     fn pyproject_prerelease_uses_pep440_spelling() {
-        let rc = write_version("pyproject.toml", PYPROJECT, None, &v("1.2.0-rc.1")).unwrap();
+        let rc = write_version("pyproject.toml", None, PYPROJECT, None, &v("1.2.0-rc.1")).unwrap();
         assert!(rc.contains("version = \"1.2.0rc1\""), "{rc}");
-        assert_eq!(read_version("pyproject.toml", &rc).unwrap(), v("1.2.0-rc.1"));
-        let beta = write_version("pyproject.toml", &rc, None, &v("1.2.0-beta.3")).unwrap();
+        assert_eq!(read_version("pyproject.toml", None, &rc).unwrap(), v("1.2.0-rc.1"));
+        let beta = write_version("pyproject.toml", None, &rc, None, &v("1.2.0-beta.3")).unwrap();
         assert!(beta.contains("version = \"1.2.0b3\""));
-        assert_eq!(read_version("pyproject.toml", &beta).unwrap(), v("1.2.0-beta.3"));
-        let final_ = write_version("pyproject.toml", &beta, None, &v("1.2.0")).unwrap();
+        assert_eq!(read_version("pyproject.toml", None, &beta).unwrap(), v("1.2.0-beta.3"));
+        let final_ = write_version("pyproject.toml", None, &beta, None, &v("1.2.0")).unwrap();
         assert!(final_.contains("version = \"1.2.0\""));
         assert_eq!(to_pep440(&v("1.2.0-next.1")), "1.2.0-next.1", "unknown labels keep semver");
     }
 
     #[test]
     fn unknown_file_name_is_an_error() {
-        assert!(read_version("Package.swift", "// swift").is_err());
+        assert!(read_version("Package.swift", None, "// swift").is_err());
+    }
+
+    const GRADLE: &str = "GROUP=io.livekit\nVERSION_NAME=2.29.2\nPOM_LICENCE_NAME=The Apache Software License, Version 2.0\n";
+    const DART: &str = "class LiveKitClient {\n  static const version = '2.13.1';\n}\n";
+
+    // Obligation contract-signature.VersionedFileHandler.* for regex files:
+    // only the `version` group changes, pre-releases round-trip, a pin
+    // request leaves the file alone, and a regex without the group fails.
+    #[test]
+    fn regex_file() {
+        let re = Some("VERSION_NAME=(?<version>.+)");
+        assert_eq!(read_version("gradle.properties", re, GRADLE).unwrap(), v("2.29.2"));
+        let written = write_version("gradle.properties", re, GRADLE, None, &v("2.30.0-rc.1")).unwrap();
+        assert_eq!(written, GRADLE.replace("2.29.2", "2.30.0-rc.1"), "MinimalEdit");
+        assert_eq!(read_version("gradle.properties", re, &written).unwrap(), v("2.30.0-rc.1"), "Roundtrip");
+
+        let re = Some("version = '(?<version>[^']+)'");
+        let written = write_version("lib/src/livekit.dart", re, DART, None, &v("2.14.0")).unwrap();
+        assert_eq!(written, DART.replace("2.13.1", "2.14.0"));
+        assert_eq!(write_version("lib/src/livekit.dart", re, DART, Some("other"), &v("9.9.9")).unwrap(), DART);
+
+        assert!(read_version("gradle.properties", Some("VERSION_NAME=(.+)"), GRADLE).is_err());
+        assert!(read_version("gradle.properties", Some("NOPE=(?<version>.+)"), GRADLE).is_err());
     }
 }

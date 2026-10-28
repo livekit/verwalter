@@ -35,9 +35,10 @@ impl Repo {
             let mut version = None;
             let mut dependencies = Vec::new();
             for file in &package.versioned_files {
+                let (file, regex) = (file.path(), file.regex());
                 let content = fs::read_to_string(root.join(file)).map_err(|e| format!("{file}: {e}"))?;
                 if version.is_none() {
-                    version = handler::read_version(file, &content).ok();
+                    version = handler::read_version(file, regex, &content).ok();
                 }
                 let others: Vec<&str> = names.iter().copied().filter(|n| n != name).collect();
                 for dep in handler::internal_dependencies(file, &content, &others)? {

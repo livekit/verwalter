@@ -82,6 +82,18 @@ Versioned files are handled by
 `Cargo.lock`, `package.json`, `package-lock.json`, `pyproject.toml`,
 `pubspec.yaml`, `go.mod`, `pom.xml` and more.
 
+Any other text file takes a regex with a `version` capture group. Only the
+captured text changes. This covers `gradle.properties`, a `.podspec`, a
+`.version` file, or a version constant in source:
+
+```toml
+versioned_files = [
+  "pubspec.yaml",
+  { path = "lib/src/livekit.dart", regex = "version = '(?<version>[^']+)'" },
+  { path = "gradle.properties", regex = "VERSION_NAME=(?<version>.+)" },
+]
+```
+
 ## GitHub Actions
 
 See [examples/workflows](examples/workflows) for the three workflows:

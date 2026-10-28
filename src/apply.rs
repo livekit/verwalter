@@ -52,13 +52,13 @@ pub fn apply_with(
     let package = config.packages.get(name).ok_or_else(|| format!("package {name} is not in verwalter.toml"))?;
     let mut written = Vec::new();
 
-    let mut rewrite = |rel: &str, dependency: Option<&str>| -> Result<(), Error> {
+    let mut rewrite = |rel: &str, regex: Option<&str>, dependency: Option<&str>| -> Result<(), Error> {
         let path = root.join(rel);
         if !path.exists() {
             return Ok(());
         }
         let before = fs::read_to_string(&path)?;
-        let after = handler::write_version(rel, &before, dependency, &release.to)?;
+        let after = handler::write_version(rel, regex, &before, dependency, &release.to)?;
         if after != before {
             fs::write(&path, after)?;
             written.push(path);
@@ -68,16 +68,16 @@ pub fn apply_with(
 
     // Own version. A lock file holds it under the package's own entry.
     for file in &package.versioned_files {
-        rewrite(file, is_lock_file(file).then_some(name))?;
+        rewrite(file.path(), file.regex(), is_lock_file(file.path()).then_some(name))?;
     }
     // Pins: repo-level pin files, then every dependent's manifests.
     for file in &config.pin_files {
-        rewrite(file, Some(name))?;
+        rewrite(file, None, Some(name))?;
     }
     for dependent in dependents(dependencies, name).into_iter().filter(|_| pins) {
         if let Some(d) = config.packages.get(dependent) {
-            for file in d.versioned_files.iter().filter(|f| !is_lock_file(f)) {
-                rewrite(file, Some(name))?;
+            for file in d.versioned_files.iter().filter(|f| !is_lock_file(f.path())) {
+                rewrite(file.path(), file.regex(), Some(name))?;
             }
         }
     }

@@ -16,11 +16,36 @@ pub enum ReleaseMode {
     TagAndRelease,
 }
 
+/// A versioned file: a bare path for a format knope-versioning knows by
+/// file name, or `{ path, regex }` for any other text file. The regex must
+/// have a `(?<version>...)` capture group; only that group is rewritten.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(untagged)]
+pub enum VersionedFile {
+    Path(String),
+    Regex { path: String, regex: String },
+}
+
+impl VersionedFile {
+    pub fn path(&self) -> &str {
+        match self {
+            Self::Path(p) | Self::Regex { path: p, .. } => p,
+        }
+    }
+
+    pub fn regex(&self) -> Option<&str> {
+        match self {
+            Self::Path(_) => None,
+            Self::Regex { regex, .. } => Some(regex),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Package {
     pub path: String,
-    pub versioned_files: Vec<String>,
+    pub versioned_files: Vec<VersionedFile>,
     pub changelog: String,
     /// Default: "v{version}" with one package, "{package}-v{version}" otherwise.
     pub tag_template: Option<String>,
@@ -155,6 +180,17 @@ release = "tag"
         let c = Config::parse(&format!("base_branch = \"next\"\ndependent_bump_level = \"minor\"\n{MONO}")).unwrap();
         assert_eq!(c.base_branch, "next");
         assert_eq!(c.dependent_bump_level, BumpLevel::Minor);
+    }
+
+    #[test]
+    fn versioned_files_accept_paths_and_regex_entries() {
+        let c = Config::parse(
+            "[packages.sdk]\npath = \".\"\nversioned_files = [\"pubspec.yaml\", { path = \"lib/src/livekit.dart\", regex = \"version = '(?<version>[^']+)'\" }]\nchangelog = \"CHANGELOG.md\"\n",
+        )
+        .unwrap();
+        let files = &c.packages["sdk"].versioned_files;
+        assert_eq!((files[0].path(), files[0].regex()), ("pubspec.yaml", None));
+        assert_eq!((files[1].path(), files[1].regex()), ("lib/src/livekit.dart", Some("version = '(?<version>[^']+)'")));
     }
 
     // obligation: entity-fields.Package (release_mode, release_as_draft, tag_template)
