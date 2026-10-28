@@ -231,9 +231,11 @@ config {
 ------------------------------------------------------------
 
 -- Workspace consistency: every publishable package the workspace
--- manifests declare must be a configured Package or ignored; a configured
--- Package must exist and not be private. The check fails on a mismatch,
--- every other command warns, so a new package cannot escape versioning.
+-- manifests declare must be a configured Package or ignored, and a
+-- configured Package must exist. A private package may be configured: it
+-- is versioned and released on GitHub, just not published to a registry.
+-- The check fails on a mismatch, every other command warns, so a new
+-- package cannot escape versioning.
 rule WorkspaceConsistencyCheck {
     when: ContributorPullRequestUpdated(pr)
     let members = workspace_members(pr.repository)

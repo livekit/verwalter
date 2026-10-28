@@ -70,9 +70,11 @@ draft = false
 Every publishable workspace member must be listed, or named in `ignore`.
 `verwalter check` fails when a Cargo, pnpm or uv workspace member without a
 private marker (`publish = false`, `"private": true`, the
-`Private :: Do Not Upload` classifier) is missing from the config, when a
-configured package is private, or when its directory has no manifest. The
-other commands print the same as warnings.
+`Private :: Do Not Upload` classifier, `[tool.uv] package = false`) is
+missing from the config, or when a configured package's directory has no
+manifest. A private package may still be configured: it gets versions, tags
+and GitHub releases, and the workflow simply does not publish it. The other
+commands print the same as warnings.
 
 Dependencies between packages are read from the manifests, not configured.
 Versioned files are handled by

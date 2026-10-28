@@ -1,8 +1,10 @@
 //! Spec: WorkspaceConsistency. The workspace manifests say which packages
 //! exist and which are private; verwalter.toml says which are versioned.
 //! A publishable member that is not configured would silently escape
-//! versioning, so `check` reports the difference. Cargo workspaces,
-//! pnpm workspaces and uv workspaces are understood.
+//! versioning, so `check` reports the difference. A private member may
+//! still be configured: livekit-ffi has `publish = false` and ships as
+//! binaries on its GitHub release. Cargo, pnpm and uv workspaces are
+//! understood.
 
 use std::{
     fs,
@@ -107,10 +109,13 @@ fn uv_members(root: &Path) -> Vec<Member> {
         .filter_map(|dir| {
             let manifest = fs::read_to_string(dir.join("pyproject.toml")).ok()?.parse::<toml::Value>().ok()?;
             let project = manifest.get("project")?;
+            // `Private :: Do Not Upload` is refused by PyPI; `[tool.uv]
+            // package = false` marks a uv workspace root that is no package.
             let private = project
                 .get("classifiers")
                 .and_then(|c| c.as_array())
-                .is_some_and(|c| c.iter().any(|v| v.as_str() == Some("Private :: Do Not Upload")));
+                .is_some_and(|c| c.iter().any(|v| v.as_str() == Some("Private :: Do Not Upload")))
+                || manifest.get("tool").and_then(|t| t.get("uv")).and_then(|u| u.get("package")).and_then(|p| p.as_bool()) == Some(false);
             Some(Member { name: project.get("name")?.as_str()?.to_string(), path: relative(root, &dir), private })
         })
         .collect()
@@ -152,8 +157,6 @@ pub enum Finding {
     Unmanaged { name: String, path: String },
     /// A configured package whose directory has no manifest.
     Missing { name: String, path: String },
-    /// A configured package that its manifest marks private.
-    Private { name: String, path: String },
 }
 
 impl std::fmt::Display for Finding {
@@ -161,7 +164,6 @@ impl std::fmt::Display for Finding {
         match self {
             Self::Unmanaged { name, path } => write!(f, "{name} ({path}) is publishable but not in verwalter.toml: add [packages.{name}] or list it under `ignore`"),
             Self::Missing { name, path } => write!(f, "{name} is in verwalter.toml but {path} has no package manifest: remove it or fix `path`"),
-            Self::Private { name, path } => write!(f, "{name} ({path}) is in verwalter.toml but its manifest marks it private: remove it, make it public, or list it under `ignore`"),
         }
     }
 }
@@ -175,9 +177,6 @@ pub fn check(root: &Path, config: &Config) -> Vec<Finding> {
     for m in &members {
         if !m.private && !config.packages.contains_key(&m.name) && !ignored(m) {
             findings.push(Finding::Unmanaged { name: m.name.clone(), path: m.path.clone() });
-        }
-        if m.private && config.packages.contains_key(&m.name) && !ignored(m) {
-            findings.push(Finding::Private { name: m.name.clone(), path: m.path.clone() });
         }
     }
     for (name, p) in &config.packages {
@@ -240,12 +239,12 @@ mod tests {
         write(&t.0, "pnpm-workspace.yaml", "packages:\n  - 'packages/*'\n  - 'examples/*'\n\ncatalog:\n  x: 1\n");
         write(&t.0, "packages/sdk/package.json", r#"{"name": "sdk", "version": "1.0.0"}"#);
         write(&t.0, "examples/demo/package.json", r#"{"name": "demo", "private": true}"#);
-        write(&t.0, "pyproject.toml", "[tool.uv.workspace]\nmembers = [\"py/*\"]\n");
+        write(&t.0, "pyproject.toml", "[project]\nname = \"root\"\nversion = \"0\"\n[tool.uv]\npackage = false\n[tool.uv.workspace]\nmembers = [\"py/*\"]\n");
         write(&t.0, "py/lib/pyproject.toml", "[project]\nname = \"lib\"\nversion = \"1.0.0\"\n");
         write(&t.0, "py/internal/pyproject.toml", "[project]\nname = \"internal\"\nversion = \"1.0.0\"\nclassifiers = [\"Private :: Do Not Upload\"]\n");
         let m = members(&t.0);
         let v: Vec<(&str, bool)> = m.iter().map(|m| (m.name.as_str(), m.private)).collect();
-        assert_eq!(v, [("demo", true), ("sdk", false), ("internal", true), ("lib", false)]);
+        assert_eq!(v, [("root", true), ("demo", true), ("sdk", false), ("internal", true), ("lib", false)]);
     }
 
     #[test]
@@ -261,14 +260,7 @@ mod tests {
         )
         .unwrap();
         let f = check(&t.0, &config);
-        assert_eq!(
-            f,
-            [
-                Finding::Private { name: "c".into(), path: "crates/c".into() },
-                Finding::Missing { name: "gone".into(), path: "crates/gone".into() },
-            ],
-            "b and examples/* are ignored, a is fine"
-        );
+        assert_eq!(f, [Finding::Missing { name: "gone".into(), path: "crates/gone".into() }], "b and examples/* are ignored; a and the private c are fine");
         let open = Config::parse("[packages.a]\npath = \"crates/a\"\nversioned_files = [\"crates/a/Cargo.toml\"]\nchangelog = \"x\"\n").unwrap();
         let unmanaged: Vec<String> = check(&t.0, &open).iter().filter_map(|f| if let Finding::Unmanaged { name, .. } = f { Some(name.clone()) } else { None }).collect();
         assert_eq!(unmanaged, ["b", "e"]);
