@@ -149,9 +149,18 @@ fn release_one(repo: &Repo, remote: &str, options: &Options, name: &str, version
                 if version.is_prerelease() {
                     args.push("--prerelease");
                 }
-                gh(&args)?;
-                fresh = true;
-                status = if draft { "drafted" } else { "published" };
+                match gh(&args) {
+                    Ok(_) => {
+                        fresh = true;
+                        status = if draft { "drafted" } else { "published" };
+                    }
+                    // Two release runs at once (two PRs merged together):
+                    // the other one won the create, which is as good as done.
+                    Err(e) => match view(gh, &tag) {
+                        Some(existing) => status = if existing.draft { "drafted" } else { "published" },
+                        None => return Err(e),
+                    },
+                }
             }
         }
     }

@@ -2,7 +2,6 @@
 //! YAML front matter with one `package: level` line per bump (package names
 //! quoted or unquoted), markdown body as the summary.
 
-use std::collections::BTreeSet;
 
 use crate::version::BumpLevel;
 
@@ -17,9 +16,8 @@ pub struct Changeset {
     pub file: String,
     pub bumps: Vec<Bump>,
     pub summary: String,
-    /// Spec: released_packages. Packages named in `bumps` that had a final
-    /// release since this file landed. The file stays until all are released.
-    pub released_packages: BTreeSet<String>,
+    /// The file as read, so `without` can rewrite its front matter.
+    pub content: String,
     /// Changelog suffix naming the PR (or commit) and author that added
     /// the file, in the livekit changesets-changelog-github form:
     /// `- [#12](pr url) ([@user](profile url))`. Set by github::attribute.
@@ -71,20 +69,30 @@ impl Changeset {
             bumps.push(Bump { package_name: name.to_string(), level });
         }
 
-        Ok(Self { file: file.to_string(), bumps, summary: body.trim().to_string(), released_packages: BTreeSet::new(), attribution: None })
+        Ok(Self { file: file.to_string(), bumps, summary: body.trim().to_string(), content: content.to_string(), attribution: None })
     }
 
-    /// Spec: Changeset.unreleased_for(name).
+    /// Spec: Changeset.unreleased_for(name). A released package is no
+    /// longer in the front matter, so this is a plain lookup.
     pub fn unreleased_for(&self, package: &str) -> Option<BumpLevel> {
-        if self.released_packages.contains(package) {
-            return None;
-        }
         self.bumps.iter().find(|b| b.package_name == package).map(|b| b.level)
     }
 
-    /// Spec: Changeset.fully_released.
-    pub fn fully_released(&self) -> bool {
-        self.bumps.iter().all(|b| self.released_packages.contains(&b.package_name))
+    /// Spec: ReleaseRemovesPackageFromChangeset / ConsumeChangeset. The file
+    /// with the bump lines of `packages` removed, or None when no bump is
+    /// left and the file goes.
+    pub fn without(&self, packages: &[&str]) -> Option<String> {
+        let rest = self.content.trim_start().strip_prefix("---")?;
+        let (front, body) = rest.split_once("\n---")?;
+        let kept: Vec<&str> = front
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .filter(|l| {
+                let name = l.split_once(':').map(|(n, _)| n.trim().trim_matches(|c| c == '"' || c == '\'')).unwrap_or("");
+                !packages.contains(&name)
+            })
+            .collect();
+        (!kept.is_empty()).then(|| format!("---\n{}\n---{body}", kept.join("\n")))
     }
 }
 
@@ -116,16 +124,21 @@ Add RPC round-trip latency metric.
         assert_eq!(u.unreleased_for("livekit"), None);
     }
 
-    // Spec: MarkPackageReleasedOnChangesets, ConsumeChangeset
+    // Spec: ReleaseRemovesPackageFromChangeset, ConsumeChangeset. Quotes
+    // and the body survive; the last line takes the file with it.
     #[test]
-    fn released_packages_hide_bumps_until_all_are_released() {
-        let mut c = Changeset::parse("b.md", UNQUOTED).unwrap();
-        c.released_packages.insert("livekit-protocol".into());
+    fn without_drops_bump_lines_and_the_file_at_the_end() {
+        let c = Changeset::parse("b.md", UNQUOTED).unwrap();
+        let rest = c.without(&["livekit-protocol"]).unwrap();
+        assert_eq!(rest, "---\nlivekit-api: patch\n---\nNegotiated data channels\n");
+        let c = Changeset::parse("b.md", &rest).unwrap();
         assert_eq!(c.unreleased_for("livekit-protocol"), None);
         assert_eq!(c.unreleased_for("livekit-api"), Some(BumpLevel::Patch));
-        assert!(!c.fully_released());
-        c.released_packages.insert("livekit-api".into());
-        assert!(c.fully_released());
+        assert_eq!(c.without(&["livekit-api"]), None);
+
+        let q = Changeset::parse("a.md", QUOTED).unwrap();
+        assert_eq!(q.without(&["livekit-server-sdk"]).unwrap(), "---\n\"@livekit/rtc-node\": minor\n---\n\nAdd RPC round-trip latency metric.\n");
+        assert_eq!(Changeset::parse("e.md", "---\n---\nempty\n").unwrap().without(&[]), None);
     }
 
     #[test]

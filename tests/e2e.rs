@@ -1,5 +1,5 @@
 //! End to end on a real git repository: plan, branches, stacking,
-//! changeset consumption, released_packages from tags.
+//! changeset consumption by front-matter edits.
 
 use std::{fs, path::{Path, PathBuf}, process::Command};
 
@@ -115,23 +115,24 @@ fn stacked_branches_from_one_changeset() {
     assert_eq!(again.len(), 3);
 }
 
+// Spec: ReleaseRemovesPackageFromChangeset. After protocol's release PR
+// merges, the shared changeset only names livekit, so only livekit is
+// planned; tags play no part.
 #[test]
-fn released_packages_come_from_tags() {
-    let r = fixture("tags");
+fn merged_release_removes_its_line_from_shared_changesets() {
+    let r = fixture("shared");
     let root = &r.0;
     write(root, ".changeset/ndc.md", "---\nlivekit-protocol: minor\nlivekit: minor\n---\nx\n");
     git(root, &["add", "-A"]);
     git(root, &["commit", "-q", "-m", "add changeset"]);
-
-    // Simulate protocol's release PR merged and tagged, changeset kept.
-    write(root, "livekit-protocol/Cargo.toml", "[package]\nname = \"livekit-protocol\"\nversion = \"0.4.0\"\n");
-    git(root, &["commit", "-qam", "release: livekit-protocol 0.4.0"]);
-    git(root, &["tag", "livekit-protocol-v0.4.0"]);
+    let repo = Repo::load(root).unwrap();
+    let first = plan(&repo.packages, &repo.changesets, repo.config.dependent_bump_level);
+    branches::create(&repo, &first, "main").unwrap();
+    git(root, &["merge", "-q", "--ff-only", "release/livekit-protocol"]);
 
     let repo = Repo::load(root).unwrap();
-    assert!(repo.changesets[0].released_packages.contains("livekit-protocol"));
-    assert!(!repo.changesets[0].released_packages.contains("livekit"));
-
+    assert_eq!(git(root, &["show", "HEAD:.changeset/ndc.md"]), "---\nlivekit: minor\n---\nx");
+    assert_eq!(repo.changesets[0].unreleased_for("livekit-protocol"), None);
     let plan = plan(&repo.packages, &repo.changesets, repo.config.dependent_bump_level);
     let names: Vec<&str> = plan.iter().map(|r| r.package.as_str()).collect();
     assert_eq!(names, ["livekit"], "protocol is done; api got no dependent bump because protocol is not planned");

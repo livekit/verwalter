@@ -225,12 +225,15 @@ mod tests {
     }
 
     // Spec: a changeset released for one package still drives the other.
+    // A package whose line a release branch removed is no longer planned.
     #[test]
-    fn released_packages_are_skipped() {
-        let mut c = cs("a.md", &[("livekit-protocol", BumpLevel::Minor), ("livekit-api", BumpLevel::Patch)]);
-        c.released_packages.insert("livekit-protocol".into());
-        let p = plan(&python_sdks(), &[c], BumpLevel::Patch);
-        assert_eq!(stack(&p), vec![("livekit-api", None)]);
+    fn removed_lines_are_not_planned() {
+        let c = cs("a.md", &[("livekit-protocol", BumpLevel::Patch), ("livekit", BumpLevel::Major)]);
+        let c = Changeset::parse("a.md", &c.without(&["livekit-protocol"]).unwrap()).unwrap();
+        let packages = vec![pkg("livekit-protocol", "0.3.0", &[]), pkg("livekit", "0.7.0", &["livekit-protocol"]), pkg("livekit-ffi", "0.12.0", &["livekit"])];
+        let p = plan(&packages, &[c], BumpLevel::Patch);
+        let names: Vec<&str> = p.iter().map(|r| r.package.as_str()).collect();
+        assert_eq!(names, ["livekit", "livekit-ffi"]);
     }
 
     // Spec: invariant StackCoversDependencies, diamond case. Only the

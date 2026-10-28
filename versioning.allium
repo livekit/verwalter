@@ -133,15 +133,16 @@ entity Changeset {
     file: String
     bumps: Set<Bump>
     summary: String
-    -- Packages named in bumps that have had a final release since this
-    -- changeset landed. The file stays until every named package is released.
-    -- Derived from git: the tag of the package's current final version
-    -- contains the commit that added the file. A pre-release tag never counts.
-    released_packages: Set<String>
+    -- A release branch removes its package's bump line from the front
+    -- matter (and the lines of the packages under it in the stack). The
+    -- file stays until its last line goes, so a changeset naming several
+    -- packages is released piecewise. Nothing is derived from tags: a repo
+    -- that adopts the tool with tags behind its versions, or a package with
+    -- release_mode none, works the same.
     status: pending | consumed
 
-    fully_released: bumps.all(b => b.package_name in released_packages)
-    unreleased_for(name): bumps.any(b => b.package_name = name) and not (name in released_packages)
+    fully_released: bumps.empty
+    unreleased_for(name): bumps.any(b => b.package_name = name)
 
     transitions status {
         pending -> consumed
@@ -271,7 +272,7 @@ rule ChangesetCheckOnContributorPullRequest {
 
 rule ContributorAddsChangeset {
     when: ContributorAddsChangeset(contributor, repository, file, bumps, summary)
-    ensures: Changeset.created(repository: repository, file: file, bumps: bumps, summary: summary, released_packages: {}, status: pending)
+    ensures: Changeset.created(repository: repository, file: file, bumps: bumps, summary: summary, status: pending)
 }
 
 rule ChangesetLandsOnBaseBranch {
@@ -356,21 +357,22 @@ rule ApplyRelease {
 }
 
 -- A pre-release keeps the changesets pending so the final release still
--- lists them. A final release marks the package as released on every
--- pending changeset that names it.
+-- lists them. A release branch drops its package's bump line from every
+-- pending changeset that names it, so the merged PR leaves the remaining
+-- packages' lines behind for their own releases.
 -- Note: allium 3.2.4 does not witness bulk updates in a `for` clause, so
 -- `check` reports Changeset.consumed as unreachable. This is the intended path.
-rule MarkPackageReleasedOnChangesets {
+rule ReleaseRemovesPackageFromChangeset {
     when: PackageReleased(rpr)
     requires: rpr.kind = release
     for c in Changesets where status = pending and repository = rpr.package.repository:
         requires: c.unreleased_for(rpr.package.name)
-        ensures: c.released_packages = c.released_packages.add(rpr.package.name)
+        ensures: c.bumps = c.bumps.filter(b => b.package_name != rpr.package.name)
 }
 
 -- The changeset file is deleted by the PR that releases the last package
--- it names. On a stacked branch, packages released by the branches under
--- it count as released: their PRs merge before this one can.
+-- it names. On a stacked branch, the packages of the branches under it
+-- are removed too: their PRs merge before this one can.
 rule ConsumeChangeset {
     when: c: Changeset.fully_released
     requires: c.status = pending

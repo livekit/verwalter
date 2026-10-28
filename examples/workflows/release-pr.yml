@@ -21,7 +21,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # tags decide which changesets are already released
+          fetch-depth: 0 # the commit that added a changeset gives its changelog line the PR and author
       - uses: lukasIO/verwalter@v0.6.0
         with:
           command: pr

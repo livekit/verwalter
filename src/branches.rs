@@ -38,8 +38,11 @@ pub fn create(repo: &Repo, plan: &[PlannedRelease], base: &str) -> Result<Vec<Br
 
         commit_branch(root, &start, &name, &format!("release: {} {}", release.package, release.to), |worktree| {
             apply::apply(worktree, &repo.config, &repo.packages, &repo.changesets, plan, release, true)?;
-            // Packages released by the branches under this one count as
-            // released: their PRs merge before this one can.
+            // Spec: ReleaseRemovesPackageFromChangeset / ConsumeChangeset.
+            // This package's line leaves every changeset that names it; the
+            // file goes with its last line. The branches under this one
+            // merge first, so their packages' lines go too (the changesets
+            // were read from the base, not from the parent branch).
             let mut released: Vec<&str> = vec![&release.package];
             let mut cur = release.stacked_on.as_deref();
             while let Some(p) = cur {
@@ -47,8 +50,15 @@ pub fn create(repo: &Repo, plan: &[PlannedRelease], base: &str) -> Result<Vec<Br
                 cur = plan.iter().find(|r| r.package == p).and_then(|r| r.stacked_on.as_deref());
             }
             for c in &repo.changesets {
-                if consumed_by(c, release, &released) {
-                    let _ = fs::remove_file(worktree.join(crate::repo::CHANGESET_DIR).join(&c.file));
+                let names: Vec<&str> = c.bumps.iter().map(|b| b.package_name.as_str()).collect();
+                if c.bumps.is_empty() || names.iter().any(|n| released.contains(n)) {
+                    let path = worktree.join(crate::repo::CHANGESET_DIR).join(&c.file);
+                    match c.without(&released) {
+                        Some(content) => fs::write(&path, content)?,
+                        None => {
+                            let _ = fs::remove_file(&path);
+                        }
+                    }
                 }
             }
             Ok(())
@@ -80,20 +90,4 @@ pub fn commit_branch(root: &Path, start: &str, branch: &str, message: &str, edit
     })();
     let _ = git::run(root, &["worktree", "remove", "--force", wt]);
     result
-}
-
-/// Spec: ConsumeChangeset. The file goes with the release of the last
-/// package it names, counting releases already tagged and releases lower
-/// in the same stack.
-fn consumed_by(changeset: &crate::changeset::Changeset, release: &PlannedRelease, released_in_stack: &[&str]) -> bool {
-    // An empty changeset (`changeset --empty`) bumps nothing; every release
-    // branch removes it, as `changeset version` does.
-    if changeset.bumps.is_empty() {
-        return true;
-    }
-    changeset.unreleased_for(&release.package).is_some()
-        && changeset
-            .bumps
-            .iter()
-            .all(|b| released_in_stack.contains(&b.package_name.as_str()) || changeset.released_packages.contains(&b.package_name))
 }

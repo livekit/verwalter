@@ -6,7 +6,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::{changeset::Changeset, config::Config, git, handler, plan::PackageState, Error};
+use crate::{changeset::Changeset, config::Config, handler, plan::PackageState, Error};
 
 pub const CONFIG_FILE: &str = "verwalter.toml";
 pub const CHANGESET_DIR: &str = ".changeset";
@@ -49,33 +49,8 @@ impl Repo {
             packages.push(PackageState { name: name.clone(), version, dependencies });
         }
 
-        let mut changesets = read_changesets(&root.join(CHANGESET_DIR))?;
-        if git::is_repo(root) {
-            mark_released(root, &config, &packages, &mut changesets);
-        }
+        let changesets = read_changesets(&root.join(CHANGESET_DIR))?;
         Ok(Self { root: root.to_path_buf(), config, packages, changesets })
-    }
-}
-
-/// Spec: Changeset.released_packages, derived from git rather than stored.
-/// A bump for package P is released when the tag of P's current version
-/// contains the commit that added the changeset file. No tag, or a tag
-/// elsewhere, means not released. A pre-release never counts: its
-/// changesets stay pending for the final release.
-fn mark_released(root: &Path, config: &Config, packages: &[PackageState], changesets: &mut [Changeset]) {
-    let tags: Vec<(&str, String)> = packages
-        .iter()
-        .filter(|p| !p.version.is_prerelease())
-        .map(|p| (p.name.as_str(), config.tag_for(&p.name, &p.version)))
-        .filter(|(_, tag)| git::ref_exists(root, tag))
-        .collect();
-    for c in changesets {
-        let Some(added) = git::added_in(root, "HEAD", &format!("{CHANGESET_DIR}/{}", c.file)) else { continue };
-        for (name, tag) in &tags {
-            if c.bumps.iter().any(|b| b.package_name == *name) && git::is_ancestor(root, &added, tag) {
-                c.released_packages.insert(name.to_string());
-            }
-        }
     }
 }
 
