@@ -10,7 +10,6 @@ on:
 
 permissions:
   contents: write
-  id-token: write # crates.io trusted publishing
 
 jobs:
   # Build first: nothing is written anywhere until the binaries exist.
@@ -55,22 +54,3 @@ jobs:
       - run: cargo run --quiet -- release --asset dist/verwalter-x86_64-unknown-linux-gnu.tar.gz --asset dist/verwalter-aarch64-unknown-linux-gnu.tar.gz --asset dist/verwalter-aarch64-apple-darwin.tar.gz
         env:
           GH_TOKEN: ${{ github.token }}
-
-  # Last, because it cannot be undone: publish the crate. Trusted
-  # publishing (no token) must be configured on crates.io for this
-  # repository and workflow; it cannot create a crate, so the first version
-  # was published by hand.
-  publish:
-    needs: release
-    runs-on: ubuntu-latest
-    environment: crates-io
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: main
-      - uses: dtolnay/rust-toolchain@stable
-      - id: auth
-        uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18 # v1.0.5
-      - run: cargo publish --locked
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}

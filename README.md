@@ -8,13 +8,15 @@ The behaviour is specified in [versioning.allium](versioning.allium).
 
 ## Install
 
+Download a binary from the
+[releases page](https://github.com/lukasIO/verwalter/releases), or build
+from source:
+
 ```bash
-cargo install verwalter
+cargo install --git https://github.com/lukasIO/verwalter --tag v0.5.0
 ```
 
-or, without a Rust toolchain, `cargo binstall verwalter` or the binaries on
-the [releases page](https://github.com/lukasIO/verwalter/releases). In GitHub
-Actions use the action below.
+In GitHub Actions use the action below.
 
 ## How it works
 
