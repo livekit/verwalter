@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.7.0
+
+### Minor Changes
+
+- A release branch removes its package's line from every changeset that names it and deletes the file with its last line, instead of inferring released packages from tags. A repository that adopts verwalter with tags behind its versions no longer loses its pending changesets on the first release, and a package with `release = "none"` is no longer bumped twice. A release run that races another on the same tag treats the other run's GitHub release as done. - [`fa8bfc2`](https://github.com/lukasIO/verwalter/commit/fa8bfc275d89450a5ce607c85bb0346db682d962) ([@lukasIO](https://github.com/lukasIO))
+
+### Patch Changes
+
+- A changeset whose commit has no GitHub user behind its email now still links the commit; the empty author field was trimmed away and the whole attribution dropped. - [`698366c`](https://github.com/lukasIO/verwalter/commit/698366cd779a5ad0f5bfac541ba15552521336cf) ([@lukasIO](https://github.com/lukasIO))
+- README and example workflows reference `lukasIO/verwalter@v0.6.0`. - [`a02f183`](https://github.com/lukasIO/verwalter/commit/a02f18376602ea74b1329f6458aa697c4c8dcbfd) ([@lukasIO](https://github.com/lukasIO))
+
 ## 0.6.0
 
 ### Minor Changes
