@@ -87,9 +87,11 @@ pub fn attribute(repo: &mut Repo, gh: Gh) {
     let root = repo.root.clone();
     for c in &mut repo.changesets {
         let Some(sha) = git::added_in(&root, "HEAD", &format!("{}/{}", crate::repo::CHANGESET_DIR, c.file)) else { continue };
-        let user = |login: &str| if login.is_empty() { String::new() } else { format!(" ([@{login}](https://github.com/{login}))") };
-        let pulls = gh(&["api", &format!("repos/{{owner}}/{{repo}}/commits/{sha}/pulls"), "--jq", r#".[0] | select(. != null) | "\(.number)\t\(.html_url)\t\(.user.login)""#]);
-        let mut commit = || gh(&["api", &format!("repos/{{owner}}/{{repo}}/commits/{sha}"), "--jq", r#""\(.html_url)\t\(.author.login // "")""#]);
+        // gh output is trimmed, so a missing login (commit email not on
+        // GitHub) is "-" rather than an empty last field.
+        let user = |login: &str| if login == "-" { String::new() } else { format!(" ([@{login}](https://github.com/{login}))") };
+        let pulls = gh(&["api", &format!("repos/{{owner}}/{{repo}}/commits/{sha}/pulls"), "--jq", r#".[0] | select(. != null) | "\(.number)\t\(.html_url)\t\(.user.login // "-")""#]);
+        let mut commit = || gh(&["api", &format!("repos/{{owner}}/{{repo}}/commits/{sha}"), "--jq", r#""\(.html_url)\t\(.author.login // "-")""#]);
         c.attribution = match pulls.ok().filter(|s| !s.is_empty()).map(|s| s.splitn(3, '\t').map(String::from).collect::<Vec<_>>()) {
             Some(parts) if parts.len() == 3 => Some(format!("- [#{}]({}){}", parts[0], parts[1], user(&parts[2]))),
             _ => match commit().ok().filter(|s| !s.is_empty()).map(|s| s.splitn(2, '\t').map(String::from).collect::<Vec<_>>()) {

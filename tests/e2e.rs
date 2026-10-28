@@ -631,7 +631,7 @@ fn changesets_are_attributed_to_their_pr_or_commit() {
         Ok(if path == format!("repos/{{owner}}/{{repo}}/commits/{pr_sha}/pulls") {
             "12\thttps://github.com/o/r/pull/12\tlukas".into()
         } else if path == format!("repos/{{owner}}/{{repo}}/commits/{push_sha}") {
-            format!("https://github.com/o/r/commit/{push_sha}\tbot")
+            format!("https://github.com/o/r/commit/{push_sha}\t-")
         } else {
             String::new()
         })
@@ -639,5 +639,6 @@ fn changesets_are_attributed_to_their_pr_or_commit() {
     verwalter::github::attribute(&mut repo, &mut gh);
     let by_file = |f: &str| repo.changesets.iter().find(|c| c.file == f).unwrap().attribution.clone().unwrap();
     assert_eq!(by_file("pr.md"), "- [#12](https://github.com/o/r/pull/12) ([@lukas](https://github.com/lukas))");
-    assert_eq!(by_file("push.md"), format!("- [`{}`](https://github.com/o/r/commit/{push_sha}) ([@bot](https://github.com/bot))", &push_sha[..7]));
+    // No GitHub user behind the commit email: link only, no author.
+    assert_eq!(by_file("push.md"), format!("- [`{}`](https://github.com/o/r/commit/{push_sha})", &push_sha[..7]));
 }
