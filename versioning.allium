@@ -390,6 +390,9 @@ rule TagRelease {
         release.tag = tag_for(release.package.tag_template, release.package.name, release.version)
 }
 
+-- Releases are tagged and created in dependency order, and a run stops
+-- at the first failure: a dependent is never released before its
+-- dependency.
 rule ResumeUntaggedReleases {
     when: ToolRunStarted(repository)
     for release in Releases where package.repository = repository and status = committed:
@@ -574,8 +577,10 @@ surface PreReleaseRequest {
         MaintainerRequestsPreRelease(maintainer, package, target_branch)
 }
 
--- After a merge the workflow receives every release the merge produced
--- and decides what to build and publish. The tool runs no publish step.
+-- After a merge the workflow receives every release the merge produced,
+-- dependencies before dependents, and decides what to build and publish
+-- in that order. If the publish of a dependency fails, its dependents are
+-- not published. The tool runs no publish step.
 surface ToolRun {
     facing workflow: Workflow
     context repository: Repository
@@ -595,6 +600,7 @@ surface WorkflowReleaseHandoff {
         release.version.is_prerelease
         release.tag when release.status = tagged | drafted
         release.status
+        release.package.dependencies
 
     provides:
         WorkflowPublishesRelease(workflow, release) when release.status = drafted

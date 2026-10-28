@@ -452,7 +452,7 @@ fn release_error_names_the_resume_command() {
     let repo = Repo::load(root).unwrap();
     let mut gh = |_: &[&str]| -> Result<String, verwalter::github::Error> { Ok(String::new()) };
     let err = verwalter::release::run(&repo, "origin", &verwalter::release::Options { assets: vec!["dist/x".into()], ..Default::default() }, &mut gh).unwrap_err().to_string();
-    assert!(err.contains("resume with: verwalter release --package livekit --asset dist/x"), "{err}");
+    assert!(err.contains("resume with: verwalter release --package livekit-protocol --asset dist/x"), "{err}");
 }
 
 #[test]
@@ -498,5 +498,80 @@ fn status_reports_state_and_next_step() {
     assert_eq!(lk.release_pr, Some(12));
     assert_eq!(lk.next_version.as_deref(), Some("0.7.1"));
     assert!(lk.next_step.contains("verwalter release --package livekit"), "untagged version comes first: {}", lk.next_step);
+    let _ = fs::remove_dir_all(&remote);
+}
+
+#[test]
+fn release_runs_in_dependency_order_and_stops_at_the_first_failure() {
+    let r = fixture("order");
+    let root = &r.0;
+    let remote = std::env::temp_dir().join(format!("verwalter-it-{}-order-remote.git", std::process::id()));
+    let _ = fs::remove_dir_all(&remote);
+    git(root, &["init", "-q", "--bare", remote.to_str().unwrap()]);
+    git(root, &["remote", "add", "origin", remote.to_str().unwrap()]);
+
+    // All three untagged: protocol first, then its dependents by name.
+    let repo = Repo::load(root).unwrap();
+    let calls = std::cell::RefCell::new(Vec::<String>::new());
+    let mut gh = |args: &[&str]| -> Result<String, verwalter::github::Error> {
+        calls.borrow_mut().push(args.join(" "));
+        match args {
+            ["release", "view", ..] => Err("not found".into()),
+            _ => Ok(String::new()),
+        }
+    };
+    let released = verwalter::release::run(&repo, "origin", &Default::default(), &mut gh).unwrap();
+    let order: Vec<&str> = released.iter().map(|r| r.package.as_str()).collect();
+    assert_eq!(order, ["livekit-protocol", "livekit", "livekit-api"]);
+    assert!(released[0].depends_on.is_empty());
+    assert_eq!(released[1].depends_on, ["livekit-protocol"]);
+    assert_eq!(released[2].depends_on, ["livekit-protocol"]);
+
+    // Fail at the dependency: nothing happens to the dependents.
+    let r2 = fixture("order-fail");
+    let root2 = &r2.0;
+    let repo2 = Repo::load(root2).unwrap();
+    let mut gh2 = |args: &[&str]| -> Result<String, verwalter::github::Error> {
+        match args {
+            ["release", "view", ..] => Err("not found".into()),
+            ["release", "create", tag, ..] if tag.starts_with("livekit-protocol") => Err("boom".into()),
+            _ => Ok(String::new()),
+        }
+    };
+    // Give it a remote so the tag push works and the gh failure is the first error.
+    let remote2 = std::env::temp_dir().join(format!("verwalter-it-{}-order-fail-remote.git", std::process::id()));
+    let _ = fs::remove_dir_all(&remote2);
+    git(root2, &["init", "-q", "--bare", remote2.to_str().unwrap()]);
+    git(root2, &["remote", "add", "origin", remote2.to_str().unwrap()]);
+    let err = verwalter::release::run(&repo2, "origin", &Default::default(), &mut gh2).unwrap_err().to_string();
+    assert!(err.starts_with("livekit-protocol: "), "{err}");
+    assert!(git(root2, &["tag", "--list", "livekit-protocol-*"]).contains("livekit-protocol-v0.3.1"), "the dependency was tagged before its release failed");
+    assert!(git(root2, &["tag", "--list", "livekit-api-*"]).is_empty(), "dependents untouched");
+    assert!(git(root2, &["tag", "--list", "livekit-v*"]).is_empty());
+    let _ = fs::remove_dir_all(&remote);
+    let _ = fs::remove_dir_all(&remote2);
+}
+
+#[test]
+fn named_package_is_reported_even_when_complete() {
+    let r = fixture("named");
+    let root = &r.0;
+    let remote = std::env::temp_dir().join(format!("verwalter-it-{}-named-remote.git", std::process::id()));
+    let _ = fs::remove_dir_all(&remote);
+    git(root, &["init", "-q", "--bare", remote.to_str().unwrap()]);
+    git(root, &["remote", "add", "origin", remote.to_str().unwrap()]);
+    git(root, &["tag", "livekit-api-v0.4.3"]);
+    git(root, &["push", "-q", "origin", "--tags"]);
+    let repo = Repo::load(root).unwrap();
+    let mut gh = |args: &[&str]| -> Result<String, verwalter::github::Error> {
+        match args {
+            ["release", "view", ..] => Ok(r#"{"isDraft":false,"assets":[{"name":"a"}]}"#.into()),
+            other => panic!("unexpected write {other:?}"),
+        }
+    };
+    let options = verwalter::release::Options { package: Some("livekit-api".into()), ..Default::default() };
+    let released = verwalter::release::run(&repo, "origin", &options, &mut gh).unwrap();
+    assert_eq!(released.len(), 1);
+    assert_eq!((released[0].package.as_str(), released[0].status), ("livekit-api", "published"));
     let _ = fs::remove_dir_all(&remote);
 }

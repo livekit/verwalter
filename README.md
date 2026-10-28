@@ -92,7 +92,7 @@ Add `--dry-run` to any command to see its steps first.
 | GitHub release creation | `verwalter release --package <name> [--asset <file>...]` creates it from the existing tag. |
 | Asset upload | `verwalter release --package <name> --asset <file>... [--publish]` uploads with `--clobber`. |
 | Draft never published | `verwalter release --package <name> --publish`. |
-| Registry publish | Re-run the publish job. The tag and release stay; the tool does not touch registries. |
+| Registry publish | Re-run the publish job. The tag and release stay; the tool does not touch registries. Dependents were not published (the publish runs in dependency order and stops at the first failure); the re-run picks them up, or dispatch the workflow with `package=<dependent>` once the dependency is on the registry. |
 | The commit itself is broken | `verwalter release --abandon <tag>` removes the release and the tag. Add a changeset and release the next version. |
 | Release PR missing or stale | `verwalter pr`. Branches are regenerated, PRs updated in place. |
 | rc PR missing or stale | `verwalter pre-release <name> --target <branch>`. |

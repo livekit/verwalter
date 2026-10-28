@@ -35,6 +35,24 @@ pub struct PlannedRelease {
     pub stacked_on: Option<String>,
 }
 
+/// Dependencies first: by depth in the dependency graph, then by name.
+/// Used for the stack and for the order releases are tagged, created and
+/// handed to the publish workflow.
+pub fn dependency_order<'a>(names: impl IntoIterator<Item = &'a str>, deps: &dyn Fn(&str) -> Vec<&'a str>) -> Vec<&'a str> {
+    fn depth<'a>(name: &'a str, deps: &dyn Fn(&str) -> Vec<&'a str>, memo: &mut BTreeMap<&'a str, usize>) -> usize {
+        if let Some(d) = memo.get(name) {
+            return *d;
+        }
+        let d = deps(name).into_iter().map(|d| depth(d, deps, memo) + 1).max().unwrap_or(0);
+        memo.insert(name, d);
+        d
+    }
+    let mut memo = BTreeMap::new();
+    let mut order: Vec<&str> = names.into_iter().collect();
+    order.sort_by_key(|n| (depth(n, deps, &mut memo), n.to_string()));
+    order
+}
+
 /// The release plan in stack order: a PR always comes after the PR it is
 /// stacked on.
 pub fn plan(packages: &[PackageState], changesets: &[Changeset], dependent_level: BumpLevel) -> Vec<PlannedRelease> {
@@ -71,17 +89,7 @@ pub fn plan(packages: &[PackageState], changesets: &[Changeset], dependent_level
     let planned_deps = |name: &str| -> Vec<&str> {
         by_name[name].dependencies.iter().map(String::as_str).filter(|d| planned.contains(d)).collect()
     };
-    fn depth<'a>(name: &'a str, deps: &dyn Fn(&str) -> Vec<&'a str>, memo: &mut BTreeMap<&'a str, usize>) -> usize {
-        if let Some(d) = memo.get(name) {
-            return *d;
-        }
-        let d = deps(name).into_iter().map(|d| depth(d, deps, memo) + 1).max().unwrap_or(0);
-        memo.insert(name, d);
-        d
-    }
-    let mut memo = BTreeMap::new();
-    let mut order: Vec<&str> = planned.iter().copied().collect();
-    order.sort_by_key(|n| (depth(n, &planned_deps, &mut memo), n.to_string()));
+    let order = dependency_order(planned.iter().copied(), &planned_deps);
     let position: BTreeMap<&str, usize> = order.iter().enumerate().map(|(i, n)| (*n, i)).collect();
 
     // Tree: stack on the planned dependency that comes last in the order.

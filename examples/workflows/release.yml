@@ -9,8 +9,15 @@ on:
     types: [closed]
     branches: [main]
   # Re-run by hand after a fix: `verwalter release` resumes from the
-  # current state (tags, releases, assets) and skips what is done.
+  # current state (tags, releases, assets) and skips what is done. With
+  # `package`, that package is reported again even when complete, so the
+  # publish job runs for it.
   workflow_dispatch:
+    inputs:
+      package:
+        description: Only this package; always reported to the publish job.
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -52,13 +59,19 @@ jobs:
           command: release
           # Attached to the GitHub release when it is created. Leave out
           # for packages with `draft = true`, whose assets are built later.
-          args: --asset dist/artifact.txt
+          args: --asset dist/artifact.txt ${{ inputs.package && format('--package {0}', inputs.package) || '' }}
 
+  # `releases` lists dependencies before dependents, each with
+  # `depends_on`. Publish in that order, one at a time, and stop at the
+  # first failure: a dependent must not reach the registry before its
+  # dependency, and not at all if the dependency failed.
   publish:
     needs: release
     if: needs.release.outputs.released == 'true'
     runs-on: ubuntu-latest
     strategy:
+      max-parallel: 1
+      fail-fast: true
       matrix:
         release: ${{ fromJSON(needs.release.outputs.releases) }}
     steps:
@@ -75,6 +88,8 @@ jobs:
       # cargo, pip and pub keep pre-releases away from default resolution
       # by the version alone. npm does not: an rc published without a
       # dist-tag becomes `latest`, so pass one.
+      # Registries index with a delay; a publish that resolves a dependency
+      # released seconds ago may need a retry (cargo publish does this).
       - name: Publish ${{ matrix.release.package }} ${{ matrix.release.version }}
         run: |
           echo "publish ${{ matrix.release.package }} ${{ matrix.release.version }}"

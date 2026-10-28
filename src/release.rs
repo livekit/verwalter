@@ -22,6 +22,9 @@ pub struct Released {
     pub prerelease: bool,
     /// committed | tagged | drafted | published, as in the spec.
     pub status: &'static str,
+    /// In-repo dependencies released in the same run. They come earlier in
+    /// the list and must be published to the registry before this one.
+    pub depends_on: Vec<String>,
 }
 
 /// What `run` may do beyond tagging and creating releases.
@@ -60,13 +63,24 @@ pub fn view(gh: Gh, tag: &str) -> Option<ReleaseState> {
 /// whose tag exists and whose GitHub release is published (or not wanted)
 /// is complete and not reported, unless assets were uploaded to it. A
 /// draft is reported on every run until it is published.
+///
+/// Packages are handled in dependency order and the run stops at the
+/// first failure, so a dependent is never released before its dependency.
+/// The report lists `depends_on` per entry so the publish step can keep
+/// that order too.
 pub fn run(repo: &Repo, remote: &str, options: &Options, gh: Gh) -> Result<Vec<Released>, Error> {
-    let mut out = Vec::new();
-    for p in &repo.packages {
-        if options.package.as_deref().is_some_and(|only| only != p.name) {
+    let deps_of = |name: &str| -> Vec<&str> {
+        repo.packages.iter().find(|p| p.name == name).map(|p| p.dependencies.iter().map(String::as_str).collect()).unwrap_or_default()
+    };
+    let order = crate::plan::dependency_order(repo.packages.iter().map(|p| p.name.as_str()), &deps_of);
+    let mut out: Vec<Released> = Vec::new();
+    for name in order {
+        if options.package.as_deref().is_some_and(|only| only != name) {
             continue;
         }
-        if let Some(released) = release_one(repo, remote, options, &p.name, &p.version, gh).map_err(|e| resume_hint(e, &p.name, options))? {
+        let version = &repo.packages.iter().find(|p| p.name == name).expect("ordered from packages").version;
+        if let Some(mut released) = release_one(repo, remote, options, name, version, gh).map_err(|e| resume_hint(e, name, options))? {
+            released.depends_on = deps_of(name).into_iter().filter(|d| out.iter().any(|r| r.package == *d)).map(String::from).collect();
             out.push(released);
         }
     }
@@ -144,7 +158,9 @@ fn release_one(repo: &Repo, remote: &str, options: &Options, name: &str, version
         }
     }
 
-    if !fresh && status != "drafted" {
+    // A package named with --package is always reported, so a manual run
+    // can hand one release to the publish step again.
+    if !fresh && status != "drafted" && options.package.is_none() {
         return Ok(None);
     }
     let changelog = fs::read_to_string(root.join(&package.changelog)).unwrap_or_default();
@@ -155,6 +171,7 @@ fn release_one(repo: &Repo, remote: &str, options: &Options, name: &str, version
         tag,
         prerelease: version.is_prerelease(),
         status,
+        depends_on: Vec::new(),
     }))
 }
 
