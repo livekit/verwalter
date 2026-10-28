@@ -219,7 +219,8 @@ changelog = "livekit-api/CHANGELOG.md"
 
         let written = apply(&repo.0, &config, &deps(), &changesets, &p, &p[0]).unwrap();
         let names: Vec<String> = written.iter().map(|w| w.strip_prefix(&repo.0).unwrap().display().to_string()).collect();
-        assert_eq!(names, ["livekit-protocol/Cargo.toml", "Cargo.toml", "Cargo.lock", "livekit-api/Cargo.toml", "livekit-protocol/CHANGELOG.md"]);
+        // livekit-api inherits the pin via `workspace = true`, so its manifest stays as is.
+        assert_eq!(names, ["livekit-protocol/Cargo.toml", "Cargo.toml", "Cargo.lock", "livekit-protocol/CHANGELOG.md"]);
 
         assert!(repo.read("livekit-protocol/Cargo.toml").contains("version = \"0.4.0\""));
         assert!(repo.read("Cargo.toml").contains("livekit-protocol = { version = \"0.4.0\""));
