@@ -107,7 +107,16 @@ pub fn sync(repo: &Repo, plan: &[PlannedRelease], branches: &[Branch], remote: &
         let pr = match open.iter().find(|pr| pr.head == branch.name) {
             Some(existing) => {
                 let n = existing.number.to_string();
-                gh(&["pr", "edit", &n, "--base", &branch.target, "--title", &title, "--body", &body, "--add-label", label])?;
+                gh(&["pr", "edit", &n, "--title", &title, "--body", &body, "--add-label", label])?;
+                // GitHub refuses a base change on a PR that is part of a
+                // stack; `gh stack link` below corrects the chain instead.
+                if existing.base != branch.target {
+                    if let Err(e) = gh(&["pr", "edit", &n, "--base", &branch.target]) {
+                        if !e.to_string().contains("part of a stack") {
+                            return Err(e);
+                        }
+                    }
+                }
                 PullRequest { number: existing.number, head: branch.name.clone(), base: branch.target.clone() }
             }
             None => {

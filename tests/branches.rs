@@ -157,7 +157,7 @@ fn pr_sync_pushes_and_creates_updates_closes() {
     let mut gh = |args: &[&str]| -> Result<String, verwalter::github::Error> {
         calls.push(args.join(" "));
         Ok(match args {
-            ["pr", "list", ..] => r#"[{"number":41,"headRefName":"release/livekit-api","baseRefName":"main"},{"number":99,"headRefName":"release/old-package","baseRefName":"main"}]"#.into(),
+            ["pr", "list", ..] => r#"[{"number":40,"headRefName":"release/livekit-protocol","baseRefName":"main"},{"number":41,"headRefName":"release/livekit-api","baseRefName":"main"},{"number":99,"headRefName":"release/old-package","baseRefName":"main"}]"#.into(),
             ["pr", "create", ..] => format!("https://github.com/livekit/x/pull/{}", 100 + calls.len()),
             _ => String::new(),
         })
@@ -172,15 +172,15 @@ fn pr_sync_pushes_and_creates_updates_closes() {
     }
 
     let heads: Vec<(u64, &str, &str)> = prs.iter().map(|p| (p.number, p.head.as_str(), p.base.as_str())).collect();
-    assert_eq!(heads[0].1, "release/livekit-protocol");
-    assert_eq!(heads[0].2, "main");
+    assert_eq!(heads[0], (40, "release/livekit-protocol", "main"));
+    assert!(!calls.iter().any(|c| c.starts_with("pr edit 40 --base")), "base unchanged: not touched (a stacked PR would refuse it)");
     assert_eq!(heads[1], (heads[1].0, "release/livekit", "release/livekit-protocol"));
     assert_eq!(heads[2], (41, "release/livekit-api", "release/livekit-protocol"), "existing PR kept its number, re-based onto the stack");
 
     assert!(calls[0].starts_with("label create release --force"));
-    assert!(calls.iter().filter(|c| c.starts_with("pr create")).count() == 2);
-    let edit = calls.iter().find(|c| c.starts_with("pr edit 41")).unwrap();
-    assert!(edit.contains("--base release/livekit-protocol"));
+    assert!(calls.iter().filter(|c| c.starts_with("pr create")).count() == 1);
+    assert!(calls.iter().any(|c| c == "pr edit 41 --base release/livekit-protocol"), "base changed in its own call");
+    let edit = calls.iter().find(|c| c.starts_with("pr edit 41 --title")).unwrap();
     assert!(edit.contains("Stacked on #"), "body carries the stack note");
     assert!(calls.iter().any(|c| c.starts_with("pr close 99")));
     assert!(!calls.iter().any(|c| c.starts_with("stack link")), "a tree is not linked as a GitHub stack");
