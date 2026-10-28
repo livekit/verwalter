@@ -39,7 +39,7 @@ In GitHub Actions use the action below.
    monorepo the PRs stack: the package others depend on is at the bottom, its
    dependents target its branch. Branches are regenerated on every run. A
    release branch also leaves a changeset for the dependents it pins but
-   does not release, so merging only the bottom PR keeps their bumps pending.
+   does not release. Merging only the bottom PR keeps their bumps pending.
 
 3. A maintainer merges a release PR. The workflow builds, then
    `verwalter release --asset <file>...` tags the version and creates the GitHub
