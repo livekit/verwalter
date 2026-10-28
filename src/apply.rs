@@ -24,8 +24,12 @@ fn is_lock_file(path: &str) -> bool {
 }
 
 /// Which packages depend on `package` (for the pins).
-fn dependents<'a>(packages: &'a [PackageState], package: &str) -> Vec<&'a str> {
-    packages.iter().filter(|p| p.dependencies.iter().any(|d| d == package)).map(|p| p.name.as_str()).collect()
+pub(crate) fn dependents<'a>(packages: &'a [PackageState], package: &str) -> Vec<&'a str> {
+    packages
+        .iter()
+        .filter(|p| p.dependencies.iter().any(|d| d == package))
+        .map(|p| p.name.as_str())
+        .collect()
 }
 
 /// Write one release into the working tree under `root`. `packages` is
@@ -42,26 +46,34 @@ pub fn apply(
     pins: bool,
 ) -> Result<Vec<PathBuf>, Error> {
     let name = release.package.as_str();
-    let package = config.packages.get(name).ok_or_else(|| format!("package {name} is not in verwalter.toml"))?;
+    let package = config
+        .packages
+        .get(name)
+        .ok_or_else(|| format!("package {name} is not in verwalter.toml"))?;
     let mut written = Vec::new();
 
-    let mut rewrite = |rel: &str, regex: Option<&str>, dependency: Option<&str>| -> Result<(), Error> {
-        let path = root.join(rel);
-        if !path.exists() {
-            return Ok(());
-        }
-        let before = fs::read_to_string(&path)?;
-        let after = handler::write_version(rel, regex, &before, dependency, &release.to)?;
-        if after != before {
-            fs::write(&path, after)?;
-            written.push(path);
-        }
-        Ok(())
-    };
+    let mut rewrite =
+        |rel: &str, regex: Option<&str>, dependency: Option<&str>| -> Result<(), Error> {
+            let path = root.join(rel);
+            if !path.exists() {
+                return Ok(());
+            }
+            let before = fs::read_to_string(&path)?;
+            let after = handler::write_version(rel, regex, &before, dependency, &release.to)?;
+            if after != before {
+                fs::write(&path, after)?;
+                written.push(path);
+            }
+            Ok(())
+        };
 
     // Own version. A lock file holds it under the package's own entry.
     for file in &package.versioned_files {
-        rewrite(file.path(), file.regex(), is_lock_file(file.path()).then_some(name))?;
+        rewrite(
+            file.path(),
+            file.regex(),
+            is_lock_file(file.path()).then_some(name),
+        )?;
     }
     // Pins: repo-level pin files, then every dependent's manifests.
     for file in &config.pin_files {
@@ -90,7 +102,11 @@ pub fn apply(
 /// changesets-github style: a heading per version, a section per bump
 /// level, one line per changeset, and an "Updated dependencies" line for
 /// bumps the tool added itself.
-pub fn render_entry(release: &PlannedRelease, changesets: &[Changeset], plan: &[PlannedRelease]) -> String {
+pub fn render_entry(
+    release: &PlannedRelease,
+    changesets: &[Changeset],
+    plan: &[PlannedRelease],
+) -> String {
     let mut out = format!("## {}\n", release.to);
     for (level, title) in [
         (BumpLevel::Major, "Major Changes"),
@@ -133,10 +149,18 @@ fn insert_entry(changelog: &str, entry: &str) -> String {
     let at = changelog
         .find("\n## ")
         .map(|i| i + 1)
-        .or_else(|| changelog.strip_prefix("# ").map(|_| changelog.find('\n').map_or(changelog.len(), |i| i + 1)))
+        .or_else(|| {
+            changelog
+                .strip_prefix("# ")
+                .map(|_| changelog.find('\n').map_or(changelog.len(), |i| i + 1))
+        })
         .unwrap_or(0);
     let (head, tail) = changelog.split_at(at);
-    let head = if head.is_empty() || head.ends_with("\n\n") { head.to_string() } else { format!("{}\n", head.trim_end_matches('\n')) + "\n" };
+    let head = if head.is_empty() || head.ends_with("\n\n") {
+        head.to_string()
+    } else {
+        format!("{}\n", head.trim_end_matches('\n')) + "\n"
+    };
     let sep = if tail.is_empty() { "" } else { "\n" };
     format!("{head}{entry}{sep}{tail}")
 }
@@ -164,7 +188,8 @@ changelog = "livekit-api/CHANGELOG.md"
 
     impl Repo {
         fn new(test: &str) -> Self {
-            let root = std::env::temp_dir().join(format!("verwalter-{}-{test}", std::process::id()));
+            let root =
+                std::env::temp_dir().join(format!("verwalter-{}-{test}", std::process::id()));
             let _ = fs::remove_dir_all(&root);
             let files = [
                 ("Cargo.toml", "[workspace]\nmembers = [\"livekit-protocol\", \"livekit-api\"]\n\n[workspace.dependencies]\nlivekit-protocol = { version = \"0.3.1\", path = \"livekit-protocol\" }\n"),
@@ -193,8 +218,16 @@ changelog = "livekit-api/CHANGELOG.md"
 
     fn state() -> Vec<PackageState> {
         vec![
-            PackageState { name: "livekit-protocol".into(), version: "0.3.1".parse().unwrap(), dependencies: vec![] },
-            PackageState { name: "livekit-api".into(), version: "0.4.3".parse().unwrap(), dependencies: vec!["livekit-protocol".into()] },
+            PackageState {
+                name: "livekit-protocol".into(),
+                version: "0.3.1".parse().unwrap(),
+                dependencies: vec![],
+            },
+            PackageState {
+                name: "livekit-api".into(),
+                version: "0.4.3".parse().unwrap(),
+                dependencies: vec!["livekit-protocol".into()],
+            },
         ]
     }
 
@@ -202,19 +235,41 @@ changelog = "livekit-api/CHANGELOG.md"
     fn protocol_release_updates_files_pins_and_changelog() {
         let repo = Repo::new("protocol");
         let config = Config::parse(CONFIG).unwrap();
-        let changesets = [Changeset::parse("a.md", "---\nlivekit-protocol: minor\n---\nNegotiated data channels\nwith details\n").unwrap()];
+        let changesets = [Changeset::parse(
+            "a.md",
+            "---\nlivekit-protocol: minor\n---\nNegotiated data channels\nwith details\n",
+        )
+        .unwrap()];
         let p = plan(&state(), &changesets, BumpLevel::Patch);
 
         let written = apply(&repo.0, &config, &state(), &changesets, &p, &p[0], true).unwrap();
-        let names: Vec<String> = written.iter().map(|w| w.strip_prefix(&repo.0).unwrap().display().to_string()).collect();
+        let names: Vec<String> = written
+            .iter()
+            .map(|w| w.strip_prefix(&repo.0).unwrap().display().to_string())
+            .collect();
         // livekit-api inherits the pin via `workspace = true`, so its manifest stays as is.
-        assert_eq!(names, ["livekit-protocol/Cargo.toml", "Cargo.toml", "Cargo.lock", "livekit-protocol/CHANGELOG.md"]);
+        assert_eq!(
+            names,
+            [
+                "livekit-protocol/Cargo.toml",
+                "Cargo.toml",
+                "Cargo.lock",
+                "livekit-protocol/CHANGELOG.md"
+            ]
+        );
 
-        assert!(repo.read("livekit-protocol/Cargo.toml").contains("version = \"0.4.0\""));
-        assert!(repo.read("Cargo.toml").contains("livekit-protocol = { version = \"0.4.0\""));
+        assert!(repo
+            .read("livekit-protocol/Cargo.toml")
+            .contains("version = \"0.4.0\""));
+        assert!(repo
+            .read("Cargo.toml")
+            .contains("livekit-protocol = { version = \"0.4.0\""));
         let lock = repo.read("Cargo.lock");
         assert!(lock.contains("name = \"livekit-protocol\"\nversion = \"0.4.0\""));
-        assert!(lock.contains("name = \"livekit-api\"\nversion = \"0.4.3\""), "api untouched in the lock");
+        assert!(
+            lock.contains("name = \"livekit-api\"\nversion = \"0.4.3\""),
+            "api untouched in the lock"
+        );
         assert_eq!(
             repo.read("livekit-protocol/CHANGELOG.md"),
             "# Changelog\n\n## 0.4.0\n\n### Minor Changes\n\n- Negotiated data channels\n  with details\n\n## 0.3.1\n\n### Patch Changes\n\n- old fix\n"
@@ -225,12 +280,15 @@ changelog = "livekit-api/CHANGELOG.md"
     fn dependent_release_writes_updated_dependencies_line() {
         let repo = Repo::new("api");
         let config = Config::parse(CONFIG).unwrap();
-        let changesets = [Changeset::parse("a.md", "---\nlivekit-protocol: minor\n---\nx\n").unwrap()];
+        let changesets =
+            [Changeset::parse("a.md", "---\nlivekit-protocol: minor\n---\nx\n").unwrap()];
         let p = plan(&state(), &changesets, BumpLevel::Patch);
         let api = p.iter().find(|r| r.package == "livekit-api").unwrap();
 
         apply(&repo.0, &config, &state(), &changesets, &p, api, true).unwrap();
-        assert!(repo.read("livekit-api/Cargo.toml").contains("version = \"0.4.4\""));
+        assert!(repo
+            .read("livekit-api/Cargo.toml")
+            .contains("version = \"0.4.4\""));
         // Created from scratch: no changelog existed.
         assert_eq!(
             repo.read("livekit-api/CHANGELOG.md"),
@@ -241,6 +299,9 @@ changelog = "livekit-api/CHANGELOG.md"
     #[test]
     fn insert_entry_handles_missing_heading() {
         assert_eq!(insert_entry("", "## 1.0.0\n"), "## 1.0.0\n");
-        assert_eq!(insert_entry("## 0.9.0\n", "## 1.0.0\n"), "## 1.0.0\n\n## 0.9.0\n");
+        assert_eq!(
+            insert_entry("## 0.9.0\n", "## 1.0.0\n"),
+            "## 1.0.0\n\n## 0.9.0\n"
+        );
     }
 }

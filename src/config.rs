@@ -177,7 +177,10 @@ release = "tag"
 
     #[test]
     fn config_overrides() {
-        let c = Config::parse(&format!("base_branch = \"next\"\ndependent_bump_level = \"minor\"\n{MONO}")).unwrap();
+        let c = Config::parse(&format!(
+            "base_branch = \"next\"\ndependent_bump_level = \"minor\"\n{MONO}"
+        ))
+        .unwrap();
         assert_eq!(c.base_branch, "next");
         assert_eq!(c.dependent_bump_level, BumpLevel::Minor);
     }
@@ -190,7 +193,13 @@ release = "tag"
         .unwrap();
         let files = &c.packages["sdk"].versioned_files;
         assert_eq!((files[0].path(), files[0].regex()), ("pubspec.yaml", None));
-        assert_eq!((files[1].path(), files[1].regex()), ("lib/src/livekit.dart", Some("version = '(?<version>[^']+)'")));
+        assert_eq!(
+            (files[1].path(), files[1].regex()),
+            (
+                "lib/src/livekit.dart",
+                Some("version = '(?<version>[^']+)'")
+            )
+        );
     }
 
     // obligation: entity-fields.Package (release_mode, release_as_draft, tag_template)
@@ -209,12 +218,26 @@ release = "tag"
     fn tag_template_defaults_depend_on_package_count() {
         let mono = Config::parse(MONO).unwrap();
         let v: crate::Version = "1.2.0".parse().unwrap();
-        assert_eq!(mono.tag_for("livekit-protocol", &v), "livekit-protocol-v1.2.0");
+        assert_eq!(
+            mono.tag_for("livekit-protocol", &v),
+            "livekit-protocol-v1.2.0"
+        );
         assert_eq!(mono.tag_for("livekit-ffi", &v), "ffi/v1.2.0");
 
-        assert_eq!(mono.version_from_tag("livekit-ffi", "ffi/v1.2.0-rc.1").unwrap().to_string(), "1.2.0-rc.1");
-        assert_eq!(mono.version_from_tag("livekit-ffi", "livekit-protocol-v1.2.0"), None);
-        assert_eq!(mono.version_from_tag("livekit-protocol", "livekit-protocol-v1.2.0"), Some(v.clone()));
+        assert_eq!(
+            mono.version_from_tag("livekit-ffi", "ffi/v1.2.0-rc.1")
+                .unwrap()
+                .to_string(),
+            "1.2.0-rc.1"
+        );
+        assert_eq!(
+            mono.version_from_tag("livekit-ffi", "livekit-protocol-v1.2.0"),
+            None
+        );
+        assert_eq!(
+            mono.version_from_tag("livekit-protocol", "livekit-protocol-v1.2.0"),
+            Some(v.clone())
+        );
 
         let single = Config::parse(SINGLE).unwrap();
         assert_eq!(single.tag_for("livekit-client", &v), "v1.2.0");

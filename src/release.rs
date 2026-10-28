@@ -54,7 +54,9 @@ pub struct Asset {
 }
 
 pub fn view(gh: Gh, tag: &str) -> Option<ReleaseState> {
-    gh(&["release", "view", tag, "--json", "isDraft,assets"]).ok().and_then(|j| serde_json::from_str(&j).ok())
+    gh(&["release", "view", tag, "--json", "isDraft,assets"])
+        .ok()
+        .and_then(|j| serde_json::from_str(&j).ok())
 }
 
 /// Finish every release that is not complete and report it. A package
@@ -68,17 +70,33 @@ pub fn view(gh: Gh, tag: &str) -> Option<ReleaseState> {
 /// that order too.
 pub fn run(repo: &Repo, remote: &str, options: &Options, gh: Gh) -> Result<Vec<Released>, Error> {
     let deps_of = |name: &str| -> Vec<&str> {
-        repo.packages.iter().find(|p| p.name == name).map(|p| p.dependencies.iter().map(String::as_str).collect()).unwrap_or_default()
+        repo.packages
+            .iter()
+            .find(|p| p.name == name)
+            .map(|p| p.dependencies.iter().map(String::as_str).collect())
+            .unwrap_or_default()
     };
-    let order = crate::plan::dependency_order(repo.packages.iter().map(|p| p.name.as_str()), &deps_of);
+    let order =
+        crate::plan::dependency_order(repo.packages.iter().map(|p| p.name.as_str()), &deps_of);
     let mut out: Vec<Released> = Vec::new();
     for name in order {
         if options.package.as_deref().is_some_and(|only| only != name) {
             continue;
         }
-        let version = &repo.packages.iter().find(|p| p.name == name).expect("ordered from packages").version;
-        if let Some(mut released) = release_one(repo, remote, options, name, version, gh).map_err(|e| resume_hint(e, name, options))? {
-            released.depends_on = deps_of(name).into_iter().filter(|d| out.iter().any(|r| r.package == *d)).map(String::from).collect();
+        let version = &repo
+            .packages
+            .iter()
+            .find(|p| p.name == name)
+            .expect("ordered from packages")
+            .version;
+        if let Some(mut released) = release_one(repo, remote, options, name, version, gh)
+            .map_err(|e| resume_hint(e, name, options))?
+        {
+            released.depends_on = deps_of(name)
+                .into_iter()
+                .filter(|d| out.iter().any(|r| r.package == *d))
+                .map(String::from)
+                .collect();
             out.push(released);
         }
     }
@@ -86,12 +104,23 @@ pub fn run(repo: &Repo, remote: &str, options: &Options, gh: Gh) -> Result<Vec<R
 }
 
 fn resume_hint(e: Error, package: &str, options: &Options) -> Error {
-    let assets: String = options.assets.iter().map(|a| format!(" --asset {a}")).collect();
+    let assets: String = options
+        .assets
+        .iter()
+        .map(|a| format!(" --asset {a}"))
+        .collect();
     let publish = if options.publish { " --publish" } else { "" };
     format!("{package}: {e}\nresume with: verwalter release --package {package}{assets}{publish}  (add --dry-run to see the steps first)").into()
 }
 
-fn release_one(repo: &Repo, remote: &str, options: &Options, name: &str, version: &crate::Version, gh: Gh) -> Result<Option<Released>, Error> {
+fn release_one(
+    repo: &Repo,
+    remote: &str,
+    options: &Options,
+    name: &str,
+    version: &crate::Version,
+    gh: Gh,
+) -> Result<Option<Released>, Error> {
     let root = repo.root.as_path();
     let package = &repo.config.packages[name];
     if package.release == ReleaseMode::None {
@@ -105,11 +134,23 @@ fn release_one(repo: &Repo, remote: &str, options: &Options, name: &str, version
     let mut fresh = false;
     if !git::ref_exists(root, &tag) {
         if remote_has_tag(root, remote, &tag)? {
-            git::run(root, &["fetch", "--quiet", remote, &format!("refs/tags/{tag}:refs/tags/{tag}")])?;
+            git::run(
+                root,
+                &[
+                    "fetch",
+                    "--quiet",
+                    remote,
+                    &format!("refs/tags/{tag}:refs/tags/{tag}"),
+                ],
+            )?;
         } else {
             let head = git::run(root, &["rev-parse", "HEAD"])?;
             git::write(root, dry_run, &["tag", &tag, &head])?;
-            git::write(root, dry_run, &["push", "--quiet", remote, &format!("refs/tags/{tag}")])?;
+            git::write(
+                root,
+                dry_run,
+                &["push", "--quiet", remote, &format!("refs/tags/{tag}")],
+            )?;
             fresh = true;
         }
     }
@@ -138,9 +179,21 @@ fn release_one(repo: &Repo, remote: &str, options: &Options, name: &str, version
                 status = if draft { "drafted" } else { "published" };
             }
             None => {
-                let notes = changelog_section(&fs::read_to_string(root.join(&package.changelog)).unwrap_or_default(), &version.to_string());
+                let notes = changelog_section(
+                    &fs::read_to_string(root.join(&package.changelog)).unwrap_or_default(),
+                    &version.to_string(),
+                );
                 let title = format!("{name} {version}");
-                let mut args = vec!["release", "create", &tag, "--title", &title, "--notes", &notes, "--verify-tag"];
+                let mut args = vec![
+                    "release",
+                    "create",
+                    &tag,
+                    "--title",
+                    &title,
+                    "--notes",
+                    &notes,
+                    "--verify-tag",
+                ];
                 args.extend(options.assets.iter().map(String::as_str));
                 let draft = package.draft && !options.publish;
                 if draft {
@@ -157,7 +210,13 @@ fn release_one(repo: &Repo, remote: &str, options: &Options, name: &str, version
                     // Two release runs at once (two PRs merged together):
                     // the other one won the create, which is as good as done.
                     Err(e) => match view(gh, &tag) {
-                        Some(existing) => status = if existing.draft { "drafted" } else { "published" },
+                        Some(existing) => {
+                            status = if existing.draft {
+                                "drafted"
+                            } else {
+                                "published"
+                            }
+                        }
                         None => return Err(e),
                     },
                 }
@@ -185,7 +244,13 @@ fn release_one(repo: &Repo, remote: &str, options: &Options, name: &str, version
 /// Spec: MaintainerAbandonsRelease. Removes the GitHub release and the
 /// tag, locally and on the remote, for a release whose commit turned out
 /// broken. Missing pieces are skipped; the registry is not touched.
-pub fn abandon(repo: &Repo, remote: &str, tag: &str, dry_run: bool, gh: Gh) -> Result<Vec<String>, Error> {
+pub fn abandon(
+    repo: &Repo,
+    remote: &str,
+    tag: &str,
+    dry_run: bool,
+    gh: Gh,
+) -> Result<Vec<String>, Error> {
     let root = repo.root.as_path();
     let mut removed = Vec::new();
     if gh(&["release", "view", tag, "--json", "tagName"]).is_ok() {
@@ -193,7 +258,17 @@ pub fn abandon(repo: &Repo, remote: &str, tag: &str, dry_run: bool, gh: Gh) -> R
         removed.push(format!("release {tag}"));
     }
     if remote_has_tag(root, remote, tag)? {
-        git::write(root, dry_run, &["push", "--quiet", "--delete", remote, &format!("refs/tags/{tag}")])?;
+        git::write(
+            root,
+            dry_run,
+            &[
+                "push",
+                "--quiet",
+                "--delete",
+                remote,
+                &format!("refs/tags/{tag}"),
+            ],
+        )?;
         removed.push(format!("{remote} tag {tag}"));
     }
     if git::ref_exists(root, tag) {
@@ -204,13 +279,19 @@ pub fn abandon(repo: &Repo, remote: &str, tag: &str, dry_run: bool, gh: Gh) -> R
 }
 
 fn remote_has_tag(root: &Path, remote: &str, tag: &str) -> Result<bool, Error> {
-    Ok(!git::run(root, &["ls-remote", "--tags", remote, &format!("refs/tags/{tag}")])?.is_empty())
+    Ok(!git::run(
+        root,
+        &["ls-remote", "--tags", remote, &format!("refs/tags/{tag}")],
+    )?
+    .is_empty())
 }
 
 /// The body under `## <version>` up to the next `## `.
 pub fn changelog_section(changelog: &str, version: &str) -> String {
     let heading = format!("## {version}");
-    let Some(start) = changelog.lines().position(|l| l.trim() == heading) else { return String::new() };
+    let Some(start) = changelog.lines().position(|l| l.trim() == heading) else {
+        return String::new();
+    };
     changelog
         .lines()
         .skip(start + 1)
@@ -230,7 +311,10 @@ fn previous_version(changelog: &str, version: &str) -> Option<String> {
         .lines()
         .skip_while(|l| l.trim() != heading)
         .skip(1)
-        .find_map(|l| l.strip_prefix("## ").map(|v| v.split_whitespace().next().unwrap_or("").to_string()))
+        .find_map(|l| {
+            l.strip_prefix("## ")
+                .map(|v| v.split_whitespace().next().unwrap_or("").to_string())
+        })
 }
 
 /// Spec: WorkflowReleaseHandoff. Appends to `$GITHUB_OUTPUT` when set.
@@ -238,7 +322,10 @@ pub fn write_outputs(released: &[Released]) -> Result<String, Error> {
     let json = serde_json::to_string(released)?;
     if let Ok(path) = std::env::var("GITHUB_OUTPUT") {
         use std::io::Write;
-        let mut f = fs::OpenOptions::new().append(true).create(true).open(path)?;
+        let mut f = fs::OpenOptions::new()
+            .append(true)
+            .create(true)
+            .open(path)?;
         writeln!(f, "released={}", !released.is_empty())?;
         writeln!(f, "releases={json}")?;
     }
@@ -253,8 +340,14 @@ mod tests {
 
     #[test]
     fn changelog_section_and_previous() {
-        assert_eq!(changelog_section(LOG, "0.4.0"), "### Minor Changes\n\n- a\n- b");
-        assert_eq!(changelog_section(LOG, "0.3.1"), "### Patch Changes\n\n- old");
+        assert_eq!(
+            changelog_section(LOG, "0.4.0"),
+            "### Minor Changes\n\n- a\n- b"
+        );
+        assert_eq!(
+            changelog_section(LOG, "0.3.1"),
+            "### Patch Changes\n\n- old"
+        );
         assert_eq!(changelog_section(LOG, "9.9.9"), "");
         assert_eq!(previous_version(LOG, "0.4.0").as_deref(), Some("0.3.1"));
         assert_eq!(previous_version(LOG, "0.3.1"), None);

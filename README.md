@@ -37,7 +37,9 @@ In GitHub Actions use the action below.
 2. On every push to `main`, `verwalter pr` opens or updates one release PR per
    package with pending changesets. Dependents get a `patch` bump. In a
    monorepo the PRs stack: the package others depend on is at the bottom, its
-   dependents target its branch. Branches are regenerated on every run.
+   dependents target its branch. Branches are regenerated on every run. A
+   release branch also leaves a changeset for the dependents it pins but
+   does not release, so merging only the bottom PR keeps their bumps pending.
 
 3. A maintainer merges a release PR. The workflow builds, then
    `verwalter release --asset <file>...` tags the version and creates the GitHub

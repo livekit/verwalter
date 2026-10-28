@@ -1,6 +1,12 @@
-use std::{path::{Path, PathBuf}, process::ExitCode};
+use std::{
+    path::{Path, PathBuf},
+    process::ExitCode,
+};
 
-use verwalter::{branches, check, github, plan::plan, prerelease, release, repo::Repo, status, version::BumpLevel, workspace, Error};
+use verwalter::{
+    branches, check, github, plan::plan, prerelease, release, repo::Repo, status,
+    version::BumpLevel, workspace, Error,
+};
 
 const USAGE: &str = "usage: verwalter <status|plan|branches|pr> [--config <file>] [--base <ref>] [--remote <name>] [--dry-run] [<checkout>]\n       verwalter release [--asset <file>]... [--package <name>] [--publish] [--abandon <tag>] [--remote <name>] [--dry-run] [<checkout>]\n       verwalter check --pr <number> [--config <file>] [--dry-run] [<checkout>]\n       verwalter pre-release <package> [--target <branch>] [--level major|minor|patch] [--remote <name>] [--dry-run] [<checkout>]";
 
@@ -16,7 +22,9 @@ fn main() -> ExitCode {
 
 fn run() -> Result<(), Error> {
     let mut args = std::env::args().skip(1);
-    let Some(command) = args.next() else { return Err(USAGE.into()) };
+    let Some(command) = args.next() else {
+        return Err(USAGE.into());
+    };
     let mut package = None;
     if command == "pre-release" {
         package = Some(args.next().ok_or(USAGE)?);
@@ -60,11 +68,23 @@ fn run() -> Result<(), Error> {
         Some(c) => Repo::load_with_config(&root, &c)?,
         None => Repo::load(&root)?,
     };
-    let releases = plan(&repo.packages, &repo.changesets, repo.config.dependent_bump_level);
+    let releases = plan(
+        &repo.packages,
+        &repo.changesets,
+        repo.config.dependent_bump_level,
+    );
     // Spec: WorkspaceConsistency. `check` fails on it, the others warn.
     let findings = workspace::check(&repo.root, &repo.config);
     if command == "check" && !findings.is_empty() {
-        return Err(format!("verwalter.toml does not match the workspace:\n  {}", findings.iter().map(ToString::to_string).collect::<Vec<_>>().join("\n  ")).into());
+        return Err(format!(
+            "verwalter.toml does not match the workspace:\n  {}",
+            findings
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("\n  ")
+        )
+        .into());
     }
     for f in &findings {
         eprintln!("warning: {f}");
@@ -98,9 +118,32 @@ fn run() -> Result<(), Error> {
             let rows = status::status(&repo, &remote, &mut gh)?;
             let w = rows.iter().map(|r| r.package.len()).max().unwrap_or(0);
             for r in &rows {
-                let pending = if r.pending_changesets.is_empty() { String::new() } else { format!("  {} pending", r.pending_changesets.len()) };
-                let prs = [r.release_pr.map(|n| format!("  PR #{n}")), r.rc_pr.map(|n| format!("  rc PR #{n}"))].into_iter().flatten().collect::<String>();
-                println!("{:w$}  {}  tag:{}  release:{}{}{}{}", r.package, r.version, r.tag_state, r.release, if r.assets > 0 { format!("({} assets)", r.assets) } else { String::new() }, pending, prs);
+                let pending = if r.pending_changesets.is_empty() {
+                    String::new()
+                } else {
+                    format!("  {} pending", r.pending_changesets.len())
+                };
+                let prs = [
+                    r.release_pr.map(|n| format!("  PR #{n}")),
+                    r.rc_pr.map(|n| format!("  rc PR #{n}")),
+                ]
+                .into_iter()
+                .flatten()
+                .collect::<String>();
+                println!(
+                    "{:w$}  {}  tag:{}  release:{}{}{}{}",
+                    r.package,
+                    r.version,
+                    r.tag_state,
+                    r.release,
+                    if r.assets > 0 {
+                        format!("({} assets)", r.assets)
+                    } else {
+                        String::new()
+                    },
+                    pending,
+                    prs
+                );
                 println!("{:w$}  -> {}", "", r.next_step);
             }
             Ok(())
@@ -112,14 +155,20 @@ fn run() -> Result<(), Error> {
             let mut gh = gh(&repo.root, &remote, dry_run);
             let (r, pr) = prerelease::open(&repo, &package, &target, level, &remote, dry_run, &mut gh)
                 .map_err(|e| format!("{e}\nresume with: verwalter pre-release {package} --target {target}  (the rc branch and PR are updated in place)"))?;
-            println!("#{}  {}  {} -> {}  on {}", pr.number, pr.head, r.from, r.to, pr.base);
+            println!(
+                "#{}  {}  {} -> {}  on {}",
+                pr.number, pr.head, r.from, r.to, pr.base
+            );
             Ok(())
         }
         "check" => {
             let pr = pr.ok_or(USAGE)?;
             let mut gh = gh(&repo.root, &remote, dry_run);
             let c = check::run(&repo.root, &repo.config, pr, &mut gh)?;
-            println!("{:?}: affected {:?}, covered {:?}", c.status, c.affected, c.covered);
+            println!(
+                "{:?}: affected {:?}, covered {:?}",
+                c.status, c.affected, c.covered
+            );
             if c.status == check::Status::Failed {
                 return Err(format!("changeset missing for: {}", c.missing().join(", ")).into());
             }
@@ -133,7 +182,12 @@ fn run() -> Result<(), Error> {
                 }
                 return Ok(());
             }
-            let options = release::Options { assets, package: only, publish, dry_run };
+            let options = release::Options {
+                assets,
+                package: only,
+                publish,
+                dry_run,
+            };
             let released = release::run(&repo, &remote, &options, &mut gh)?;
             for r in &released {
                 println!("{}  {}  {}  {}", r.package, r.version, r.tag, r.status);
@@ -158,18 +212,32 @@ fn gh<'a>(root: &'a Path, remote: &str, dry_run: bool) -> GhRunner<'a> {
 }
 
 fn print_plan(repo: &Repo, releases: &[verwalter::plan::PlannedRelease]) {
-    println!("{} packages, {} pending changesets, {} releases", repo.packages.len(), repo.changesets.len(), releases.len());
+    println!(
+        "{} packages, {} pending changesets, {} releases",
+        repo.packages.len(),
+        repo.changesets.len(),
+        releases.len()
+    );
     if releases.is_empty() {
         return;
     }
     let width = releases.iter().map(|r| r.package.len()).max().unwrap_or(0);
     for r in releases {
-        let on = r.stacked_on.as_deref().map_or(String::new(), |p| format!("  on {p}"));
+        let on = r
+            .stacked_on
+            .as_deref()
+            .map_or(String::new(), |p| format!("  on {p}"));
         let via = if r.changesets.is_empty() {
             format!("deps: {}", r.bumped_dependencies.join(", "))
         } else {
             r.changesets.join(", ")
         };
-        println!("{:width$}  {} -> {}  {:<5} {on}  [{via}]", r.package, r.from, r.to, format!("{:?}", r.level).to_lowercase());
+        println!(
+            "{:width$}  {} -> {}  {:<5} {on}  [{via}]",
+            r.package,
+            r.from,
+            r.to,
+            format!("{:?}", r.level).to_lowercase()
+        );
     }
 }

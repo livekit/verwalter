@@ -38,12 +38,23 @@ pub struct PlannedRelease {
 /// Dependencies first: by depth in the dependency graph, then by name.
 /// Used for the stack and for the order releases are tagged, created and
 /// handed to the publish workflow.
-pub fn dependency_order<'a>(names: impl IntoIterator<Item = &'a str>, deps: &dyn Fn(&str) -> Vec<&'a str>) -> Vec<&'a str> {
-    fn depth<'a>(name: &'a str, deps: &dyn Fn(&str) -> Vec<&'a str>, memo: &mut BTreeMap<&'a str, usize>) -> usize {
+pub fn dependency_order<'a>(
+    names: impl IntoIterator<Item = &'a str>,
+    deps: &dyn Fn(&str) -> Vec<&'a str>,
+) -> Vec<&'a str> {
+    fn depth<'a>(
+        name: &'a str,
+        deps: &dyn Fn(&str) -> Vec<&'a str>,
+        memo: &mut BTreeMap<&'a str, usize>,
+    ) -> usize {
         if let Some(d) = memo.get(name) {
             return *d;
         }
-        let d = deps(name).into_iter().map(|d| depth(d, deps, memo) + 1).max().unwrap_or(0);
+        let d = deps(name)
+            .into_iter()
+            .map(|d| depth(d, deps, memo) + 1)
+            .max()
+            .unwrap_or(0);
         memo.insert(name, d);
         d
     }
@@ -55,8 +66,13 @@ pub fn dependency_order<'a>(names: impl IntoIterator<Item = &'a str>, deps: &dyn
 
 /// The release plan in stack order: a PR always comes after the PR it is
 /// stacked on.
-pub fn plan(packages: &[PackageState], changesets: &[Changeset], dependent_level: BumpLevel) -> Vec<PlannedRelease> {
-    let by_name: BTreeMap<&str, &PackageState> = packages.iter().map(|p| (p.name.as_str(), p)).collect();
+pub fn plan(
+    packages: &[PackageState],
+    changesets: &[Changeset],
+    dependent_level: BumpLevel,
+) -> Vec<PlannedRelease> {
+    let by_name: BTreeMap<&str, &PackageState> =
+        packages.iter().map(|p| (p.name.as_str(), p)).collect();
 
     // Direct bumps: the highest unreleased level named in a changeset.
     let mut level: BTreeMap<&str, BumpLevel> = BTreeMap::new();
@@ -64,7 +80,10 @@ pub fn plan(packages: &[PackageState], changesets: &[Changeset], dependent_level
     for p in packages {
         for c in changesets {
             if let Some(l) = c.unreleased_for(&p.name) {
-                level.entry(&p.name).and_modify(|cur| *cur = (*cur).max(l)).or_insert(l);
+                level
+                    .entry(&p.name)
+                    .and_modify(|cur| *cur = (*cur).max(l))
+                    .or_insert(l);
                 files.entry(&p.name).or_default().push(c.file.clone());
             }
         }
@@ -75,7 +94,10 @@ pub fn plan(packages: &[PackageState], changesets: &[Changeset], dependent_level
     loop {
         let before = level.len();
         for p in packages {
-            if p.dependencies.iter().any(|d| level.contains_key(d.as_str())) {
+            if p.dependencies
+                .iter()
+                .any(|d| level.contains_key(d.as_str()))
+            {
                 level.entry(&p.name).or_insert(dependent_level);
             }
         }
@@ -87,7 +109,12 @@ pub fn plan(packages: &[PackageState], changesets: &[Changeset], dependent_level
     // Stack order: dependency depth among planned packages, then name.
     let planned: BTreeSet<&str> = level.keys().copied().collect();
     let planned_deps = |name: &str| -> Vec<&str> {
-        by_name[name].dependencies.iter().map(String::as_str).filter(|d| planned.contains(d)).collect()
+        by_name[name]
+            .dependencies
+            .iter()
+            .map(String::as_str)
+            .filter(|d| planned.contains(d))
+            .collect()
     };
     let order = dependency_order(planned.iter().copied(), &planned_deps);
     let position: BTreeMap<&str, usize> = order.iter().enumerate().map(|(i, n)| (*n, i)).collect();
@@ -103,8 +130,10 @@ pub fn plan(packages: &[PackageState], changesets: &[Changeset], dependent_level
         }
         seen
     };
-    let mut parent: BTreeMap<&str, Option<&str>> =
-        order.iter().map(|n| (*n, closure(n).into_iter().max_by_key(|d| position[d]))).collect();
+    let mut parent: BTreeMap<&str, Option<&str>> = order
+        .iter()
+        .map(|n| (*n, closure(n).into_iter().max_by_key(|d| position[d])))
+        .collect();
 
     // A diamond (two unrelated planned dependencies) is not a tree. The
     // connected component holding it becomes one chain in stack order,
@@ -128,14 +157,27 @@ pub fn plan(packages: &[PackageState], changesets: &[Changeset], dependent_level
         while let Some(n) = todo.pop() {
             if component.insert(n, id).is_none() {
                 todo.extend(planned_deps(n));
-                todo.extend(order.iter().copied().filter(|m| planned_deps(m).contains(&n)));
+                todo.extend(
+                    order
+                        .iter()
+                        .copied()
+                        .filter(|m| planned_deps(m).contains(&n)),
+                );
             }
         }
     }
     let covered = |n: &&&str| closure(n).is_subset(&ancestors(n, &parent));
-    let diamonds: BTreeSet<usize> = order.iter().filter(|n| !covered(n)).map(|n| component[*n]).collect();
+    let diamonds: BTreeSet<usize> = order
+        .iter()
+        .filter(|n| !covered(n))
+        .map(|n| component[*n])
+        .collect();
     for id in diamonds {
-        let members: Vec<&str> = order.iter().copied().filter(|n| component[n] == id).collect();
+        let members: Vec<&str> = order
+            .iter()
+            .copied()
+            .filter(|n| component[n] == id)
+            .collect();
         for (i, n) in members.iter().enumerate() {
             parent.insert(n, i.checked_sub(1).map(|j| members[j]));
         }
@@ -163,7 +205,11 @@ mod tests {
     use super::*;
 
     fn pkg(name: &str, version: &str, deps: &[&str]) -> PackageState {
-        PackageState { name: name.into(), version: version.parse().unwrap(), dependencies: deps.iter().map(|d| d.to_string()).collect() }
+        PackageState {
+            name: name.into(),
+            version: version.parse().unwrap(),
+            dependencies: deps.iter().map(|d| d.to_string()).collect(),
+        }
     }
 
     fn cs(file: &str, bumps: &[(&str, BumpLevel)]) -> Changeset {
@@ -183,7 +229,9 @@ mod tests {
     }
 
     fn stack(plan: &[PlannedRelease]) -> Vec<(&str, Option<&str>)> {
-        plan.iter().map(|r| (r.package.as_str(), r.stacked_on.as_deref())).collect()
+        plan.iter()
+            .map(|r| (r.package.as_str(), r.stacked_on.as_deref()))
+            .collect()
     }
 
     #[test]
@@ -198,7 +246,11 @@ mod tests {
         let p = plan(&python_sdks(), &changesets, BumpLevel::Patch);
         assert_eq!(
             stack(&p),
-            vec![("livekit-protocol", None), ("livekit", Some("livekit-protocol")), ("livekit-api", Some("livekit-protocol"))]
+            vec![
+                ("livekit-protocol", None),
+                ("livekit", Some("livekit-protocol")),
+                ("livekit-api", Some("livekit-protocol"))
+            ]
         );
         assert_eq!(p[0].to.to_string(), "1.2.0");
         assert_eq!(p[0].changesets, vec!["a.md"]);
@@ -210,7 +262,13 @@ mod tests {
 
     #[test]
     fn direct_bump_wins_over_dependent_level() {
-        let changesets = [cs("a.md", &[("livekit-protocol", BumpLevel::Patch), ("livekit", BumpLevel::Major)])];
+        let changesets = [cs(
+            "a.md",
+            &[
+                ("livekit-protocol", BumpLevel::Patch),
+                ("livekit", BumpLevel::Major),
+            ],
+        )];
         let p = plan(&python_sdks(), &changesets, BumpLevel::Patch);
         let rtc = p.iter().find(|r| r.package == "livekit").unwrap();
         assert_eq!(rtc.to.to_string(), "2.0.0");
@@ -228,9 +286,19 @@ mod tests {
     // A package whose line a release branch removed is no longer planned.
     #[test]
     fn removed_lines_are_not_planned() {
-        let c = cs("a.md", &[("livekit-protocol", BumpLevel::Patch), ("livekit", BumpLevel::Major)]);
+        let c = cs(
+            "a.md",
+            &[
+                ("livekit-protocol", BumpLevel::Patch),
+                ("livekit", BumpLevel::Major),
+            ],
+        );
         let c = Changeset::parse("a.md", &c.without(&["livekit-protocol"]).unwrap()).unwrap();
-        let packages = vec![pkg("livekit-protocol", "0.3.0", &[]), pkg("livekit", "0.7.0", &["livekit-protocol"]), pkg("livekit-ffi", "0.12.0", &["livekit"])];
+        let packages = vec![
+            pkg("livekit-protocol", "0.3.0", &[]),
+            pkg("livekit", "0.7.0", &["livekit-protocol"]),
+            pkg("livekit-ffi", "0.12.0", &["livekit"]),
+        ];
         let p = plan(&packages, &[c], BumpLevel::Patch);
         let names: Vec<&str> = p.iter().map(|r| r.package.as_str()).collect();
         assert_eq!(names, ["livekit", "livekit-ffi"]);
@@ -246,9 +314,19 @@ mod tests {
             pkg("c", "1.0.0", &["a", "b"]),
             pkg("z", "1.0.0", &[]),
         ];
-        let changesets = [cs("x.md", &[("a", BumpLevel::Patch), ("b", BumpLevel::Patch), ("z", BumpLevel::Patch)])];
+        let changesets = [cs(
+            "x.md",
+            &[
+                ("a", BumpLevel::Patch),
+                ("b", BumpLevel::Patch),
+                ("z", BumpLevel::Patch),
+            ],
+        )];
         let p = plan(&packages, &changesets, BumpLevel::Patch);
-        assert_eq!(stack(&p), vec![("a", None), ("b", Some("a")), ("z", None), ("c", Some("b"))]);
+        assert_eq!(
+            stack(&p),
+            vec![("a", None), ("b", Some("a")), ("z", None), ("c", Some("b"))]
+        );
     }
 
     #[test]

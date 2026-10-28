@@ -5,7 +5,7 @@
 
 use std::{fs, path::Path};
 
-use crate::{apply, git, plan::PlannedRelease, repo::Repo, Error};
+use crate::{apply, changeset::Changeset, git, plan::PlannedRelease, repo::Repo, Error};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Branch {
@@ -28,6 +28,9 @@ pub fn create(repo: &Repo, plan: &[PlannedRelease], base: &str) -> Result<Vec<Br
         return Err(format!("base ref {base} does not exist").into());
     }
     let mut branches = Vec::new();
+    // Changesets the branches below wrote for their dependents, by the
+    // package that wrote them (spec: ReleaseLeavesChangesetForDependents).
+    let mut left_behind: Vec<(String, Changeset)> = Vec::new();
 
     for release in plan {
         let name = branch_name(repo, &release.package);
@@ -36,46 +39,121 @@ pub fn create(repo: &Repo, plan: &[PlannedRelease], base: &str) -> Result<Vec<Br
             None => (base.to_string(), repo.config.base_branch.clone()),
         };
 
-        commit_branch(root, &start, &name, &format!("release: {} {}", release.package, release.to), |worktree| {
-            apply::apply(worktree, &repo.config, &repo.packages, &repo.changesets, plan, release, true)?;
-            // Spec: ReleaseRemovesPackageFromChangeset / ConsumeChangeset.
-            // This package's line leaves every changeset that names it; the
-            // file goes with its last line. The branches under this one
-            // merge first, so their packages' lines go too (the changesets
-            // were read from the base, not from the parent branch).
-            let mut released: Vec<&str> = vec![&release.package];
-            let mut cur = release.stacked_on.as_deref();
-            while let Some(p) = cur {
-                released.push(p);
-                cur = plan.iter().find(|r| r.package == p).and_then(|r| r.stacked_on.as_deref());
-            }
-            for c in &repo.changesets {
-                let names: Vec<&str> = c.bumps.iter().map(|b| b.package_name.as_str()).collect();
-                if c.bumps.is_empty() || names.iter().any(|n| released.contains(n)) {
-                    let path = worktree.join(crate::repo::CHANGESET_DIR).join(&c.file);
-                    match c.without(&released) {
-                        Some(content) => fs::write(&path, content)?,
-                        None => {
-                            let _ = fs::remove_file(&path);
+        // This package and the ones under it in the stack: their PRs merge
+        // before this one can.
+        let mut released: Vec<&str> = vec![&release.package];
+        let mut cur = release.stacked_on.as_deref();
+        while let Some(p) = cur {
+            released.push(p);
+            cur = plan
+                .iter()
+                .find(|r| r.package == p)
+                .and_then(|r| r.stacked_on.as_deref());
+        }
+        let inherited: Vec<&Changeset> = left_behind
+            .iter()
+            .filter(|(by, _)| released.contains(&by.as_str()))
+            .map(|(_, c)| c)
+            .collect();
+        let mut left = None;
+
+        commit_branch(
+            root,
+            &start,
+            &name,
+            &format!("release: {} {}", release.package, release.to),
+            |worktree| {
+                apply::apply(
+                    worktree,
+                    &repo.config,
+                    &repo.packages,
+                    &repo.changesets,
+                    plan,
+                    release,
+                    true,
+                )?;
+                let dir = worktree.join(crate::repo::CHANGESET_DIR);
+                // Spec: ReleaseRemovesPackageFromChangeset / ConsumeChangeset.
+                // This package's line leaves every changeset that names it; the
+                // file goes with its last line. The branches under this one
+                // merge first, so their packages' lines go too (the changesets
+                // were read from the base, not from the parent branch).
+                for c in repo.changesets.iter().chain(inherited) {
+                    let names: Vec<&str> =
+                        c.bumps.iter().map(|b| b.package_name.as_str()).collect();
+                    if c.bumps.is_empty() || names.iter().any(|n| released.contains(n)) {
+                        let path = dir.join(&c.file);
+                        match c.without(&released) {
+                            Some(content) => fs::write(&path, content)?,
+                            None => {
+                                let _ = fs::remove_file(&path);
+                            }
                         }
                     }
                 }
-            }
-            Ok(())
-        })?;
+                // Spec: ReleaseLeavesChangesetForDependents. The pins in every
+                // dependent moved, so a dependent this PR does not release
+                // needs a release of its own. Merging only the bottom of a
+                // stack must not lose that bump with the consumed changeset.
+                let waiting: Vec<&str> = apply::dependents(&repo.packages, &release.package)
+                    .into_iter()
+                    .filter(|d| !released.contains(d))
+                    .collect();
+                if !waiting.is_empty() {
+                    let lines: Vec<String> = waiting
+                        .iter()
+                        .map(|d| format!("\"{d}\": {}", repo.config.dependent_bump_level))
+                        .collect();
+                    let content = format!(
+                        "---\n{}\n---\nUpdated dependencies: {}@{}\n",
+                        lines.join("\n"),
+                        release.package,
+                        release.to
+                    );
+                    let file = format!("{}-{}-dependents.md", slug(&release.package), release.to);
+                    fs::create_dir_all(&dir)?;
+                    fs::write(dir.join(&file), &content)?;
+                    left = Some(Changeset::parse(&file, &content)?);
+                }
+                Ok(())
+            },
+        )?;
 
-        branches.push(Branch { package: release.package.clone(), name, target });
+        if let Some(c) = left {
+            left_behind.push((release.package.clone(), c));
+        }
+        branches.push(Branch {
+            package: release.package.clone(),
+            name,
+            target,
+        });
     }
     Ok(branches)
 }
 
+/// `@play/core` -> `play-core`: a package name as a file name.
+fn slug(name: &str) -> String {
+    name.trim_start_matches('@')
+        .replace(|c: char| !c.is_ascii_alphanumeric() && c != '.', "-")
+}
+
 /// Run `edit` in a throwaway worktree at `start`, commit everything, and
 /// point `branch` at the result. The user's checkout is never touched.
-pub fn commit_branch(root: &Path, start: &str, branch: &str, message: &str, edit: impl FnOnce(&Path) -> Result<(), Error>) -> Result<(), Error> {
+pub fn commit_branch(
+    root: &Path,
+    start: &str,
+    branch: &str,
+    message: &str,
+    edit: impl FnOnce(&Path) -> Result<(), Error>,
+) -> Result<(), Error> {
     // The counter keeps parallel runs in one process apart (tests).
     static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let worktree = std::env::temp_dir().join(format!("verwalter-{}-{n}-{}", std::process::id(), branch.replace('/', "_")));
+    let worktree = std::env::temp_dir().join(format!(
+        "verwalter-{}-{n}-{}",
+        std::process::id(),
+        branch.replace('/', "_")
+    ));
     let _ = fs::remove_dir_all(&worktree);
     let wt = worktree.to_str().ok_or("temp dir is not valid UTF-8")?;
     git::run(root, &["worktree", "add", "--detach", "--force", wt, start])?;

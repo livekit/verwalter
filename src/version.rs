@@ -13,10 +13,23 @@ pub enum BumpLevel {
     Major,
 }
 
+/// The changeset spelling: `patch`, `minor`, `major`.
+impl std::fmt::Display for BumpLevel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Patch => "patch",
+            Self::Minor => "minor",
+            Self::Major => "major",
+        })
+    }
+}
+
 fn components(v: &Version) -> (u64, u64, u64) {
     // StableVersion keeps its fields private; Display is the public view.
     let s = v.stable_component().to_string();
-    let mut it = s.split('.').map(|n| n.parse::<u64>().expect("stable version components"));
+    let mut it = s
+        .split('.')
+        .map(|n| n.parse::<u64>().expect("stable version components"));
     (it.next().unwrap(), it.next().unwrap(), it.next().unwrap())
 }
 
@@ -47,16 +60,34 @@ pub fn next_version(current: &Version, pending: impl IntoIterator<Item = BumpLev
 /// from the latest stable release so that a later `major` request from an
 /// rc moves to the next major, not to the rc's own target. `label` is
 /// `rc` by default (config: prerelease_label).
-pub fn next_prerelease_version(current: &Version, released: &[Version], level: BumpLevel, label: &str) -> Version {
-    let base = released.iter().filter(|r| !r.is_prerelease()).max().cloned().unwrap_or_else(|| {
-        if current.is_prerelease() { Version::Stable(current.stable_component()) } else { current.clone() }
-    });
+pub fn next_prerelease_version(
+    current: &Version,
+    released: &[Version],
+    level: BumpLevel,
+    label: &str,
+) -> Version {
+    let base = released
+        .iter()
+        .filter(|r| !r.is_prerelease())
+        .max()
+        .cloned()
+        .unwrap_or_else(|| {
+            if current.is_prerelease() {
+                Version::Stable(current.stable_component())
+            } else {
+                current.clone()
+            }
+        });
     let target = bump(&base, level).stable_component();
     let marker = format!("-{label}.");
     let last = released
         .iter()
         .filter(|r| r.is_prerelease() && r.stable_component() == target)
-        .filter_map(|r| r.to_string().rsplit_once(marker.as_str()).and_then(|(_, n)| n.parse::<u64>().ok()))
+        .filter_map(|r| {
+            r.to_string()
+                .rsplit_once(marker.as_str())
+                .and_then(|(_, n)| n.parse::<u64>().ok())
+        })
         .max();
     Version::Pre(PreVersion {
         stable_component: target,
@@ -107,7 +138,10 @@ mod tests {
     #[test]
     fn next_version_takes_highest_pending_level() {
         let h = v("1.5.1");
-        assert_eq!(next_version(&h, [BumpLevel::Patch, BumpLevel::Minor, BumpLevel::Patch]), v("1.6.0"));
+        assert_eq!(
+            next_version(&h, [BumpLevel::Patch, BumpLevel::Minor, BumpLevel::Patch]),
+            v("1.6.0")
+        );
         assert_eq!(next_version(&h, []), v("1.5.1"));
     }
 
@@ -117,16 +151,28 @@ mod tests {
     fn prerelease_sequence() {
         let released = [v("1.5.1")];
         let h = v("1.5.1");
-        assert_eq!(next_prerelease_version(&h, &released, BumpLevel::Minor, "rc"), v("1.6.0-rc.1"));
+        assert_eq!(
+            next_prerelease_version(&h, &released, BumpLevel::Minor, "rc"),
+            v("1.6.0-rc.1")
+        );
 
         // rc.1 merged and tagged: files say 1.6.0-rc.1, tags know 1.5.1 too.
         let released = [v("1.5.1"), v("1.6.0-rc.1")];
         let h = v("1.6.0-rc.1");
-        assert_eq!(next_prerelease_version(&h, &released, BumpLevel::Minor, "rc"), v("1.6.0-rc.2"));
+        assert_eq!(
+            next_prerelease_version(&h, &released, BumpLevel::Minor, "rc"),
+            v("1.6.0-rc.2")
+        );
         // A different target version restarts at rc.1.
-        assert_eq!(next_prerelease_version(&h, &released, BumpLevel::Major, "rc"), v("2.0.0-rc.1"));
+        assert_eq!(
+            next_prerelease_version(&h, &released, BumpLevel::Major, "rc"),
+            v("2.0.0-rc.1")
+        );
         // Another label starts its own sequence.
-        assert_eq!(next_prerelease_version(&h, &released, BumpLevel::Minor, "beta"), v("1.6.0-beta.1"));
+        assert_eq!(
+            next_prerelease_version(&h, &released, BumpLevel::Minor, "beta"),
+            v("1.6.0-beta.1")
+        );
 
         // The final release from the rc: the pending minor resolves to 1.6.0.
         assert_eq!(next_version(&h, [BumpLevel::Minor]), v("1.6.0"));

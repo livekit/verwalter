@@ -370,6 +370,26 @@ rule ReleaseRemovesPackageFromChangeset {
         ensures: c.bumps = c.bumps.filter(b => b.package_name != rpr.package.name)
 }
 
+-- A release moves the pins in every dependent, so a dependent that is not
+-- released with it has changed without a pending bump. The release leaves
+-- a changeset behind that names those dependents at the dependent bump
+-- level, so merging only the bottom of a stack does not lose their bumps.
+-- The dependents' own releases consume it like any other changeset.
+rule ReleaseLeavesChangesetForDependents {
+    when: PackageReleased(rpr)
+    requires: rpr.kind = release
+    let waiting = rpr.package.dependents.filter(d => not rpr.absorbed.any(r => r.package = d))
+    requires: waiting.count > 0
+    ensures:
+        Changeset.created(
+            repository: rpr.package.repository,
+            file: ".changeset/" + rpr.package.name + "-" + rpr.to_version + "-dependents.md",
+            bumps: waiting.map(d => Bump(package_name: d.name, level: config.dependent_bump_level)),
+            summary: "Updated dependencies: " + rpr.package.name + "@" + rpr.to_version,
+            status: pending
+        )
+}
+
 -- The changeset file is deleted by the PR that releases the last package
 -- it names. On a stacked branch, the packages of the branches under it
 -- are removed too: their PRs merge before this one can.

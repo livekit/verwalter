@@ -2,7 +2,6 @@
 //! YAML front matter with one `package: level` line per bump (package names
 //! quoted or unquoted), markdown body as the summary.
 
-
 use crate::version::BumpLevel;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -34,7 +33,10 @@ impl std::fmt::Display for ParseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::MissingFrontMatter => write!(f, "changeset has no `---` front matter"),
-            Self::BadBumpLine(n, l) => write!(f, "line {n}: expected `package: major|minor|patch`, got `{l}`"),
+            Self::BadBumpLine(n, l) => write!(
+                f,
+                "line {n}: expected `package: major|minor|patch`, got `{l}`"
+            ),
         }
     }
 }
@@ -47,7 +49,9 @@ impl Changeset {
             .trim_start()
             .strip_prefix("---")
             .ok_or(ParseError::MissingFrontMatter)?;
-        let (front, body) = rest.split_once("\n---").ok_or(ParseError::MissingFrontMatter)?;
+        let (front, body) = rest
+            .split_once("\n---")
+            .ok_or(ParseError::MissingFrontMatter)?;
 
         let mut bumps = Vec::new();
         for (i, line) in front.lines().enumerate() {
@@ -66,16 +70,28 @@ impl Changeset {
                 "patch" => BumpLevel::Patch,
                 _ => return Err(bad()),
             };
-            bumps.push(Bump { package_name: name.to_string(), level });
+            bumps.push(Bump {
+                package_name: name.to_string(),
+                level,
+            });
         }
 
-        Ok(Self { file: file.to_string(), bumps, summary: body.trim().to_string(), content: content.to_string(), attribution: None })
+        Ok(Self {
+            file: file.to_string(),
+            bumps,
+            summary: body.trim().to_string(),
+            content: content.to_string(),
+            attribution: None,
+        })
     }
 
     /// Spec: Changeset.unreleased_for(name). A released package is no
     /// longer in the front matter, so this is a plain lookup.
     pub fn unreleased_for(&self, package: &str) -> Option<BumpLevel> {
-        self.bumps.iter().find(|b| b.package_name == package).map(|b| b.level)
+        self.bumps
+            .iter()
+            .find(|b| b.package_name == package)
+            .map(|b| b.level)
     }
 
     /// Spec: ReleaseRemovesPackageFromChangeset / ConsumeChangeset. The file
@@ -88,7 +104,10 @@ impl Changeset {
             .lines()
             .filter(|l| !l.trim().is_empty())
             .filter(|l| {
-                let name = l.split_once(':').map(|(n, _)| n.trim().trim_matches(|c| c == '"' || c == '\'')).unwrap_or("");
+                let name = l
+                    .split_once(':')
+                    .map(|(n, _)| n.trim().trim_matches(|c| c == '"' || c == '\''))
+                    .unwrap_or("");
                 !packages.contains(&name)
             })
             .collect();
@@ -108,13 +127,20 @@ mod tests {
 Add RPC round-trip latency metric.
 "#;
 
-    const UNQUOTED: &str = "---\nlivekit-protocol: minor\nlivekit-api: patch\n---\nNegotiated data channels\n";
+    const UNQUOTED: &str =
+        "---\nlivekit-protocol: minor\nlivekit-api: patch\n---\nNegotiated data channels\n";
 
     // obligation: entity-fields.Changeset, value-equality.Bump
     #[test]
     fn parses_quoted_and_unquoted_package_names() {
         let q = Changeset::parse("a.md", QUOTED).unwrap();
-        assert_eq!(q.bumps[0], Bump { package_name: "@livekit/rtc-node".into(), level: BumpLevel::Minor });
+        assert_eq!(
+            q.bumps[0],
+            Bump {
+                package_name: "@livekit/rtc-node".into(),
+                level: BumpLevel::Minor
+            }
+        );
         assert_eq!(q.bumps[1].package_name, "livekit-server-sdk");
         assert_eq!(q.summary, "Add RPC round-trip latency metric.");
 
@@ -130,20 +156,34 @@ Add RPC round-trip latency metric.
     fn without_drops_bump_lines_and_the_file_at_the_end() {
         let c = Changeset::parse("b.md", UNQUOTED).unwrap();
         let rest = c.without(&["livekit-protocol"]).unwrap();
-        assert_eq!(rest, "---\nlivekit-api: patch\n---\nNegotiated data channels\n");
+        assert_eq!(
+            rest,
+            "---\nlivekit-api: patch\n---\nNegotiated data channels\n"
+        );
         let c = Changeset::parse("b.md", &rest).unwrap();
         assert_eq!(c.unreleased_for("livekit-protocol"), None);
         assert_eq!(c.unreleased_for("livekit-api"), Some(BumpLevel::Patch));
         assert_eq!(c.without(&["livekit-api"]), None);
 
         let q = Changeset::parse("a.md", QUOTED).unwrap();
-        assert_eq!(q.without(&["livekit-server-sdk"]).unwrap(), "---\n\"@livekit/rtc-node\": minor\n---\n\nAdd RPC round-trip latency metric.\n");
-        assert_eq!(Changeset::parse("e.md", "---\n---\nempty\n").unwrap().without(&[]), None);
+        assert_eq!(
+            q.without(&["livekit-server-sdk"]).unwrap(),
+            "---\n\"@livekit/rtc-node\": minor\n---\n\nAdd RPC round-trip latency metric.\n"
+        );
+        assert_eq!(
+            Changeset::parse("e.md", "---\n---\nempty\n")
+                .unwrap()
+                .without(&[]),
+            None
+        );
     }
 
     #[test]
     fn rejects_bad_input() {
-        assert_eq!(Changeset::parse("x.md", "no front matter"), Err(ParseError::MissingFrontMatter));
+        assert_eq!(
+            Changeset::parse("x.md", "no front matter"),
+            Err(ParseError::MissingFrontMatter)
+        );
         let err = Changeset::parse("x.md", "---\nlivekit: huge\n---\n").unwrap_err();
         assert!(matches!(err, ParseError::BadBumpLine(2, _)));
     }

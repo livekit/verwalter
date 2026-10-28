@@ -34,32 +34,62 @@ pub fn members(root: &Path) -> Vec<Member> {
 }
 
 fn cargo_members(root: &Path) -> Vec<Member> {
-    let Ok(doc) = fs::read_to_string(root.join("Cargo.toml")).and_then(|s| s.parse::<toml::Value>().map_err(std::io::Error::other)) else { return Vec::new() };
+    let Ok(doc) = fs::read_to_string(root.join("Cargo.toml"))
+        .and_then(|s| s.parse::<toml::Value>().map_err(std::io::Error::other))
+    else {
+        return Vec::new();
+    };
     let mut dirs: Vec<PathBuf> = Vec::new();
     if let Some(ws) = doc.get("workspace") {
-        let patterns = |key: &str| ws.get(key).and_then(|m| m.as_array()).map(|a| a.iter().filter_map(|p| p.as_str().map(String::from)).collect::<Vec<_>>()).unwrap_or_default();
-        let excluded: Vec<PathBuf> = patterns("exclude").iter().flat_map(|p| expand(root, p)).collect();
-        dirs.extend(patterns("members").iter().flat_map(|p| expand(root, p)).filter(|d| !excluded.contains(d)));
+        let patterns = |key: &str| {
+            ws.get(key)
+                .and_then(|m| m.as_array())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|p| p.as_str().map(String::from))
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default()
+        };
+        let excluded: Vec<PathBuf> = patterns("exclude")
+            .iter()
+            .flat_map(|p| expand(root, p))
+            .collect();
+        dirs.extend(
+            patterns("members")
+                .iter()
+                .flat_map(|p| expand(root, p))
+                .filter(|d| !excluded.contains(d)),
+        );
     }
     if doc.get("package").is_some() {
         dirs.push(root.to_path_buf());
     }
     dirs.into_iter()
         .filter_map(|dir| {
-            let manifest = fs::read_to_string(dir.join("Cargo.toml")).ok()?.parse::<toml::Value>().ok()?;
+            let manifest = fs::read_to_string(dir.join("Cargo.toml"))
+                .ok()?
+                .parse::<toml::Value>()
+                .ok()?;
             let package = manifest.get("package")?;
             let private = match package.get("publish") {
                 Some(toml::Value::Boolean(b)) => !b,
                 Some(toml::Value::Array(registries)) => registries.is_empty(),
                 _ => false,
             };
-            Some(Member { name: package.get("name")?.as_str()?.to_string(), path: relative(root, &dir), private })
+            Some(Member {
+                name: package.get("name")?.as_str()?.to_string(),
+                path: relative(root, &dir),
+                private,
+            })
         })
         .collect()
 }
 
 fn pnpm_members(root: &Path) -> Vec<Member> {
-    let Ok(yaml) = fs::read_to_string(root.join("pnpm-workspace.yaml")) else { return Vec::new() };
+    let Ok(yaml) = fs::read_to_string(root.join("pnpm-workspace.yaml")) else {
+        return Vec::new();
+    };
     // ponytail: the `packages:` list is read line by line; a YAML parser
     // is not worth a dependency for a list of globs.
     let mut patterns = Vec::new();
@@ -82,41 +112,69 @@ fn pnpm_members(root: &Path) -> Vec<Member> {
         .iter()
         .flat_map(|p| expand(root, p))
         .filter_map(|dir| {
-            let json: serde_json::Value = serde_json::from_str(&fs::read_to_string(dir.join("package.json")).ok()?).ok()?;
+            let json: serde_json::Value =
+                serde_json::from_str(&fs::read_to_string(dir.join("package.json")).ok()?).ok()?;
             Some(Member {
                 name: json.get("name")?.as_str()?.to_string(),
                 path: relative(root, &dir),
-                private: json.get("private").and_then(|p| p.as_bool()).unwrap_or(false),
+                private: json
+                    .get("private")
+                    .and_then(|p| p.as_bool())
+                    .unwrap_or(false),
             })
         })
         .collect()
 }
 
 fn uv_members(root: &Path) -> Vec<Member> {
-    let Ok(doc) = fs::read_to_string(root.join("pyproject.toml")).and_then(|s| s.parse::<toml::Value>().map_err(std::io::Error::other)) else { return Vec::new() };
+    let Ok(doc) = fs::read_to_string(root.join("pyproject.toml"))
+        .and_then(|s| s.parse::<toml::Value>().map_err(std::io::Error::other))
+    else {
+        return Vec::new();
+    };
     let mut dirs: Vec<PathBuf> = doc
         .get("tool")
         .and_then(|t| t.get("uv"))
         .and_then(|u| u.get("workspace"))
         .and_then(|w| w.get("members"))
         .and_then(|m| m.as_array())
-        .map(|a| a.iter().filter_map(|p| p.as_str()).flat_map(|p| expand(root, p)).collect())
+        .map(|a| {
+            a.iter()
+                .filter_map(|p| p.as_str())
+                .flat_map(|p| expand(root, p))
+                .collect()
+        })
         .unwrap_or_default();
     if doc.get("project").is_some() {
         dirs.push(root.to_path_buf());
     }
     dirs.into_iter()
         .filter_map(|dir| {
-            let manifest = fs::read_to_string(dir.join("pyproject.toml")).ok()?.parse::<toml::Value>().ok()?;
+            let manifest = fs::read_to_string(dir.join("pyproject.toml"))
+                .ok()?
+                .parse::<toml::Value>()
+                .ok()?;
             let project = manifest.get("project")?;
             // `Private :: Do Not Upload` is refused by PyPI; `[tool.uv]
             // package = false` marks a uv workspace root that is no package.
             let private = project
                 .get("classifiers")
                 .and_then(|c| c.as_array())
-                .is_some_and(|c| c.iter().any(|v| v.as_str() == Some("Private :: Do Not Upload")))
-                || manifest.get("tool").and_then(|t| t.get("uv")).and_then(|u| u.get("package")).and_then(|p| p.as_bool()) == Some(false);
-            Some(Member { name: project.get("name")?.as_str()?.to_string(), path: relative(root, &dir), private })
+                .is_some_and(|c| {
+                    c.iter()
+                        .any(|v| v.as_str() == Some("Private :: Do Not Upload"))
+                })
+                || manifest
+                    .get("tool")
+                    .and_then(|t| t.get("uv"))
+                    .and_then(|u| u.get("package"))
+                    .and_then(|p| p.as_bool())
+                    == Some(false);
+            Some(Member {
+                name: project.get("name")?.as_str()?.to_string(),
+                path: relative(root, &dir),
+                private,
+            })
         })
         .collect()
 }
@@ -130,7 +188,11 @@ fn expand(root: &Path, pattern: &str) -> Vec<PathBuf> {
         for dir in &dirs {
             if component == "*" || component == "**" {
                 if let Ok(entries) = fs::read_dir(dir) {
-                    let mut found: Vec<PathBuf> = entries.flatten().map(|e| e.path()).filter(|p| p.is_dir()).collect();
+                    let mut found: Vec<PathBuf> = entries
+                        .flatten()
+                        .map(|e| e.path())
+                        .filter(|p| p.is_dir())
+                        .collect();
                     found.sort();
                     next.extend(found);
                 }
@@ -147,8 +209,16 @@ fn expand(root: &Path, pattern: &str) -> Vec<PathBuf> {
 }
 
 fn relative(root: &Path, dir: &Path) -> String {
-    let rel = dir.strip_prefix(root).unwrap_or(dir).to_string_lossy().replace('\\', "/");
-    if rel.is_empty() { ".".to_string() } else { rel }
+    let rel = dir
+        .strip_prefix(root)
+        .unwrap_or(dir)
+        .to_string_lossy()
+        .replace('\\', "/");
+    if rel.is_empty() {
+        ".".to_string()
+    } else {
+        rel
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -171,28 +241,51 @@ impl std::fmt::Display for Finding {
 /// Spec: WorkspaceConsistency. `ignore` entries match a member's name or
 /// its path; a trailing `*` matches a prefix (`examples/*`).
 pub fn check(root: &Path, config: &Config) -> Vec<Finding> {
-    let ignored = |m: &Member| config.ignore.iter().any(|pat| matches(pat, &m.name) || matches(pat, &m.path));
+    let ignored = |m: &Member| {
+        config
+            .ignore
+            .iter()
+            .any(|pat| matches(pat, &m.name) || matches(pat, &m.path))
+    };
     let mut findings = Vec::new();
     let members = members(root);
     // Names compare normalised (PEP 503 style): a pyproject `play_py_ext`
     // is the configured `play-py-ext`.
-    let configured = |name: &str| config.packages.keys().any(|k| normalise(k) == normalise(name));
+    let configured = |name: &str| {
+        config
+            .packages
+            .keys()
+            .any(|k| normalise(k) == normalise(name))
+    };
     for m in &members {
         if !m.private && !configured(&m.name) && !ignored(m) {
-            findings.push(Finding::Unmanaged { name: m.name.clone(), path: m.path.clone() });
+            findings.push(Finding::Unmanaged {
+                name: m.name.clone(),
+                path: m.path.clone(),
+            });
         }
     }
     for (name, p) in &config.packages {
-        let present = root.join(&p.path).is_dir() && p.versioned_files.iter().any(|f| root.join(f.path()).is_file());
+        let present = root.join(&p.path).is_dir()
+            && p.versioned_files
+                .iter()
+                .any(|f| root.join(f.path()).is_file());
         if !present {
-            findings.push(Finding::Missing { name: name.clone(), path: p.path.clone() });
+            findings.push(Finding::Missing {
+                name: name.clone(),
+                path: p.path.clone(),
+            });
         }
     }
     findings
 }
 
 fn normalise(name: &str) -> String {
-    name.to_lowercase().split(['-', '_', '.']).filter(|s| !s.is_empty()).collect::<Vec<_>>().join("-")
+    name.to_lowercase()
+        .split(['-', '_', '.'])
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join("-")
 }
 
 fn matches(pattern: &str, value: &str) -> bool {
@@ -230,45 +323,132 @@ mod tests {
     fn cargo_workspace_members_and_publish_flag() {
         let t = tmp("cargo");
         write(&t.0, "Cargo.toml", "[workspace]\nmembers = [\"crates/*\", \"tools/bench\"]\nexclude = [\"crates/skipped\"]\n");
-        write(&t.0, "crates/a/Cargo.toml", "[package]\nname = \"a\"\nversion = \"0.1.0\"\n");
-        write(&t.0, "crates/b/Cargo.toml", "[package]\nname = \"b\"\nversion = \"0.1.0\"\npublish = false\n");
-        write(&t.0, "crates/skipped/Cargo.toml", "[package]\nname = \"skipped\"\nversion = \"0.1.0\"\n");
-        write(&t.0, "tools/bench/Cargo.toml", "[package]\nname = \"bench\"\nversion = \"0.1.0\"\npublish = []\n");
+        write(
+            &t.0,
+            "crates/a/Cargo.toml",
+            "[package]\nname = \"a\"\nversion = \"0.1.0\"\n",
+        );
+        write(
+            &t.0,
+            "crates/b/Cargo.toml",
+            "[package]\nname = \"b\"\nversion = \"0.1.0\"\npublish = false\n",
+        );
+        write(
+            &t.0,
+            "crates/skipped/Cargo.toml",
+            "[package]\nname = \"skipped\"\nversion = \"0.1.0\"\n",
+        );
+        write(
+            &t.0,
+            "tools/bench/Cargo.toml",
+            "[package]\nname = \"bench\"\nversion = \"0.1.0\"\npublish = []\n",
+        );
         let m = members(&t.0);
-        let v: Vec<(&str, &str, bool)> = m.iter().map(|m| (m.name.as_str(), m.path.as_str(), m.private)).collect();
-        assert_eq!(v, [("a", "crates/a", false), ("b", "crates/b", true), ("bench", "tools/bench", true)]);
+        let v: Vec<(&str, &str, bool)> = m
+            .iter()
+            .map(|m| (m.name.as_str(), m.path.as_str(), m.private))
+            .collect();
+        assert_eq!(
+            v,
+            [
+                ("a", "crates/a", false),
+                ("b", "crates/b", true),
+                ("bench", "tools/bench", true)
+            ]
+        );
     }
 
     #[test]
     fn pnpm_and_uv_members() {
         let t = tmp("pnpm-uv");
-        write(&t.0, "pnpm-workspace.yaml", "packages:\n  - 'packages/*'\n  - 'examples/*'\n\ncatalog:\n  x: 1\n");
-        write(&t.0, "packages/sdk/package.json", r#"{"name": "sdk", "version": "1.0.0"}"#);
-        write(&t.0, "examples/demo/package.json", r#"{"name": "demo", "private": true}"#);
+        write(
+            &t.0,
+            "pnpm-workspace.yaml",
+            "packages:\n  - 'packages/*'\n  - 'examples/*'\n\ncatalog:\n  x: 1\n",
+        );
+        write(
+            &t.0,
+            "packages/sdk/package.json",
+            r#"{"name": "sdk", "version": "1.0.0"}"#,
+        );
+        write(
+            &t.0,
+            "examples/demo/package.json",
+            r#"{"name": "demo", "private": true}"#,
+        );
         write(&t.0, "pyproject.toml", "[project]\nname = \"root\"\nversion = \"0\"\n[tool.uv]\npackage = false\n[tool.uv.workspace]\nmembers = [\"py/*\"]\n");
-        write(&t.0, "py/lib/pyproject.toml", "[project]\nname = \"lib\"\nversion = \"1.0.0\"\n");
+        write(
+            &t.0,
+            "py/lib/pyproject.toml",
+            "[project]\nname = \"lib\"\nversion = \"1.0.0\"\n",
+        );
         write(&t.0, "py/internal/pyproject.toml", "[project]\nname = \"internal\"\nversion = \"1.0.0\"\nclassifiers = [\"Private :: Do Not Upload\"]\n");
         let m = members(&t.0);
         let v: Vec<(&str, bool)> = m.iter().map(|m| (m.name.as_str(), m.private)).collect();
-        assert_eq!(v, [("root", true), ("demo", true), ("sdk", false), ("internal", true), ("lib", false)]);
+        assert_eq!(
+            v,
+            [
+                ("root", true),
+                ("demo", true),
+                ("sdk", false),
+                ("internal", true),
+                ("lib", false)
+            ]
+        );
     }
 
     #[test]
     fn findings_and_ignore() {
         let t = tmp("findings");
-        write(&t.0, "Cargo.toml", "[workspace]\nmembers = [\"crates/*\", \"examples/*\"]\n");
-        write(&t.0, "crates/a/Cargo.toml", "[package]\nname = \"a\"\nversion = \"0.1.0\"\n");
-        write(&t.0, "crates/b/Cargo.toml", "[package]\nname = \"b\"\nversion = \"0.1.0\"\n");
-        write(&t.0, "crates/c/Cargo.toml", "[package]\nname = \"c\"\nversion = \"0.1.0\"\npublish = false\n");
-        write(&t.0, "examples/e/Cargo.toml", "[package]\nname = \"e\"\nversion = \"0.1.0\"\n");
+        write(
+            &t.0,
+            "Cargo.toml",
+            "[workspace]\nmembers = [\"crates/*\", \"examples/*\"]\n",
+        );
+        write(
+            &t.0,
+            "crates/a/Cargo.toml",
+            "[package]\nname = \"a\"\nversion = \"0.1.0\"\n",
+        );
+        write(
+            &t.0,
+            "crates/b/Cargo.toml",
+            "[package]\nname = \"b\"\nversion = \"0.1.0\"\n",
+        );
+        write(
+            &t.0,
+            "crates/c/Cargo.toml",
+            "[package]\nname = \"c\"\nversion = \"0.1.0\"\npublish = false\n",
+        );
+        write(
+            &t.0,
+            "examples/e/Cargo.toml",
+            "[package]\nname = \"e\"\nversion = \"0.1.0\"\n",
+        );
         let config = Config::parse(
             "ignore = [\"examples/*\", \"b\"]\n[packages.a]\npath = \"crates/a\"\nversioned_files = [\"crates/a/Cargo.toml\"]\nchangelog = \"crates/a/CHANGELOG.md\"\n[packages.c]\npath = \"crates/c\"\nversioned_files = [\"crates/c/Cargo.toml\"]\nchangelog = \"x\"\n[packages.gone]\npath = \"crates/gone\"\nversioned_files = [\"crates/gone/Cargo.toml\"]\nchangelog = \"x\"\n",
         )
         .unwrap();
         let f = check(&t.0, &config);
-        assert_eq!(f, [Finding::Missing { name: "gone".into(), path: "crates/gone".into() }], "b and examples/* are ignored; a and the private c are fine");
+        assert_eq!(
+            f,
+            [Finding::Missing {
+                name: "gone".into(),
+                path: "crates/gone".into()
+            }],
+            "b and examples/* are ignored; a and the private c are fine"
+        );
         let open = Config::parse("[packages.a]\npath = \"crates/a\"\nversioned_files = [\"crates/a/Cargo.toml\"]\nchangelog = \"x\"\n").unwrap();
-        let unmanaged: Vec<String> = check(&t.0, &open).iter().filter_map(|f| if let Finding::Unmanaged { name, .. } = f { Some(name.clone()) } else { None }).collect();
+        let unmanaged: Vec<String> = check(&t.0, &open)
+            .iter()
+            .filter_map(|f| {
+                if let Finding::Unmanaged { name, .. } = f {
+                    Some(name.clone())
+                } else {
+                    None
+                }
+            })
+            .collect();
         assert_eq!(unmanaged, ["b", "e"]);
     }
 }
