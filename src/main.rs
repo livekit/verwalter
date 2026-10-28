@@ -1,8 +1,8 @@
 use std::{path::PathBuf, process::ExitCode};
 
-use verwalter::{branches, check, github, plan::plan, prerelease, release, repo::Repo, version::BumpLevel};
+use verwalter::{branches, check, github, plan::plan, prerelease, release, repo::Repo, status, version::BumpLevel};
 
-const USAGE: &str = "usage: verwalter <plan|branches|pr> [--config <file>] [--base <ref>] [--remote <name>] [--dry-run] [<checkout>]\n       verwalter release [--asset <file>]... [--abandon <tag>] [--remote <name>] [--dry-run] [<checkout>]\n       verwalter check --pr <number> [--config <file>] [--dry-run] [<checkout>]\n       verwalter pre-release <package> [--target <branch>] [--level major|minor|patch] [--remote <name>] [--dry-run] [<checkout>]";
+const USAGE: &str = "usage: verwalter <status|plan|branches|pr> [--config <file>] [--base <ref>] [--remote <name>] [--dry-run] [<checkout>]\n       verwalter release [--asset <file>]... [--package <name>] [--publish] [--abandon <tag>] [--remote <name>] [--dry-run] [<checkout>]\n       verwalter check --pr <number> [--config <file>] [--dry-run] [<checkout>]\n       verwalter pre-release <package> [--target <branch>] [--level major|minor|patch] [--remote <name>] [--dry-run] [<checkout>]";
 
 fn main() -> ExitCode {
     match run() {
@@ -30,6 +30,8 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut target: Option<String> = None;
     let mut level: Option<BumpLevel> = None;
     let mut dry_run = false;
+    let mut only: Option<String> = None;
+    let mut publish = false;
     let mut root = PathBuf::from(".");
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -41,6 +43,8 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             "--abandon" => abandon = Some(args.next().ok_or(USAGE)?),
             "--target" => target = Some(args.next().ok_or(USAGE)?),
             "--dry-run" => dry_run = true,
+            "--package" => only = Some(args.next().ok_or(USAGE)?),
+            "--publish" => publish = true,
             "--level" => {
                 level = Some(match args.next().ok_or(USAGE)?.as_str() {
                     "major" => BumpLevel::Major,
@@ -73,8 +77,22 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             let base = base.unwrap_or_else(|| format!("{remote}/{}", repo.config.base_branch));
             let branches = branches::create(&repo, &releases, &base)?;
             let mut gh = gh(&repo, dry_run);
-            for pr in github::sync(&repo, &releases, &branches, &remote, dry_run, &mut gh)? {
+            let prs = github::sync(&repo, &releases, &branches, &remote, dry_run, &mut gh)
+                .map_err(|e| format!("{e}\nresume with: verwalter pr  (branches are regenerated, PRs updated in place; --dry-run shows the steps)"))?;
+            for pr in prs {
                 println!("#{}  {}  on {}", pr.number, pr.head, pr.base);
+            }
+            Ok(())
+        }
+        "status" => {
+            let mut gh = gh(&repo, dry_run);
+            let rows = status::status(&repo, &remote, &mut gh)?;
+            let w = rows.iter().map(|r| r.package.len()).max().unwrap_or(0);
+            for r in &rows {
+                let pending = if r.pending_changesets.is_empty() { String::new() } else { format!("  {} pending", r.pending_changesets.len()) };
+                let prs = [r.release_pr.map(|n| format!("  PR #{n}")), r.rc_pr.map(|n| format!("  rc PR #{n}"))].into_iter().flatten().collect::<String>();
+                println!("{:w$}  {}  tag:{}  release:{}{}{}{}", r.package, r.version, r.tag_state, r.release, if r.assets > 0 { format!("({} assets)", r.assets) } else { String::new() }, pending, prs);
+                println!("{:w$}  -> {}", "", r.next_step);
             }
             Ok(())
         }
@@ -82,7 +100,8 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             let package = package.ok_or(USAGE)?;
             let target = target.unwrap_or_else(|| repo.config.base_branch.clone());
             let mut gh = gh(&repo, dry_run);
-            let (r, pr) = prerelease::open(&repo, &package, &target, level, &remote, dry_run, &mut gh)?;
+            let (r, pr) = prerelease::open(&repo, &package, &target, level, &remote, dry_run, &mut gh)
+                .map_err(|e| format!("{e}\nresume with: verwalter pre-release {package} --target {target}  (the rc branch and PR are updated in place)"))?;
             println!("#{}  {}  {} -> {}  on {}", pr.number, pr.head, r.from, r.to, pr.base);
             Ok(())
         }
@@ -104,7 +123,8 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 }
                 return Ok(());
             }
-            let released = release::run(&repo, &remote, &assets, dry_run, &mut gh)?;
+            let options = release::Options { assets, package: only, publish, dry_run };
+            let released = release::run(&repo, &remote, &options, &mut gh)?;
             for r in &released {
                 println!("{}  {}  {}  {}", r.package, r.version, r.tag, r.status);
             }

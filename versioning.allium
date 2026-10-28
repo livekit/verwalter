@@ -436,6 +436,14 @@ rule MaintainerAbandonsRelease {
     ensures: not exists release
 }
 
+-- Assets can be attached to an existing release at any time, for example
+-- after a failed upload; attaching is idempotent.
+rule WorkflowAttachesAssets {
+    when: WorkflowAttachesAssets(workflow, release, assets)
+    requires: release.status != committed
+    ensures: ReleaseAssetsAttached(release: release, assets: assets)
+}
+
 rule WorkflowPublishesDraftRelease {
     when: WorkflowPublishesRelease(workflow, release)
     requires: release.status = drafted
@@ -590,12 +598,32 @@ surface WorkflowReleaseHandoff {
 
     provides:
         WorkflowPublishesRelease(workflow, release) when release.status = drafted
+        WorkflowAttachesAssets(workflow, release, assets) when release.status != committed
 
     @guidance
         -- Recommended order in the workflow: build, then tag and create
         -- the release with its assets (no draft), then publish to the
         -- registry. The irreversible step goes last. Drafts remain for
         -- assets that can only be built once the release exists.
+}
+
+-- Where every package stands and what finishes its release, so a
+-- maintainer can take over from a failed workflow run.
+surface ReleaseStatus {
+    facing maintainer: Maintainer
+    context package: Package
+
+    exposes:
+        package.version
+        package.pending_changesets
+        package.open_release_pull_request
+        package.release_pull_requests
+
+    @guidance
+        -- The implementation derives the Release state from tags and the
+        -- GitHub release (none, draft, published, assets) and names the
+        -- command that finishes it. Every command is resumable: it reads
+        -- the current state and skips what is done.
 }
 
 surface ReleaseAbandon {

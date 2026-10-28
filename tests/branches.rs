@@ -210,12 +210,12 @@ fn release_tags_and_creates_github_releases_resumably() {
         calls.push(args.join(" "));
         match args {
             // Older tags already have releases; the new one does not yet.
-            ["release", "view", tag, ..] if *tag != "livekit-v0.8.0" => Ok("false".into()),
+            ["release", "view", tag, ..] if *tag != "livekit-v0.8.0" => Ok(r#"{"isDraft":false,"assets":[]}"#.into()),
             ["release", "view", ..] => Err("release not found".into()),
             _ => Ok(String::new()),
         }
     };
-    let released = verwalter::release::run(&repo, "origin", &[], false, &mut gh).unwrap();
+    let released = verwalter::release::run(&repo, "origin", &Default::default(), &mut gh).unwrap();
 
     assert!(git(root, &["ls-remote", "--tags", "origin"]).contains("livekit-v0.8.0"), "tag pushed");
     assert_eq!(git(root, &["rev-parse", "livekit-v0.8.0^{commit}"]), git(root, &["rev-parse", "HEAD"]));
@@ -232,9 +232,9 @@ fn release_tags_and_creates_github_releases_resumably() {
     let before = calls.len();
     let mut gh2 = |args: &[&str]| -> Result<String, verwalter::github::Error> {
         calls.push(args.join(" "));
-        Ok(if args[2] == "livekit-v0.8.0" { "true".into() } else { "false".into() })
+        Ok(if args[2] == "livekit-v0.8.0" { r#"{"isDraft":true,"assets":[]}"#.into() } else { r#"{"isDraft":false,"assets":[]}"#.into() })
     };
-    let again = verwalter::release::run(&repo, "origin", &[], false, &mut gh2).unwrap();
+    let again = verwalter::release::run(&repo, "origin", &Default::default(), &mut gh2).unwrap();
     assert!(!calls[before..].iter().any(|c| c.starts_with("release create")));
     assert_eq!(again.len(), 1, "the draft is reported until the workflow publishes it");
     assert_eq!(again[0].status, "drafted");
@@ -262,11 +262,11 @@ fn release_resumes_a_tag_without_github_release() {
         calls.push(args.join(" "));
         match args {
             ["release", "view", "livekit-v0.7.0", ..] => Err("not found".into()),
-            ["release", "view", ..] => Ok("false".into()),
+            ["release", "view", ..] => Ok(r#"{"isDraft":false,"assets":[]}"#.into()),
             _ => Ok(String::new()),
         }
     };
-    let released = verwalter::release::run(&repo, "origin", &[], false, &mut gh).unwrap();
+    let released = verwalter::release::run(&repo, "origin", &Default::default(), &mut gh).unwrap();
     assert_eq!(released.len(), 1);
     assert_eq!((released[0].package.as_str(), released[0].status), ("livekit", "published"));
     assert!(calls.iter().any(|c| c.starts_with("release create livekit-v0.7.0")));
@@ -296,12 +296,12 @@ fn release_with_assets_then_abandon() {
         calls.borrow_mut().push(args.join(" "));
         match args {
             ["release", "view", "livekit-v0.7.0", ..] if !exists => Err("not found".into()),
-            ["release", "view", ..] => Ok("false".into()),
+            ["release", "view", ..] => Ok(r#"{"isDraft":false,"assets":[]}"#.into()),
             _ => Ok(String::new()),
         }
     };
     let assets = ["dist/a.tar.gz".to_string(), "dist/b.tar.gz".to_string()];
-    let released = verwalter::release::run(&repo, "origin", &assets, false, &mut gh).unwrap();
+    let released = verwalter::release::run(&repo, "origin", &verwalter::release::Options { assets: assets.to_vec(), ..Default::default() }, &mut gh).unwrap();
     assert_eq!(released.len(), 1);
     let create = calls.borrow().iter().find(|c| c.starts_with("release create livekit-v0.7.0")).cloned().unwrap();
     assert!(create.contains("--verify-tag dist/a.tar.gz dist/b.tar.gz"), "{create}");
@@ -399,10 +399,104 @@ fn dry_run_writes_nothing() {
     let mut gh = verwalter::github::dry_run_gh(inner);
     let prs = verwalter::github::sync(&repo, &plan, &branches, "origin", true, &mut gh).unwrap();
     assert_eq!(prs.len(), 3);
-    let released = verwalter::release::run(&repo, "origin", &[], true, &mut gh).unwrap();
+    let released = verwalter::release::run(&repo, "origin", &verwalter::release::Options { dry_run: true, ..Default::default() }, &mut gh).unwrap();
     assert_eq!(released.len(), 3, "reported as if tagged and created");
     assert_eq!(writes.get(), 0, "no gh write reached the inner runner");
     assert!(git(root, &["ls-remote", "--heads", "origin"]).lines().all(|l| l.ends_with("refs/heads/main")), "nothing pushed");
     assert!(git(root, &["tag", "--list"]).is_empty(), "no tag created");
+    let _ = fs::remove_dir_all(&remote);
+}
+
+#[test]
+fn release_finishes_a_partial_release_for_one_package() {
+    let r = fixture("partial");
+    let root = &r.0;
+    let remote = std::env::temp_dir().join(format!("verwalter-it-{}-partial-remote.git", std::process::id()));
+    let _ = fs::remove_dir_all(&remote);
+    git(root, &["init", "-q", "--bare", remote.to_str().unwrap()]);
+    git(root, &["remote", "add", "origin", remote.to_str().unwrap()]);
+    // livekit: tagged, draft release without assets (the upload failed).
+    // livekit-api: not tagged at all, but out of scope via --package.
+    git(root, &["tag", "livekit-v0.7.0"]);
+    git(root, &["tag", "livekit-protocol-v0.3.1"]);
+    git(root, &["push", "-q", "origin", "--tags"]);
+
+    let repo = Repo::load(root).unwrap();
+    let calls = std::cell::RefCell::new(Vec::<String>::new());
+    let mut gh = |args: &[&str]| -> Result<String, verwalter::github::Error> {
+        let published = calls.borrow().iter().any(|c| c.starts_with("release edit livekit-v0.7.0 --draft=false"));
+        calls.borrow_mut().push(args.join(" "));
+        match args {
+            ["release", "view", "livekit-v0.7.0", ..] => Ok(format!(r#"{{"isDraft":{},"assets":[]}}"#, !published)),
+            ["release", "view", ..] => Ok(r#"{"isDraft":false,"assets":[{"name":"x"}]}"#.into()),
+            _ => Ok(String::new()),
+        }
+    };
+    let options = verwalter::release::Options { assets: vec!["dist/a.tar.gz".into()], package: Some("livekit".into()), publish: true, ..Default::default() };
+    let released = verwalter::release::run(&repo, "origin", &options, &mut gh).unwrap();
+    assert_eq!(released.len(), 1);
+    assert_eq!((released[0].package.as_str(), released[0].status), ("livekit", "published"));
+    let calls = calls.borrow();
+    assert!(calls.iter().any(|c| c == "release upload livekit-v0.7.0 --clobber dist/a.tar.gz"), "{calls:?}");
+    assert!(calls.iter().any(|c| c == "release edit livekit-v0.7.0 --draft=false"));
+    assert!(!calls.iter().any(|c| c.contains("livekit-api")), "other packages untouched");
+    assert!(git(root, &["tag", "--list", "livekit-api-v0.4.3"]).is_empty(), "api not tagged");
+    let _ = fs::remove_dir_all(&remote);
+}
+
+#[test]
+fn release_error_names_the_resume_command() {
+    let r = fixture("resume-hint");
+    let root = &r.0;
+    // No remote: the tag push fails.
+    let repo = Repo::load(root).unwrap();
+    let mut gh = |_: &[&str]| -> Result<String, verwalter::github::Error> { Ok(String::new()) };
+    let err = verwalter::release::run(&repo, "origin", &verwalter::release::Options { assets: vec!["dist/x".into()], ..Default::default() }, &mut gh).unwrap_err().to_string();
+    assert!(err.contains("resume with: verwalter release --package livekit --asset dist/x"), "{err}");
+}
+
+#[test]
+fn status_reports_state_and_next_step() {
+    let r = fixture("status");
+    let root = &r.0;
+    let remote = std::env::temp_dir().join(format!("verwalter-it-{}-status-remote.git", std::process::id()));
+    let _ = fs::remove_dir_all(&remote);
+    git(root, &["init", "-q", "--bare", remote.to_str().unwrap()]);
+    git(root, &["remote", "add", "origin", remote.to_str().unwrap()]);
+    // protocol: complete. api: tagged locally only, draft without assets.
+    // livekit: version committed, no tag; a changeset is pending.
+    git(root, &["tag", "livekit-protocol-v0.3.1"]);
+    git(root, &["push", "-q", "origin", "livekit-protocol-v0.3.1"]);
+    git(root, &["tag", "livekit-api-v0.4.3"]);
+    write(root, ".changeset/x.md", "---\nlivekit: patch\n---\nx\n");
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-q", "-m", "cs"]);
+
+    let repo = Repo::load(root).unwrap();
+    let mut gh = |args: &[&str]| -> Result<String, verwalter::github::Error> {
+        match args {
+            ["pr", "list", ..] => Ok(r#"[{"number":12,"headRefName":"release/livekit","baseRefName":"main"}]"#.into()),
+            ["release", "view", "livekit-protocol-v0.3.1", ..] => Ok(r#"{"isDraft":false,"assets":[{"name":"a"},{"name":"b"}]}"#.into()),
+            ["release", "view", "livekit-api-v0.4.3", ..] => Ok(r#"{"isDraft":true,"assets":[]}"#.into()),
+            _ => Err("not found".into()),
+        }
+    };
+    let rows = verwalter::status::status(&repo, "origin", &mut gh).unwrap();
+    let by = |n: &str| rows.iter().find(|r| r.package == n).unwrap();
+
+    let protocol = by("livekit-protocol");
+    assert_eq!((protocol.tag_state, protocol.release.as_str(), protocol.assets), ("both", "published", 2));
+    assert_eq!(protocol.next_step, "up to date");
+
+    let api = by("livekit-api");
+    assert_eq!((api.tag_state, api.release.as_str()), ("local", "draft"));
+    assert!(api.next_step.starts_with("tag livekit-api-v0.4.3 is not on origin"), "{}", api.next_step);
+
+    let lk = by("livekit");
+    assert_eq!(lk.tag_state, "missing");
+    assert_eq!(lk.pending_changesets, ["x.md"]);
+    assert_eq!(lk.release_pr, Some(12));
+    assert_eq!(lk.next_version.as_deref(), Some("0.7.1"));
+    assert!(lk.next_step.contains("verwalter release --package livekit"), "untagged version comes first: {}", lk.next_step);
     let _ = fs::remove_dir_all(&remote);
 }

@@ -78,14 +78,37 @@ pull requests" (Settings → Actions → General) must be on, or the job must us
 a token of a GitHub App or a PAT. The App or PAT token also lets the release
 PRs trigger CI, which the default `github.token` does not.
 
+## When a release fails
+
+Nothing is remembered between runs: the tool reads tags, releases and PRs
+and finishes what is missing. Start with `verwalter status`. It prints,
+per package, the tag state, the GitHub release state and the next step.
+Add `--dry-run` to any command to see its steps first.
+
+| What failed | What to do |
+|---|---|
+| Build or test job before the tag | Fix, merge, re-run the workflow (`workflow_dispatch`). Nothing was written. |
+| Tag push | `verwalter release --package <name>` tags and pushes. |
+| GitHub release creation | `verwalter release --package <name> [--asset <file>...]` creates it from the existing tag. |
+| Asset upload | `verwalter release --package <name> --asset <file>... [--publish]` uploads with `--clobber`. |
+| Draft never published | `verwalter release --package <name> --publish`. |
+| Registry publish | Re-run the publish job. The tag and release stay; the tool does not touch registries. |
+| The commit itself is broken | `verwalter release --abandon <tag>` removes the release and the tag. Add a changeset and release the next version. |
+| Release PR missing or stale | `verwalter pr`. Branches are regenerated, PRs updated in place. |
+| rc PR missing or stale | `verwalter pre-release <name> --target <branch>`. |
+
+Running locally needs push rights and `gh auth login`. Fetch first so tags
+and `origin/<base>` are current.
+
 ## Commands
 
 | Command | What it does |
 |---|---|
+| `verwalter status` | Per package: version, tag, GitHub release, pending changesets, open PRs, next step. |
 | `verwalter plan` | Print the release plan: next versions and stack order. |
 | `verwalter branches [--base <ref>]` | Create the release branches locally. |
 | `verwalter pr [--remote origin]` | Push the branches and open or update the PRs. |
-| `verwalter release [--asset <file>]...` | Tag and create GitHub releases for every untagged version, with assets. |
+| `verwalter release [--asset <file>]... [--package <name>] [--publish]` | Tag and create GitHub releases for every untagged version. Uploads assets to drafts or a named package, `--publish` flips a draft. |
 | `verwalter release --abandon <tag>` | Delete a GitHub release and its tag. |
 | `verwalter check --pr <n>` | Changeset check for a contributor PR, with comment. |
 | `verwalter pre-release <package> [--target <branch>] [--level <l>]` | Open an rc PR for one package. Changesets stay pending. |

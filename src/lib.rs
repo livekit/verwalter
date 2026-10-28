@@ -17,6 +17,7 @@ pub mod plan;
 pub mod prerelease;
 pub mod release;
 pub mod repo;
+pub mod status;
 pub mod version;
 
 pub use knope_versioning::semver::Version;

@@ -24,73 +24,138 @@ pub struct Released {
     pub status: &'static str,
 }
 
+/// What `run` may do beyond tagging and creating releases.
+#[derive(Debug, Clone, Default)]
+pub struct Options {
+    /// Attached when a release is created; uploaded with `--clobber` to an
+    /// existing release when it is a draft or `package` names it.
+    pub assets: Vec<String>,
+    /// Only this package; the others are left as they are.
+    pub package: Option<String>,
+    /// Spec: WorkflowPublishesRelease. Flip a draft to published once its
+    /// assets are there.
+    pub publish: bool,
+    pub dry_run: bool,
+}
+
+/// The GitHub release behind a tag, as `gh release view` reports it.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+pub struct ReleaseState {
+    #[serde(rename = "isDraft")]
+    pub draft: bool,
+    #[serde(default)]
+    pub assets: Vec<Asset>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+pub struct Asset {
+    pub name: String,
+}
+
+pub fn view(gh: Gh, tag: &str) -> Option<ReleaseState> {
+    gh(&["release", "view", tag, "--json", "isDraft,assets"]).ok().and_then(|j| serde_json::from_str(&j).ok())
+}
+
 /// Finish every release that is not complete and report it. A package
 /// whose tag exists and whose GitHub release is published (or not wanted)
-/// is complete and not reported. A draft is reported on every run until
-/// the workflow publishes it. `assets` are attached when a release is
-/// created, so a workflow that builds first needs no draft at all.
-pub fn run(repo: &Repo, remote: &str, assets: &[String], dry_run: bool, gh: Gh) -> Result<Vec<Released>, Error> {
-    let root = repo.root.as_path();
-    let head = git::run(root, &["rev-parse", "HEAD"])?;
+/// is complete and not reported, unless assets were uploaded to it. A
+/// draft is reported on every run until it is published.
+pub fn run(repo: &Repo, remote: &str, options: &Options, gh: Gh) -> Result<Vec<Released>, Error> {
     let mut out = Vec::new();
-
     for p in &repo.packages {
-        let package = &repo.config.packages[&p.name];
-        if package.release == ReleaseMode::None {
+        if options.package.as_deref().is_some_and(|only| only != p.name) {
             continue;
         }
-        let tag = repo.config.tag_for(&p.name, &p.version);
-
-        // Spec: TagRelease / ResumeUntaggedReleases. An existing tag, local
-        // or on the remote, counts as done wherever it points.
-        let mut fresh = false;
-        if !git::ref_exists(root, &tag) {
-            if remote_has_tag(root, remote, &tag)? {
-                git::run(root, &["fetch", "--quiet", remote, &format!("refs/tags/{tag}:refs/tags/{tag}")])?;
-            } else {
-                git::write(root, dry_run, &["tag", &tag, &head])?;
-                git::write(root, dry_run, &["push", "--quiet", remote, &format!("refs/tags/{tag}")])?;
-                fresh = true;
-            }
+        if let Some(released) = release_one(repo, remote, options, &p.name, &p.version, gh).map_err(|e| resume_hint(e, &p.name, options))? {
+            out.push(released);
         }
-        let mut status = "tagged";
-
-        // Spec: CreateGitHubRelease / ResumeTaggedReleasesWithoutGitHubRelease.
-        if package.release == ReleaseMode::TagAndRelease {
-            match gh(&["release", "view", &tag, "--json", "isDraft", "--jq", ".isDraft"]) {
-                Ok(is_draft) => status = if is_draft.trim() == "true" { "drafted" } else { "published" },
-                Err(_) => {
-                    let notes = changelog_section(&fs::read_to_string(root.join(&package.changelog)).unwrap_or_default(), &p.version.to_string());
-                    let title = format!("{} {}", p.name, p.version);
-                    let mut args = vec!["release", "create", &tag, "--title", &title, "--notes", &notes, "--verify-tag"];
-                    args.extend(assets.iter().map(String::as_str));
-                    if package.draft {
-                        args.push("--draft");
-                    }
-                    if p.version.is_prerelease() {
-                        args.push("--prerelease");
-                    }
-                    gh(&args)?;
-                    fresh = true;
-                    status = if package.draft { "drafted" } else { "published" };
-                }
-            }
-        }
-
-        if !fresh && status != "drafted" {
-            continue;
-        }
-        let changelog = fs::read_to_string(root.join(&package.changelog)).unwrap_or_default();
-        out.push(Released {
-            package: p.name.clone(),
-            previous_version: previous_version(&changelog, &p.version.to_string()),
-            version: p.version.to_string(),
-            tag,
-            prerelease: p.version.is_prerelease(),
-            status,
-        });
     }
     Ok(out)
+}
+
+fn resume_hint(e: Error, package: &str, options: &Options) -> Error {
+    let assets: String = options.assets.iter().map(|a| format!(" --asset {a}")).collect();
+    let publish = if options.publish { " --publish" } else { "" };
+    format!("{package}: {e}\nresume with: verwalter release --package {package}{assets}{publish}  (add --dry-run to see the steps first)").into()
+}
+
+fn release_one(repo: &Repo, remote: &str, options: &Options, name: &str, version: &crate::Version, gh: Gh) -> Result<Option<Released>, Error> {
+    let root = repo.root.as_path();
+    let package = &repo.config.packages[name];
+    if package.release == ReleaseMode::None {
+        return Ok(None);
+    }
+    let dry_run = options.dry_run;
+    let tag = repo.config.tag_for(name, version);
+
+    // Spec: TagRelease / ResumeUntaggedReleases. An existing tag, local
+    // or on the remote, counts as done wherever it points.
+    let mut fresh = false;
+    if !git::ref_exists(root, &tag) {
+        if remote_has_tag(root, remote, &tag)? {
+            git::run(root, &["fetch", "--quiet", remote, &format!("refs/tags/{tag}:refs/tags/{tag}")])?;
+        } else {
+            let head = git::run(root, &["rev-parse", "HEAD"])?;
+            git::write(root, dry_run, &["tag", &tag, &head])?;
+            git::write(root, dry_run, &["push", "--quiet", remote, &format!("refs/tags/{tag}")])?;
+            fresh = true;
+        }
+    }
+    let mut status = "tagged";
+
+    // Spec: CreateGitHubRelease / ResumeTaggedReleasesWithoutGitHubRelease,
+    // then WorkflowPublishesRelease for drafts.
+    if package.release == ReleaseMode::TagAndRelease {
+        match view(gh, &tag) {
+            Some(existing) => {
+                let mut draft = existing.draft;
+                // Assets go to an existing release only when it is still a
+                // draft or the package was named: in a monorepo, `--asset`
+                // must not land on every complete release.
+                if !options.assets.is_empty() && (draft || options.package.is_some()) {
+                    let mut args = vec!["release", "upload", tag.as_str(), "--clobber"];
+                    args.extend(options.assets.iter().map(String::as_str));
+                    gh(&args)?;
+                    fresh = true;
+                }
+                if draft && options.publish {
+                    gh(&["release", "edit", &tag, "--draft=false"])?;
+                    draft = false;
+                    fresh = true;
+                }
+                status = if draft { "drafted" } else { "published" };
+            }
+            None => {
+                let notes = changelog_section(&fs::read_to_string(root.join(&package.changelog)).unwrap_or_default(), &version.to_string());
+                let title = format!("{name} {version}");
+                let mut args = vec!["release", "create", &tag, "--title", &title, "--notes", &notes, "--verify-tag"];
+                args.extend(options.assets.iter().map(String::as_str));
+                let draft = package.draft && !options.publish;
+                if draft {
+                    args.push("--draft");
+                }
+                if version.is_prerelease() {
+                    args.push("--prerelease");
+                }
+                gh(&args)?;
+                fresh = true;
+                status = if draft { "drafted" } else { "published" };
+            }
+        }
+    }
+
+    if !fresh && status != "drafted" {
+        return Ok(None);
+    }
+    let changelog = fs::read_to_string(root.join(&package.changelog)).unwrap_or_default();
+    Ok(Some(Released {
+        package: name.to_string(),
+        previous_version: previous_version(&changelog, &version.to_string()),
+        version: version.to_string(),
+        tag,
+        prerelease: version.is_prerelease(),
+        status,
+    }))
 }
 
 /// Spec: MaintainerAbandonsRelease. Removes the GitHub release and the
