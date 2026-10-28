@@ -93,6 +93,11 @@ pub fn read_version(path: &str, content: &str) -> Result<Version, Error> {
 /// re-serialized with two-space indentation, which is what prettier
 /// produces in node-sdks.
 pub fn write_version(path: &str, content: &str, dependency: Option<&str>, version: &Version) -> Result<String, Error> {
+    if let (true, Some(dep)) = (is_pyproject(path), dependency) {
+        // knope's pyproject handler has no dependency mode; it would set the
+        // package's own version instead.
+        return Ok(pyproject_pin(content, dep, version));
+    }
     let (config, file) = load(path, dependency, content)?;
     let mut package = Package::new(
         Name::from(dependency.unwrap_or("package")),
@@ -116,8 +121,74 @@ pub fn write_version(path: &str, content: &str, dependency: Option<&str>, versio
     Ok(written)
 }
 
+/// PEP 503 normalised name: lower case, runs of `-`, `_` and `.` as `-`.
+fn normalise_py(name: &str) -> String {
+    let mut out = String::new();
+    let mut dash = false;
+    for c in name.chars() {
+        if matches!(c, '-' | '_' | '.') {
+            dash = true;
+        } else {
+            if dash && !out.is_empty() {
+                out.push('-');
+            }
+            dash = false;
+            out.push(c.to_ascii_lowercase());
+        }
+    }
+    out
+}
+
+/// Every requirement string under `[project] dependencies` and
+/// `[project.optional-dependencies]`.
+fn pyproject_requirements(content: &str) -> Vec<String> {
+    let Ok(doc) = content.parse::<toml::Value>() else { return Vec::new() };
+    let Some(project) = doc.get("project") else { return Vec::new() };
+    let mut out = Vec::new();
+    let mut take = |v: Option<&toml::Value>| {
+        if let Some(arr) = v.and_then(|v| v.as_array()) {
+            out.extend(arr.iter().filter_map(|r| r.as_str()).map(String::from));
+        }
+    };
+    take(project.get("dependencies"));
+    if let Some(groups) = project.get("optional-dependencies").and_then(|g| g.as_table()) {
+        for g in groups.values() {
+            take(Some(g));
+        }
+    }
+    out
+}
+
+/// The distribution name at the start of a PEP 508 requirement.
+fn requirement_name(req: &str) -> &str {
+    req.trim_start().split(|c: char| !(c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))).next().unwrap_or("")
+}
+
+/// Spec: write_dependency_version for pyproject.toml. Moves the lower bound
+/// (`>=`, `==`, `~=`) of every requirement on `dep` to `version`, in PEP
+/// 440 spelling; upper bounds and markers stay. Line-based, so formatting
+/// and comments are preserved.
+fn pyproject_pin(content: &str, dep: &str, version: &Version) -> String {
+    let wanted = normalise_py(dep);
+    let new = to_pep440(version);
+    let re = regex::Regex::new(r#"(["'])\s*([A-Za-z0-9][A-Za-z0-9._-]*)(\[[^\]]*\])?\s*(>=|==|~=)\s*([0-9][0-9A-Za-z.+!*-]*)"#).expect("static regex");
+    re.replace_all(content, |caps: &regex::Captures| {
+        let whole = caps.get(0).expect("match");
+        if normalise_py(&caps[2]) == wanted {
+            // Keep everything up to the old version, spacing included.
+            let old_version = caps.get(5).expect("version group");
+            format!("{}{new}", &content[whole.start()..old_version.start()])
+        } else {
+            whole.as_str().to_string()
+        }
+    })
+    .into_owned()
+}
+
 /// Spec: internal_dependencies. Which of `candidates` (the other package
-/// names in the repo) this manifest depends on.
+/// names in the repo) this manifest depends on. Only runtime dependencies
+/// count: a devDependency (package.json) does not make a package a
+/// dependent for bumps or stacking, as in changesets.
 pub fn internal_dependencies(path: &str, content: &str, candidates: &[&str]) -> Result<Vec<String>, Error> {
     let file_name = path.rsplit('/').next().unwrap_or(path);
     let found: Vec<String> = match file_name {
@@ -127,15 +198,19 @@ pub fn internal_dependencies(path: &str, content: &str, candidates: &[&str]) -> 
         }
         "package.json" => {
             let json: serde_json::Value = serde_json::from_str(content)?;
-            let sections = ["dependencies", "devDependencies", "peerDependencies", "optionalDependencies"];
+            let sections = ["dependencies", "peerDependencies", "optionalDependencies"];
             candidates
                 .iter()
                 .filter(|c| sections.iter().any(|s| json.get(s).and_then(|d| d.get(**c)).is_some()))
                 .map(|c| c.to_string())
                 .collect()
         }
-        // ponytail: pyproject.toml and pubspec.yaml report no dependencies
-        // yet; add a branch when a monorepo in that language needs stacking.
+        "pyproject.toml" => {
+            let names: Vec<String> = pyproject_requirements(content).iter().map(|r| normalise_py(requirement_name(r))).collect();
+            candidates.iter().filter(|c| names.contains(&normalise_py(c))).map(|c| c.to_string()).collect()
+        }
+        // ponytail: pubspec.yaml and go.mod report no dependencies yet; add
+        // a branch when a monorepo in that language needs stacking.
         _ => Vec::new(),
     };
     Ok(found)
@@ -228,19 +303,46 @@ version = "1.0.228"
         assert_one_line_changed(PACKAGE_JSON, &written);
 
         let deps = internal_dependencies("package.json", PACKAGE_JSON, &["@livekit/protocol", "vitest", "nope"]).unwrap();
-        assert_eq!(deps, vec!["@livekit/protocol", "vitest"]);
+        assert_eq!(deps, vec!["@livekit/protocol"], "devDependencies make no edge");
     }
 
     const PYPROJECT: &str = r#"[project]
 name = "livekit-api"
 version = "1.1.1"
-dependencies = ["livekit-protocol>=1.1.0"]
+dependencies = [
+    "livekit-protocol>=1.1.0,<2.0.0", # keep in sync
+    'Livekit_RTC[extra] == 1.2.0; python_version >= "3.9"',
+    "aiohttp>=3.9",
+]
+
+[project.optional-dependencies]
+dev = ["livekit-test-utils~=0.3"]
 "#;
 
     #[test]
     fn pyproject_toml() {
         let written = check("livekit-api/pyproject.toml", PYPROJECT, "1.2.0");
         assert_one_line_changed(PYPROJECT, &written);
+    }
+
+    #[test]
+    fn pyproject_dependencies_and_lower_bound_pins() {
+        let deps = internal_dependencies("livekit-api/pyproject.toml", PYPROJECT, &["livekit-protocol", "livekit-rtc", "livekit-test-utils", "aiohttp", "livekit"]).unwrap();
+        assert_eq!(deps, vec!["livekit-protocol", "livekit-rtc", "livekit-test-utils", "aiohttp"]);
+
+        let pinned = write_version("livekit-api/pyproject.toml", PYPROJECT, Some("livekit-protocol"), &v("1.2.0")).unwrap();
+        assert!(pinned.contains(r#""livekit-protocol>=1.2.0,<2.0.0", # keep in sync"#), "{pinned}");
+        assert!(pinned.contains(r#"version = "1.1.1""#), "own version untouched");
+        assert_one_line_changed(PYPROJECT, &pinned);
+
+        let rc = write_version("livekit-api/pyproject.toml", PYPROJECT, Some("livekit-rtc"), &v("1.3.0-rc.1")).unwrap();
+        assert!(rc.contains(r#"'Livekit_RTC[extra] == 1.3.0rc1; python_version >= "3.9"'"#), "{rc}");
+
+        let tilde = write_version("livekit-api/pyproject.toml", PYPROJECT, Some("livekit-test-utils"), &v("0.4.0")).unwrap();
+        assert!(tilde.contains(r#""livekit-test-utils~=0.4.0""#));
+
+        let none = write_version("livekit-api/pyproject.toml", PYPROJECT, Some("nope"), &v("9.9.9")).unwrap();
+        assert_eq!(none, PYPROJECT);
     }
 
     #[test]

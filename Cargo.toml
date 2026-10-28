@@ -21,6 +21,7 @@ pkg-fmt = "tgz"
 # Versioned file formats (Cargo.toml, Cargo.lock, package.json, pyproject.toml,
 # pubspec.yaml, go.mod, ...), format-preserving edits, semver with pre-releases.
 knope-versioning = "0.8"
+regex = "1"
 relative-path = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
