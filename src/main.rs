@@ -76,7 +76,7 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         "pr" => {
             let base = base.unwrap_or_else(|| format!("{remote}/{}", repo.config.base_branch));
             let branches = branches::create(&repo, &releases, &base)?;
-            let mut gh = gh(&repo, dry_run);
+            let mut gh = gh(&repo, &remote, dry_run);
             let prs = github::sync(&repo, &releases, &branches, &remote, dry_run, &mut gh)
                 .map_err(|e| format!("{e}\nresume with: verwalter pr  (branches are regenerated, PRs updated in place; --dry-run shows the steps)"))?;
             for pr in prs {
@@ -85,7 +85,7 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             Ok(())
         }
         "status" => {
-            let mut gh = gh(&repo, dry_run);
+            let mut gh = gh(&repo, &remote, dry_run);
             let rows = status::status(&repo, &remote, &mut gh)?;
             let w = rows.iter().map(|r| r.package.len()).max().unwrap_or(0);
             for r in &rows {
@@ -99,7 +99,7 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         "pre-release" => {
             let package = package.ok_or(USAGE)?;
             let target = target.unwrap_or_else(|| repo.config.base_branch.clone());
-            let mut gh = gh(&repo, dry_run);
+            let mut gh = gh(&repo, &remote, dry_run);
             let (r, pr) = prerelease::open(&repo, &package, &target, level, &remote, dry_run, &mut gh)
                 .map_err(|e| format!("{e}\nresume with: verwalter pre-release {package} --target {target}  (the rc branch and PR are updated in place)"))?;
             println!("#{}  {}  {} -> {}  on {}", pr.number, pr.head, r.from, r.to, pr.base);
@@ -107,7 +107,7 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         }
         "check" => {
             let pr = pr.ok_or(USAGE)?;
-            let mut gh = gh(&repo, dry_run);
+            let mut gh = gh(&repo, &remote, dry_run);
             let c = check::run(&repo.root, &repo.config, pr, &mut gh)?;
             println!("{:?}: affected {:?}, covered {:?}", c.status, c.affected, c.covered);
             if c.status == check::Status::Failed {
@@ -116,7 +116,7 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             Ok(())
         }
         "release" => {
-            let mut gh = gh(&repo, dry_run);
+            let mut gh = gh(&repo, &remote, dry_run);
             if let Some(tag) = abandon {
                 for r in release::abandon(&repo, &remote, &tag, dry_run, &mut gh)? {
                     println!("removed {r}");
@@ -138,8 +138,8 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 type GhRunner<'a> = Box<dyn FnMut(&[&str]) -> Result<String, github::Error> + 'a>;
 
 /// The gh runner, with every write printed instead of run under `--dry-run`.
-fn gh(repo: &Repo, dry_run: bool) -> GhRunner<'_> {
-    let inner = github::gh_cli(&repo.root);
+fn gh<'a>(repo: &'a Repo, remote: &str, dry_run: bool) -> GhRunner<'a> {
+    let inner = github::gh_cli(&repo.root, remote);
     if dry_run {
         Box::new(github::dry_run_gh(inner))
     } else {

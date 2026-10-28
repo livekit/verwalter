@@ -17,9 +17,26 @@ pub type Error = Box<dyn std::error::Error + Send + Sync>;
 /// tests can fake GitHub.
 pub type Gh<'a> = &'a mut dyn FnMut(&[&str]) -> Result<String, Error>;
 
-pub fn gh_cli(root: &Path) -> impl FnMut(&[&str]) -> Result<String, Error> + '_ {
+/// `owner/repo` of a GitHub remote URL (ssh or https), if it is one.
+pub fn repo_slug(url: &str) -> Option<String> {
+    let rest = url.trim().strip_suffix(".git").unwrap_or(url.trim());
+    let after = rest.split_once("github.com").map(|(_, a)| a.trim_start_matches([':', '/']))?;
+    let mut parts = after.split('/');
+    Some(format!("{}/{}", parts.next()?, parts.next()?))
+}
+
+/// Runs gh pinned to the repository behind `remote` (`GH_REPO`), so a
+/// clone with an `upstream` remote never resolves PR numbers against the
+/// parent repository.
+pub fn gh_cli<'a>(root: &'a Path, remote: &str) -> impl FnMut(&[&str]) -> Result<String, Error> + 'a {
+    let slug = crate::git::run(root, &["remote", "get-url", remote]).ok().and_then(|u| repo_slug(&u));
     move |args: &[&str]| {
-        let out = Command::new("gh").current_dir(root).args(args).output()?;
+        let mut cmd = Command::new("gh");
+        cmd.current_dir(root).args(args).env("GH_STACK_NO_UPDATE_NOTIFIER", "1");
+        if let Some(slug) = &slug {
+            cmd.env("GH_REPO", slug);
+        }
+        let out = cmd.output()?;
         if !out.status.success() {
             return Err(format!("gh {}: {}", args.join(" "), String::from_utf8_lossy(&out.stderr).trim()).into());
         }
@@ -48,6 +65,7 @@ pub fn dry_run_gh(mut inner: impl FnMut(&[&str]) -> Result<String, Error>) -> im
             ["pr", "create" | "edit" | "close" | "comment", ..]
                 | ["release", "create" | "delete" | "edit", ..]
                 | ["label", "create", ..]
+                | ["stack", ..]
                 | ["api", "-X", ..]
         );
         if !is_write {
@@ -104,7 +122,39 @@ pub fn sync(repo: &Repo, plan: &[PlannedRelease], branches: &[Branch], remote: &
     for stale in open.iter().filter(|pr| !branches.iter().any(|b| b.name == pr.head)) {
         gh(&["pr", "close", &stale.number.to_string(), "--delete-branch", "--comment", "Nothing left to release for this package."])?;
     }
+
+    // Declare the stack to GitHub (`gh stack link`, bottom to top) so the
+    // PRs show as one stack and merging the top lands all of them. GitHub
+    // stacks are linear: only a chain is linked, a tree is left as is. A
+    // failure here is cosmetic and only printed.
+    if let Some(chain) = linear_chain(plan) {
+        let numbers: Vec<String> = chain
+            .iter()
+            .filter_map(|p| result.iter().find(|pr| pr.head == format!("{}{p}", repo.config.release_branch_prefix)))
+            .map(|pr| pr.number.to_string())
+            .collect();
+        if numbers.len() == chain.len() && numbers.len() > 1 {
+            let mut args = vec!["stack", "link"];
+            args.extend(numbers.iter().map(String::as_str));
+            if let Err(e) = gh(&args) {
+                println!("warning: could not link the PRs into a GitHub stack (is the gh-stack extension installed?): {e}");
+            }
+        }
+    }
     Ok(result)
+}
+
+/// The packages bottom to top when the plan is one chain: every release is
+/// stacked on the previous one.
+fn linear_chain(plan: &[PlannedRelease]) -> Option<Vec<&str>> {
+    let mut prev: Option<&str> = None;
+    for r in plan {
+        if r.stacked_on.as_deref() != prev {
+            return None;
+        }
+        prev = Some(&r.package);
+    }
+    Some(plan.iter().map(|r| r.package.as_str()).collect())
 }
 
 fn number_from_url(url: &str) -> Result<u64, Error> {
@@ -157,6 +207,23 @@ mod tests {
         assert!(b.contains("Stacked on #7 (`release/a`)"));
         assert!(b.contains("Updated dependencies: a@1.1.0"));
         assert!(!b.contains("Changesets:"));
+    }
+
+    #[test]
+    fn repo_slug_from_remote_urls() {
+        assert_eq!(repo_slug("git@github.com:lukasIO/rust-sdks.git").as_deref(), Some("lukasIO/rust-sdks"));
+        assert_eq!(repo_slug("https://github.com/livekit/node-sdks").as_deref(), Some("livekit/node-sdks"));
+        assert_eq!(repo_slug("https://gitlab.com/x/y.git"), None);
+    }
+
+    #[test]
+    fn linear_chain_only_for_chains() {
+        let r = repo();
+        let plan = crate::plan::plan(&r.packages, &r.changesets, crate::version::BumpLevel::Patch);
+        assert_eq!(linear_chain(&plan), Some(vec!["a", "b"]));
+        let mut tree = plan.clone();
+        tree.push(PlannedRelease { package: "c".into(), stacked_on: Some("a".into()), ..plan[1].clone() });
+        assert_eq!(linear_chain(&tree), None);
     }
 
     #[test]

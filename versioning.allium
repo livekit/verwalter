@@ -155,6 +155,8 @@ entity ChangesetCheck {
     missing_packages: affected_packages where not (this in covered_packages)
 }
 
+-- When the stack is one chain, the PRs are also declared as a GitHub stack
+-- (merging the top lands all of them). A tree is not declared.
 -- One per package with pending bumps. In a monorepo these stack as a tree:
 -- the PR for a package that others depend on sits at the base, and the PR
 -- of each dependent targets the base PR's branch. Two packages that depend

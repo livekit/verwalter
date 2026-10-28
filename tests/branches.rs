@@ -183,6 +183,40 @@ fn pr_sync_pushes_and_creates_updates_closes() {
     assert!(edit.contains("--base release/livekit-protocol"));
     assert!(edit.contains("Stacked on #"), "body carries the stack note");
     assert!(calls.iter().any(|c| c.starts_with("pr close 99")));
+    assert!(!calls.iter().any(|c| c.starts_with("stack link")), "a tree is not linked as a GitHub stack");
+}
+
+#[test]
+fn pr_sync_links_a_chain_as_a_github_stack() {
+    let r = fixture("stack-link");
+    let root = &r.0;
+    // api depends on protocol, livekit on api: one chain.
+    write(root, "livekit/Cargo.toml", "[package]\nname = \"livekit\"\nversion = \"0.7.0\"\n\n[dependencies]\nlivekit-api = { workspace = true }\n");
+    write(root, ".changeset/ndc.md", "---\nlivekit-protocol: minor\n---\nx\n");
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-q", "-m", "chain"]);
+    let remote = std::env::temp_dir().join(format!("verwalter-it-{}-stack-remote.git", std::process::id()));
+    let _ = fs::remove_dir_all(&remote);
+    git(root, &["init", "-q", "--bare", remote.to_str().unwrap()]);
+    git(root, &["remote", "add", "origin", remote.to_str().unwrap()]);
+
+    let repo = Repo::load(root).unwrap();
+    let plan = plan(&repo.packages, &repo.changesets, repo.config.dependent_bump_level);
+    let branches = branches::create(&repo, &plan, "main").unwrap();
+    let mut calls: Vec<String> = Vec::new();
+    let mut gh = |args: &[&str]| -> Result<String, verwalter::github::Error> {
+        calls.push(args.join(" "));
+        Ok(match args {
+            ["pr", "list", ..] => "[]".into(),
+            ["pr", "create", ..] => format!("https://github.com/x/y/pull/{}", 200 + calls.len()),
+            _ => String::new(),
+        })
+    };
+    verwalter::github::sync(&repo, &plan, &branches, "origin", false, &mut gh).unwrap();
+    let link = calls.iter().find(|c| c.starts_with("stack link")).expect("chain linked");
+    let numbers: Vec<&str> = link.split_whitespace().skip(2).collect();
+    assert_eq!(numbers.len(), 3, "{link}");
+    let _ = fs::remove_dir_all(&remote);
 }
 
 #[test]
