@@ -56,6 +56,7 @@ release_label = "release"
 dependent_bump_level = "patch"
 prerelease_label = "rc"          # 1.6.0-rc.1; written as 1.6.0rc1 in pyproject.toml
 pin_files = ["Cargo.toml", "Cargo.lock"]   # workspace manifest and lock files
+ignore = ["examples/*"]         # workspace members the consistency check skips
 
 [packages.livekit-protocol]
 path = "livekit-protocol"
@@ -65,6 +66,13 @@ tag_template = "{package}-v{version}"      # default in a monorepo, v{version} w
 release = "tag_and_release"                # none | tag | tag_and_release
 draft = false
 ```
+
+Every publishable workspace member must be listed, or named in `ignore`.
+`verwalter check` fails when a Cargo, pnpm or uv workspace member without a
+private marker (`publish = false`, `"private": true`, the
+`Private :: Do Not Upload` classifier) is missing from the config, when a
+configured package is private, or when its directory has no manifest. The
+other commands print the same as warnings.
 
 Dependencies between packages are read from the manifests, not configured.
 Versioned files are handled by

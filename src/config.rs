@@ -52,6 +52,10 @@ pub struct Config {
     /// updates its own entry in each of them.
     #[serde(default)]
     pub pin_files: Vec<String>,
+    /// Workspace members the consistency check must not report, by package
+    /// name or path; a trailing `*` matches a prefix (`examples/*`).
+    #[serde(default)]
+    pub ignore: Vec<String>,
     pub packages: BTreeMap<String, Package>,
 }
 

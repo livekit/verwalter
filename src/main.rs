@@ -1,6 +1,6 @@
 use std::{path::PathBuf, process::ExitCode};
 
-use verwalter::{branches, check, github, plan::plan, prerelease, release, repo::Repo, status, version::BumpLevel};
+use verwalter::{branches, check, github, plan::plan, prerelease, release, repo::Repo, status, version::BumpLevel, workspace};
 
 const USAGE: &str = "usage: verwalter <status|plan|branches|pr> [--config <file>] [--base <ref>] [--remote <name>] [--dry-run] [<checkout>]\n       verwalter release [--asset <file>]... [--package <name>] [--publish] [--abandon <tag>] [--remote <name>] [--dry-run] [<checkout>]\n       verwalter check --pr <number> [--config <file>] [--dry-run] [<checkout>]\n       verwalter pre-release <package> [--target <branch>] [--level major|minor|patch] [--remote <name>] [--dry-run] [<checkout>]";
 
@@ -61,6 +61,14 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         None => Repo::load(&root)?,
     };
     let releases = plan(&repo.packages, &repo.changesets, repo.config.dependent_bump_level);
+    // Spec: WorkspaceConsistency. `check` fails on it, the others warn.
+    let findings = workspace::check(&repo.root, &repo.config);
+    if command == "check" && !findings.is_empty() {
+        return Err(format!("verwalter.toml does not match the workspace:\n  {}", findings.iter().map(ToString::to_string).collect::<Vec<_>>().join("\n  ")).into());
+    }
+    for f in &findings {
+        eprintln!("warning: {f}");
+    }
     match command.as_str() {
         "plan" => {
             print_plan(&repo, &releases);

@@ -217,6 +217,8 @@ config {
     prerelease_label: String = "rc"
     -- PRs carrying this label need no changeset.
     exempt_label: String = "internal"
+    -- Workspace members the consistency check skips, by name or path.
+    ignore: Set<String> = {}
     -- Release PRs are recognisable by branch prefix and label so that repo
     -- workflows can gate them (approvals, registry checks). Gating itself
     -- is a workflow concern, not the tool's.
@@ -227,6 +229,17 @@ config {
 ------------------------------------------------------------
 -- Rules
 ------------------------------------------------------------
+
+-- Workspace consistency: every publishable package the workspace
+-- manifests declare must be a configured Package or ignored; a configured
+-- Package must exist and not be private. The check fails on a mismatch,
+-- every other command warns, so a new package cannot escape versioning.
+rule WorkspaceConsistencyCheck {
+    when: ContributorPullRequestUpdated(pr)
+    let members = workspace_members(pr.repository)
+    requires: members.all(m => m.private or m.name in Packages.name or m.name in config.ignore or m.path in config.ignore)
+    ensures: WorkspaceConsistent(repository: pr.repository)
+}
 
 -- Changeset check on contributor PRs
 
