@@ -105,6 +105,7 @@ Add `--dry-run` to any command to see its steps first.
 | Registry publish | Re-run the publish job. The tag and release stay; the tool does not touch registries. Dependents were not published (the publish runs in dependency order and stops at the first failure); the re-run picks them up, or dispatch the workflow with `package=<dependent>` once the dependency is on the registry. |
 | The commit itself is broken | `verwalter release --abandon <tag>` removes the release and the tag. Add a changeset and release the next version. |
 | Release PR missing or stale | `verwalter pr`. Branches are regenerated, PRs updated in place. |
+| Push rejected with "directory file conflict" | A branch named like the prefix (`release`) exists. Rename it or set `release_branch_prefix`. |
 | rc PR missing or stale | `verwalter pre-release <name> --target <branch>`. |
 
 Running locally needs push rights and `gh auth login`. Fetch first so tags

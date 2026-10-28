@@ -73,7 +73,14 @@ pub fn sync(repo: &Repo, plan: &[PlannedRelease], branches: &[Branch], remote: &
 
     let mut result = Vec::new();
     for (release, branch) in plan.iter().zip(branches) {
-        git::write(&repo.root, dry_run, &["push", "--force", "--quiet", remote, &format!("{}:{}", branch.name, branch.name)])?;
+        git::write(&repo.root, dry_run, &["push", "--force", "--quiet", remote, &format!("{}:{}", branch.name, branch.name)]).map_err(|e| {
+            if e.to_string().contains("directory file conflict") {
+                let prefix = repo.config.release_branch_prefix.trim_end_matches('/');
+                format!("{e}\na branch named `{prefix}` exists on {remote}, so `{}` cannot be created; rename that branch or set release_branch_prefix in verwalter.toml", branch.name).into()
+            } else {
+                e
+            }
+        })?;
 
         let parent = release.stacked_on.as_deref().and_then(|p| result.iter().find(|pr: &&PullRequest| pr.head == format!("{}{p}", repo.config.release_branch_prefix)));
         let title = format!("release: {} {}", release.package, release.to);
