@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.4.0
+
+### Minor Changes
+
+- `--dry-run` for `pr`, `release`, `pre-release` and `check` (action input `dry-run: true`): pushes, tags and GitHub writes are printed instead of done.
+- `verwalter release` handles packages in dependency order and stops at the first failure, so a dependent is never released before its dependency. The `releases` output lists dependencies first and carries `depends_on` per entry; the example workflow publishes one package at a time, fail-fast. `--package` always reports the named package, so a dispatch can hand one release to the publish job again.
+- `verwalter status` shows per package where the release stands and what finishes it. `verwalter release` takes `--package <name>` and `--publish`, uploads assets to an existing draft or named release, and every failure names the command that resumes it. The README has a runbook for failed releases.
+
+### Patch Changes
+
+- Published to crates.io: `cargo install verwalter` and `cargo binstall verwalter` work. The release workflow publishes the crate after the GitHub release.
+
 ## 0.3.0
 
 ### Minor Changes
