@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.8.0
+
+### Minor Changes
+
+- A release branch leaves a changeset for the dependents it pins but does not release. Merging only the bottom of a stack no longer loses their bumps. - [`0ba7146`](https://github.com/lukasIO/verwalter/commit/0ba714660511a662bf050d86d7ed729744a1fe8e) ([@lukasIO](https://github.com/lukasIO))
+
+### Patch Changes
+
+- Point examples and README at v0.7.0 - [`cb8bdc0`](https://github.com/lukasIO/verwalter/commit/cb8bdc072b1e921ad61a29f0362f548c48aed197) ([@lukasIO](https://github.com/lukasIO))
+
 ## 0.7.0
 
 ### Minor Changes
