@@ -27,6 +27,9 @@ pub struct Check {
     pub covered: BTreeSet<String>,
     /// Spec: ChangesetCheck.api_findings. Empty until `api_check` ran.
     pub api: Vec<ApiFinding>,
+    /// Spec: ChangesetCheck.bumps. What the PR's changesets claim, one
+    /// line per package at the highest level, for the comment.
+    pub bumps: Vec<crate::changeset::Bump>,
 }
 
 /// Spec: value ApiFinding. A covered package whose changeset level is
@@ -69,6 +72,19 @@ pub fn evaluate(
         .iter()
         .flat_map(|c| c.bumps.iter().map(|b| b.package_name.clone()))
         .collect();
+    let bumps = covered
+        .iter()
+        .map(|name| crate::changeset::Bump {
+            package_name: name.clone(),
+            level: changesets
+                .iter()
+                .flat_map(|c| c.bumps.iter())
+                .filter(|b| &b.package_name == name)
+                .map(|b| b.level)
+                .max()
+                .unwrap_or(BumpLevel::Patch),
+        })
+        .collect();
     let status = if head_branch.starts_with(&config.release_branch_prefix) {
         Status::ReleasePullRequest
     } else if labels.iter().any(|l| l == &config.exempt_label) {
@@ -83,6 +99,7 @@ pub fn evaluate(
         affected,
         covered,
         api: Vec::new(),
+        bumps,
     }
 }
 
@@ -292,6 +309,13 @@ pub fn comment(
 ) -> String {
     let missing = check.missing();
     let mut out = format!("{MARKER}\n");
+    if !check.bumps.is_empty() {
+        out.push_str("**This PR bumps**\n\n");
+        for b in &check.bumps {
+            out.push_str(&format!("- `{}`: {}\n", b.package_name, b.level));
+        }
+        out.push('\n');
+    }
     if !check.api.is_empty() {
         out.push_str("### Bump level too low\n\n");
         for f in &check.api {
@@ -366,7 +390,8 @@ fn urlencode(s: &str) -> String {
 }
 
 /// Spec: the whole rule, against GitHub. Reads the PR, evaluates, upserts
-/// or deletes the comment, returns the check. Changeset contents are read
+/// the comment when it has something to say, deletes it otherwise,
+/// returns the check. Changeset contents are read
 /// from the checkout, which CI has at the PR head.
 pub fn run(root: &Path, config: &Config, pr: u64, gh: Gh) -> Result<Check, Error> {
     #[derive(serde::Deserialize)]
@@ -418,7 +443,10 @@ pub fn run(root: &Path, config: &Config, pr: u64, gh: Gh) -> Result<Check, Error
     let mut check = evaluate(config, &pr.head, &labels, &changed, &changesets);
     api_check(root, config, &mut check, &changesets)?;
 
-    if check.status == Status::Failed {
+    // The comment stays while it has something to say: a failure, or
+    // the bumps the PR claims, as a sanity check for the reviewer.
+    if check.status == Status::Failed || (check.status == Status::Passed && !check.bumps.is_empty())
+    {
         let slug = gh(&[
             "repo",
             "view",
@@ -612,6 +640,31 @@ changelog = "livekit-api/CHANGELOG.md"
         assert!(!body.contains("Changeset missing"));
     }
 
+    // Spec: ChangesetCheck.bumps. A passing PR still gets the comment,
+    // with one line per package at the highest claimed level.
+    #[test]
+    fn passing_comment_lists_the_claimed_bumps() {
+        let config = Config::parse(CONFIG).unwrap();
+        let cs = [
+            Changeset::parse(
+                ".changeset/a.md",
+                "---\nlivekit-api: patch\nlivekit-protocol: minor\n---\na\n",
+            )
+            .unwrap(),
+            Changeset::parse(".changeset/b.md", "---\nlivekit-api: major\n---\nb\n").unwrap(),
+        ];
+        let c = evaluate(
+            &config,
+            "feat",
+            &[],
+            &s(&["livekit-api/x", ".changeset/a.md", ".changeset/b.md"]),
+            &cs,
+        );
+        assert_eq!(c.status, Status::Passed);
+        let body = comment(&c, &config, "o/r", "feat", "t");
+        assert_eq!(body, format!("{MARKER}\n**This PR bumps**\n\n- `livekit-api`: major\n- `livekit-protocol`: minor\n\n"));
+    }
+
     #[test]
     fn single_package_repo_path_dot_matches_everything() {
         let config = Config::parse("[packages.x]\npath = \".\"\nversioned_files = [\"package.json\"]\nchangelog = \"CHANGELOG.md\"\n").unwrap();
@@ -636,6 +689,7 @@ changelog = "livekit-api/CHANGELOG.md"
         );
         let body = comment(&c, &config, "livekit/rust-sdks", "feat/x", "Add thing: v2");
         assert!(body.starts_with(MARKER));
+        assert!(body.contains("**This PR bumps**\n\n- `livekit-api`: minor\n"));
         assert!(body.contains("- `livekit-protocol`\n"));
         assert!(body.contains("Already covered: `livekit-api`"));
         assert!(body.contains("https://github.com/livekit/rust-sdks/new/feat/x?filename=.changeset/add_thing_v2.md&value=---%0Alivekit-protocol%3A%20patch%0A---"));

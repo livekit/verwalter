@@ -6,7 +6,7 @@ What the tool does, what it catches, and what to do when a step fails.
 
 | Feature | What it does | Where |
 |---|---|---|
-| Changeset check | Fails a PR that changes a package without a changeset. It posts one comment with a prefilled new-file link, updates it in place, and deletes it when the check passes. An invalid changeset is reported in the same comment. | `check`, `exempt_label` |
+| Changeset check | Fails a PR that changes a package without a changeset. It posts one comment with a prefilled new-file link and updates it in place. On a passing PR the comment lists the bump each changeset claims, per package, so the reviewer sees the release the merge causes. It is deleted when the PR claims nothing. An invalid changeset is reported in the same comment. | `check`, `exempt_label` |
 | API check | Runs a configured command (cargo-semver-checks, griffe, break-check) for every changed package that a changeset covers, and fails the PR when the changeset level is below what the command proves. 0.x versions are translated: a breaking change needs `minor`. | `[check].api`, `api` |
 | Changeset command | Writes a changeset for the packages the branch changes and no pending changeset covers, or for named packages. | `changeset --level --package --summary` |
 | One release PR | Every package with a pending bump goes in one PR. Each push regenerates the branch from `main` and updates the PR in place. With nothing pending, the PR is closed. | `pr`, `release_branch_prefix` |

@@ -196,10 +196,10 @@ entity Changeset {
 }
 
 -- The result of checking one contributor PR for changeset coverage.
--- The contributor sees one PR comment, updated in place: the missing
--- packages, a link that opens a prefilled changeset file on the PR branch,
--- and the exemption label hint. The comment is removed once the check
--- passes or the PR is exempt.
+-- The contributor sees one PR comment, updated in place: the bumps the
+-- PR claims, the missing packages, a link that opens a prefilled
+-- changeset file on the PR branch, and the exemption label hint. The
+-- comment is removed when the PR is exempt or claims no bump and passes.
 entity ChangesetCheck {
     pull_request: PullRequest
     affected_packages: Set<Package>
@@ -207,6 +207,10 @@ entity ChangesetCheck {
     -- Covered packages whose changeset level is below what the API
     -- check proved, or whose check did not run.
     api_findings: Set<ApiFinding>
+    -- What the PR's changesets claim, one per package at the highest
+    -- level. The comment lists them on a passing PR too, so the reviewer
+    -- sees the release the merge will cause.
+    bumps: Set<Bump>
     -- release_pull_request: the head branch carries the release prefix.
     -- A release PR consumes changesets rather than adding one.
     status: passed | failed | exempt | release_pull_request
@@ -723,6 +727,7 @@ surface ContributorPullRequestCheck {
         check.status
         check.affected_packages
         check.covered_packages
+        check.bumps
         check.missing_packages when check.status = failed
         check.api_findings when check.status = failed
         create_changeset_link(check.pull_request, check.missing_packages) when check.status = failed
