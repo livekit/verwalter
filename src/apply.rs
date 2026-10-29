@@ -72,7 +72,7 @@ pub fn apply(
         rewrite(
             file.path(),
             file.regex(),
-            is_lock_file(file.path()).then_some(name),
+            (is_lock_file(file.path()) && file.regex().is_none()).then_some(name),
         )?;
     }
     // Pins: repo-level pin files, then every dependent's manifests.

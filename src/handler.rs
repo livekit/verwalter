@@ -107,7 +107,39 @@ fn load(
 /// The package version in a manifest. Lock files have none. `regex` picks
 /// the version out of a file knope has no format for (config::VersionedFile).
 pub fn read_version(path: &str, regex: Option<&str>, content: &str) -> Result<Version, Error> {
+    if let Some(re) = regex {
+        let re = regex::Regex::new(re)?;
+        let m = re
+            .captures(content)
+            .and_then(|c| c.name("version"))
+            .ok_or_else(|| format!("{path}: regex `{re}` has no `version` match"))?;
+        return Ok(m.as_str().parse()?);
+    }
     Ok(load(path, regex, None, content)?.1.version()?)
+}
+
+/// A regex file: the `version` group of every match becomes `version`,
+/// nothing else moves. The regex wins over the file name, so a Cargo.lock
+/// entry or a README line can be addressed directly.
+fn regex_write(path: &str, re: &str, content: &str, version: &Version) -> Result<String, Error> {
+    let re = regex::Regex::new(re)?;
+    let mut out = String::with_capacity(content.len());
+    let mut last = 0;
+    let mut matched = false;
+    for caps in re.captures_iter(content) {
+        let Some(group) = caps.name("version") else {
+            return Err(format!("{path}: regex `{re}` has no `version` group").into());
+        };
+        matched = true;
+        out.push_str(&content[last..group.start()]);
+        out.push_str(&version.to_string());
+        last = group.end();
+    }
+    if !matched {
+        return Err(format!("{path}: regex `{re}` matches nothing").into());
+    }
+    out.push_str(&content[last..]);
+    Ok(out)
 }
 
 /// Spec: write_version (`dependency` = None) and write_dependency_version
@@ -125,9 +157,12 @@ pub fn write_version(
     dependency: Option<&str>,
     version: &Version,
 ) -> Result<String, Error> {
-    if regex.is_some() && dependency.is_some() {
+    if let Some(re) = regex {
         // A regex file carries one version, its own. Nothing to pin.
-        return Ok(content.to_string());
+        if dependency.is_some() {
+            return Ok(content.to_string());
+        }
+        return regex_write(path, re, content, version);
     }
     if let (true, Some(dep)) = (path.rsplit('/').next() == Some("Cargo.toml"), dependency) {
         // A `workspace = true` dependency takes its version from the root
@@ -690,6 +725,17 @@ dev = ["livekit-test-utils~=0.3"]
     // Obligation contract-signature.VersionedFileHandler.* for regex files:
     // only the `version` group changes, pre-releases round-trip, a pin
     // request leaves the file alone, and a regex without the group fails.
+    // A regex wins over the file name: two Cargo.lock entries, one each.
+    #[test]
+    fn regex_addresses_a_lock_entry() {
+        let lock = "[[package]]\nname = \"a\"\nversion = \"0.2.2\"\n\n[[package]]\nname = \"a-uniffi\"\nversion = \"0.2.2\"\n";
+        let re = "name = \"a\"\nversion = \"(?<version>[^\"]+)\"";
+        assert_eq!(read_version("Cargo.lock", Some(re), lock).unwrap(), v("0.2.2"));
+        let out = write_version("Cargo.lock", Some(re), lock, None, &v("0.3.0")).unwrap();
+        assert_eq!(out, "[[package]]\nname = \"a\"\nversion = \"0.3.0\"\n\n[[package]]\nname = \"a-uniffi\"\nversion = \"0.2.2\"\n");
+        assert!(write_version("Cargo.lock", Some("name = \"zzz\""), lock, None, &v("1.0.0")).is_err());
+    }
+
     #[test]
     fn regex_file() {
         let re = Some("VERSION_NAME=(?<version>.+)");

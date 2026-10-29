@@ -72,10 +72,19 @@ fn cargo_members(root: &Path) -> Vec<Member> {
                 .parse::<toml::Value>()
                 .ok()?;
             let package = manifest.get("package")?;
-            let private = match package.get("publish") {
+            let unpublished = |v: Option<&toml::Value>| match v {
                 Some(toml::Value::Boolean(b)) => !b,
                 Some(toml::Value::Array(registries)) => registries.is_empty(),
                 _ => false,
+            };
+            let private = match package.get("publish") {
+                // `publish.workspace = true` inherits [workspace.package].
+                Some(toml::Value::Table(t)) if t.get("workspace") == Some(&toml::Value::Boolean(true)) => unpublished(
+                    doc.get("workspace")
+                        .and_then(|w| w.get("package"))
+                        .and_then(|p| p.get("publish")),
+                ),
+                other => unpublished(other),
             };
             Some(Member {
                 name: package.get("name")?.as_str()?.to_string(),
@@ -322,7 +331,12 @@ mod tests {
     #[test]
     fn cargo_workspace_members_and_publish_flag() {
         let t = tmp("cargo");
-        write(&t.0, "Cargo.toml", "[workspace]\nmembers = [\"crates/*\", \"tools/bench\"]\nexclude = [\"crates/skipped\"]\n");
+        write(&t.0, "Cargo.toml", "[workspace]\nmembers = [\"crates/*\", \"tools/bench\"]\nexclude = [\"crates/skipped\"]\n\n[workspace.package]\npublish = false\n");
+        write(
+            &t.0,
+            "crates/inherits/Cargo.toml",
+            "[package]\nname = \"inherits\"\nversion = \"0.1.0\"\npublish.workspace = true\n",
+        );
         write(
             &t.0,
             "crates/a/Cargo.toml",
@@ -353,6 +367,7 @@ mod tests {
             [
                 ("a", "crates/a", false),
                 ("b", "crates/b", true),
+                ("inherits", "crates/inherits", true),
                 ("bench", "tools/bench", true)
             ]
         );
