@@ -468,32 +468,27 @@ rule CloseReleasePullRequestWithNothingPending {
 }
 
 -- One rc PR, apart from the release PR, on one branch named after the
--- requested package's fixed group: <prefix><first member>-rc. The rc
--- carries the requested package, its fixed group, and every in-repo
--- dependency with a pending changeset, transitively, with its own group:
--- an rc of a dependent must not ship against a dependency whose change
--- is only on the base branch. Each group has one rc version, and the
--- pins between the carried packages move to the rc versions.
--- Dependents outside the rc are not pre-released and not pinned to it.
--- The rc branch bumps the carried packages' own files, their entries
--- in config.pin_files, the pins among them and their changelogs.
--- The level of the requested group is the maintainer's when given, else
--- the highest its pending changesets name, else patch; a pulled-in
--- group takes the level its own changesets name.
--- Without a package, the rc carries every package with a pending
--- changeset, with its group, on a branch named after the target branch
--- (<prefix><target>-rc), and a given level applies to all of them.
+-- target branch like the release PR: <prefix><target>-rc. The rc
+-- carries every package with a pending changeset and the fixed groups
+-- they are in. Nothing is chosen by hand: the changesets say what is in
+-- flight, and each group moves by the highest level its changesets
+-- name, from its highest version, past every rc a member has tagged.
+-- The pins among the carried packages move to the rc versions, so a
+-- dependent never ships against a dependency whose change is only on
+-- the branch. Dependents without a changeset are not pre-released and
+-- not pinned to the rc. The rc branch bumps the carried packages' own
+-- files, their entries in config.pin_files, the pins among them and
+-- their changelogs.
 rule MaintainerRequestsPreRelease {
-    when: MaintainerRequestsPreRelease(maintainer, package?, target_branch, level?)
-    let group = package != none ? fixed_group_of(package, config.fixed) : filter(Packages, p => p.has_pending_bump).flat_map(p => fixed_group_of(p, config.fixed))
-    let pulled = closure(group, g => g.dependencies where this.has_pending_bump, d => fixed_group_of(d, config.fixed))
-    let next = next_prerelease_version(group, level, config.prerelease_label)
+    when: MaintainerRequestsPreRelease(maintainer, repository, target_branch)
+    let carried = filter(Packages, p => p.repository = repository and p.has_pending_bump).flat_map(p => fixed_group_of(p, config.fixed))
+    requires: not carried.empty
     ensures:
         ReleasePullRequest.created(
-            repository: package.repository,
-            pull_request: release_branch_pull_request(package, target_branch),
+            repository: repository,
+            pull_request: release_branch_pull_request(repository, target_branch),
             kind: pre_release,
-            releases: group.map(m => PlannedRelease(package: m, from_version: m.version, to_version: next)) + pulled.map(p => PlannedRelease(package: p, from_version: p.version, to_version: next_prerelease_version(fixed_group_of(p, config.fixed), none, config.prerelease_label))),
+            releases: carried.map(p => PlannedRelease(package: p, from_version: p.version, to_version: next_prerelease_version(fixed_group_of(p, config.fixed), config.prerelease_label))),
             status: open
         )
 }
@@ -761,16 +756,13 @@ surface ReleasePullRequestReview {
 
 surface PreReleaseRequest {
     facing maintainer: Maintainer
-    context package: Package
+    context repository: Repository
 
     exposes:
-        package.name
-        package.version
-        package.pending_changesets
+        repository.packages where has_pending_bump
 
     provides:
-        MaintainerRequestsPreRelease(maintainer, package, target_branch, level)
-        MaintainerRequestsPreRelease(maintainer, none, target_branch, level)
+        MaintainerRequestsPreRelease(maintainer, repository, target_branch)
 }
 
 -- After a merge the workflow receives every release the merge produced,

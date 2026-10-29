@@ -17,7 +17,7 @@ What the tool does, what it catches, and what to do when a step fails.
 | Registry check | One GET per registry answers whether a version exists. 200 skips, 404 publishes, anything else fails. `status` shows the answer. | `registry`, `exists_url` |
 | Fixed groups | Members release at one version: the highest in the group, bumped by the highest level any member needs. A member without a changeset gets a "Released with" line. | `fixed` |
 | 0.x rule | `major` on `0.x` gives `1.0.0`, as changesets does. | |
-| Pre-releases | An rc PR for one package, its fixed group, and every in-repo dependency with a pending changeset, or for every package with a pending changeset, each group at its own rc version and pinned to each other, from any branch. Dependents outside the rc are untouched. Numbering continues from the tags. The final release follows the pending level. It is never lower than the rc. | `pre-release`, `prerelease_label` |
+| Pre-releases | An rc PR for every package with a pending changeset and the fixed groups they are in, each group at its own rc version and pinned to each other, from any branch. Nothing is chosen by hand. Dependents without a changeset are untouched. Numbering continues from the tags. The final release follows the pending level. It is never lower than the rc. | `pre-release`, `prerelease_label` |
 | Draft releases | The release is created as a draft. A later job uploads the assets and flips it with `--publish`. It is reported until published. | `draft`, `release --publish` |
 | Changelog | One entry per release with PR number and author, read from the commit that added each changeset. Multi-line summaries stay bullets. | `changelog` |
 | Workspace check | A Cargo, pnpm or uv member without a private marker must be in the config. A missing one fails `check` and warns elsewhere. `publish.workspace = true` is resolved. | `ignore` |
@@ -66,7 +66,7 @@ and finishes what is missing. Start with `verwalter status`. Add
 | The commit itself is broken | `verwalter release --abandon <tag>` removes the release and the tag. Add a changeset and release the next version. |
 | Release PR missing or stale | `verwalter pr`. The branch is regenerated, the PR updated in place. |
 | Push rejected with "directory file conflict" | A branch named like the prefix (`release`) exists. Rename it or set `release_branch_prefix`. |
-| rc PR missing or stale | `verwalter pre-release <name> --target <branch>`. |
+| rc PR missing or stale | `verwalter pre-release --target <branch>`. |
 
 Running locally needs push rights and `gh auth login`. Fetch first so tags
 and `origin/<base>` are current.

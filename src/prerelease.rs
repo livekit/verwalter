@@ -1,12 +1,11 @@
 //! Spec: rule MaintainerRequestsPreRelease and surface PreReleaseRequest.
-//! One package, one rc PR, apart from the release PR, against any branch.
-//! The rc carries the package, its fixed group, and every in-repo
-//! dependency with a pending changeset, transitively, each group at its
-//! own rc version, with the pins between them moved: an rc of a dependent
-//! must not ship against a dependency whose change is only on main.
-//! Changesets stay, so the final release still lists them. Dependents
-//! outside the rc are not touched. After the merge, `verwalter release`
-//! tags each as a pre-release.
+//! One rc PR, apart from the release PR, against any branch. It carries
+//! every package with a pending changeset and the fixed groups they are
+//! in, each group at its own rc version, with the pins among them moved.
+//! Nothing is chosen by hand: the changesets say what is in flight and
+//! how far it moves. Changesets stay, so the final release still lists
+//! them. Dependents without a changeset are not touched. After the
+//! merge, `verwalter release` tags each as a pre-release.
 
 use crate::{
     apply, branches, git,
@@ -17,22 +16,9 @@ use crate::{
     Error, Version,
 };
 
-/// One rc branch per fixed group, named after its first member by name,
-/// whichever member was requested: two members never open two rc PRs.
-/// Without a package, the rc of everything pending is named after the
-/// target branch, like the release PR: `release/main-rc`.
-pub fn branch_name(repo: &Repo, package: Option<&str>, target: &str) -> String {
-    let name = match package {
-        Some(package) => repo
-            .config
-            .fixed_with(package)
-            .into_iter()
-            .chain(std::iter::once(package.to_string()))
-            .min()
-            .unwrap(),
-        None => target.to_string(),
-    };
-    format!("{}{name}-rc", repo.config.release_branch_prefix)
+/// The rc branch, named after the target like the release PR: `release/main-rc`.
+pub fn branch_name(repo: &Repo, target: &str) -> String {
+    format!("{}{target}-rc", repo.config.release_branch_prefix)
 }
 
 /// Versions of `package` that have a release tag.
@@ -44,83 +30,42 @@ pub fn released_versions(repo: &Repo, package: &str) -> Result<Vec<Version>, Err
         .collect())
 }
 
-/// The rc to open: the named package and its fixed group first, then
-/// every in-repo dependency with a pending changeset, transitively, with
-/// its own group. Without a package, every package with a pending
-/// changeset, with its group. Each group has one rc version. `level`
-/// overrides the level the requested group's pending changesets imply,
-/// or every group's without a package; a pulled-in group takes the level
-/// its own changesets name; with neither, patch. Dependencies come
-/// before dependents, like a release plan.
-pub fn plan(
-    repo: &Repo,
-    package: Option<&str>,
-    level: Option<BumpLevel>,
-) -> Result<Vec<PlannedRelease>, Error> {
+/// The rc to open: every package with a pending changeset, with its fixed
+/// group. Each group moves from its highest version by the highest level
+/// its changesets name, past every rc a member has tagged. Dependencies
+/// come before dependents, like a release plan.
+pub fn plan(repo: &Repo) -> Result<Vec<PlannedRelease>, Error> {
     let find = |name: &str| repo.packages.iter().find(|p| p.name == name);
-    let group_of = |name: &str| -> Vec<String> {
-        std::iter::once(name.to_string())
-            .chain(repo.config.fixed_with(name))
-            .collect()
-    };
     let pending = |name: &str| {
         repo.changesets
             .iter()
             .any(|c| c.unreleased_for(name).is_some())
     };
-
-    // Groups in the rc, requested first, then dependencies to a fixpoint.
-    let mut groups: Vec<Vec<String>> = match package {
-        Some(package) => {
-            find(package).ok_or_else(|| format!("unknown package {package}"))?;
-            vec![group_of(package)]
+    let mut groups: Vec<Vec<String>> = Vec::new();
+    for p in repo.packages.iter().filter(|p| pending(&p.name)) {
+        if !groups.iter().any(|g| g.contains(&p.name)) {
+            groups.push(
+                std::iter::once(p.name.clone())
+                    .chain(repo.config.fixed_with(&p.name))
+                    .collect(),
+            );
         }
-        None => {
-            let mut groups: Vec<Vec<String>> = Vec::new();
-            for p in repo.packages.iter().filter(|p| pending(&p.name)) {
-                if !groups.iter().any(|g| g.contains(&p.name)) {
-                    groups.push(group_of(&p.name));
-                }
-            }
-            if groups.is_empty() {
-                return Err("no pending changesets: name a package to pre-release".into());
-            }
-            groups
-        }
-    };
-    let mut i = 0;
-    while i < groups.len() {
-        let deps: Vec<String> = groups[i]
-            .iter()
-            .filter_map(|m| find(m))
-            .flat_map(|m| m.dependencies.iter().cloned())
-            .collect();
-        for d in deps {
-            if pending(&d) && !groups.iter().any(|g| g.contains(&d)) {
-                groups.push(group_of(&d));
-            }
-        }
-        i += 1;
+    }
+    if groups.is_empty() {
+        return Err("no pending changesets: nothing to pre-release".into());
     }
     let in_rc = |name: &str| groups.iter().any(|g| g.iter().any(|m| m == name));
 
     let mut out = Vec::new();
-    for (i, group) in groups.iter().enumerate() {
+    for group in &groups {
         let members: Vec<&crate::plan::PackageState> =
             group.iter().filter_map(|m| find(m)).collect();
-        let from_changesets = repo
+        let level = repo
             .changesets
             .iter()
             .flat_map(|c| members.iter().filter_map(|m| c.unreleased_for(&m.name)))
-            .max();
-        let level = if i == 0 || package.is_none() {
-            level.or(from_changesets)
-        } else {
-            from_changesets
-        }
-        .unwrap_or(BumpLevel::Patch);
-        // The group moves from its highest version and past every rc any
-        // member has tagged.
+            .max()
+            .unwrap_or(BumpLevel::Patch);
         let base = members.iter().map(|m| &m.version).max().unwrap();
         let mut released = Vec::new();
         for m in &members {
@@ -149,7 +94,6 @@ pub fn plan(
             });
         }
     }
-    // Dependencies first: the order `apply` and `release` expect.
     let names: Vec<String> = out.iter().map(|r| r.package.clone()).collect();
     let deps = |n: &str| -> Vec<&str> {
         out.iter()
@@ -169,15 +113,13 @@ pub fn plan(
 /// the PR against `target`.
 pub fn open(
     repo: &Repo,
-    package: Option<&str>,
     target: &str,
-    level: Option<BumpLevel>,
     remote: &str,
     dry_run: bool,
     gh: Gh,
 ) -> Result<(Vec<PlannedRelease>, PullRequest), Error> {
-    let releases = plan(repo, package, level)?;
-    let branch = branch_name(repo, package, target);
+    let releases = plan(repo)?;
+    let branch = branch_name(repo, target);
     let start = format!("{remote}/{target}");
     if !git::ref_exists(&repo.root, &start) {
         return Err(format!("{start} does not exist; fetch it first").into());
@@ -229,14 +171,9 @@ pub fn open(
     )?;
 
     let mut body = format!(
-        "{MARKER}\nMerging this PR releases a pre-release from `{target}`. \
+        "{MARKER}\nMerging this PR releases a pre-release of every package with a pending changeset from `{target}`. \
          Changesets stay pending; the next final release includes them.\n"
     );
-    if releases.len() > 1 {
-        body.push_str(
-            "Dependencies with a pending changeset are pre-released with the package, and it is pinned to their rc.\n",
-        );
-    }
     for release in &releases {
         body.push_str(&section(release, repo, &releases, ""));
     }

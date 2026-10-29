@@ -44,7 +44,7 @@ a regex: `{ path = "version.go", regex = 'Version = "(?<version>[^"]+)"' }`.
 | `changeset-check.yml` | A PR is opened or updated | Fails a PR that changes a package without a changeset, with a comment and a prefilled link. On a passing PR the comment lists the bumps it claims and the dependents released with them. |
 | `release-pr.yml` | A push to `main` | Opens or updates the one release PR. |
 | `release.yml` | The release PR merges | Builds, tags, creates the GitHub releases, then publishes. |
-| `pre-release.yml` | Run by hand, optional | Opens an rc PR for one package from the chosen branch. |
+| `pre-release.yml` | Run by hand, optional | Opens an rc PR for everything with a pending changeset, from the chosen branch. |
 
 Each one is a single step of the action:
 
@@ -88,9 +88,8 @@ missing.
 - **Publish** runs your command per package, independent packages in
   parallel. A version the registry already has is skipped. A failure blocks
   its dependents and nothing else.
-- **Pre-releases** on demand: `verwalter pre-release [package]` opens an rc
-  PR from any branch, for every package with pending changes or for one
-  and the dependencies it needs.
+- **Pre-releases** on demand: `verwalter pre-release` opens an rc PR from
+  any branch for everything with a pending changeset.
 - **Checks** on contributor PRs: a missing or invalid changeset, a package
   missing from the config, and with a tool such as cargo-semver-checks, a
   changeset level below what the API change needs.

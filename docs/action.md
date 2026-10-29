@@ -40,7 +40,7 @@ per registry for `verwalter.toml`:
 | `changeset-check.yml` | `pull_request` on `main` | `check` |
 | `release-pr.yml` | `push` to `main` | `pr` |
 | `release.yml` | `pull_request` closed, merged, head `release/*`, author `github-actions[bot]`, body with the verwalter marker | `release`, then `publish` |
-| `pre-release.yml` | `workflow_dispatch` with an optional `package` and `level` | `pre-release <package> --target ${{ github.ref_name }} [--level <l>]`, with `fetch-depth: 0` because the tags number the rc. Without a level, the pending changesets decide. |
+| `pre-release.yml` | `workflow_dispatch` | `pre-release --target ${{ github.ref_name }}`, with `fetch-depth: 0` because the tags number the rc. The pending changesets decide what is in it and how far it moves. |
 
 Repository settings the workflows need:
 

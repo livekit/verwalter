@@ -8,7 +8,7 @@ use verwalter::{
     version::BumpLevel, workspace, Error,
 };
 
-const USAGE: &str = "usage: verwalter <status|plan|branches|pr> [--config <file>] [--base <ref>] [--remote <name>] [--dry-run] [<checkout>]\n       verwalter changeset [--level major|minor|patch] [--package <name>]... [--base <ref>] [--summary <text>] [<checkout>]\n       verwalter release [--asset <file>]... [--package <name>] [--publish] [--abandon <tag>] [--remote <name>] [--dry-run] [<checkout>]\n       verwalter check --pr <number> [--config <file>] [--dry-run] [<checkout>]\n       verwalter publish [--releases <json>] [--jobs <n>] [--dry-run] [<checkout>]\n       verwalter pre-release [<package>] [--target <branch>] [--level major|minor|patch] [--remote <name>] [--dry-run] [<checkout>]";
+const USAGE: &str = "usage: verwalter <status|plan|branches|pr> [--config <file>] [--base <ref>] [--remote <name>] [--dry-run] [<checkout>]\n       verwalter changeset [--level major|minor|patch] [--package <name>]... [--base <ref>] [--summary <text>] [<checkout>]\n       verwalter release [--asset <file>]... [--package <name>] [--publish] [--abandon <tag>] [--remote <name>] [--dry-run] [<checkout>]\n       verwalter check --pr <number> [--config <file>] [--dry-run] [<checkout>]\n       verwalter publish [--releases <json>] [--jobs <n>] [--dry-run] [<checkout>]\n       verwalter pre-release [--target <branch>] [--remote <name>] [--dry-run] [<checkout>]";
 
 fn main() -> ExitCode {
     match run() {
@@ -25,12 +25,6 @@ fn run() -> Result<(), Error> {
     let Some(command) = args.next() else {
         return Err(USAGE.into());
     };
-    // `pre-release [package]`: the package is optional, every pending one
-    // without it. A flag in that position is not a package.
-    let mut package = None;
-    if command == "pre-release" {
-        package = args.next_if(|a| !a.starts_with("--"));
-    }
     let mut config = None;
     let mut base = None;
     let mut remote = String::from("origin");
@@ -247,8 +241,8 @@ fn run() -> Result<(), Error> {
             let target = target.unwrap_or_else(|| repo.config.base_branch.clone());
             github::attribute(&mut repo, &mut gh(&root, &remote, dry_run));
             let mut gh = gh(&repo.root, &remote, dry_run);
-            let (releases, pr) = prerelease::open(&repo, package.as_deref(), &target, level, &remote, dry_run, &mut gh)
-                .map_err(|e| format!("{e}\nresume with: verwalter pre-release {} --target {target}  (the rc branch and PR are updated in place)", package.as_deref().unwrap_or("")))?;
+            let (releases, pr) = prerelease::open(&repo, &target, &remote, dry_run, &mut gh)
+                .map_err(|e| format!("{e}\nresume with: verwalter pre-release --target {target}  (the rc branch and PR are updated in place)"))?;
             for r in &releases {
                 println!(
                     "#{}  {}  {} {} -> {}  on {}",
