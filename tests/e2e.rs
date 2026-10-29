@@ -220,9 +220,8 @@ fn pr_sync_pushes_and_creates_updates_closes() {
 
     let calls = std::cell::RefCell::new(Vec::<String>::new());
     let has = |prefix: &str| calls.borrow().iter().any(|c| c.starts_with(prefix));
-    // #40 is the release PR; #41 and #99 are per-package PRs from before
-    // 0.9; #50 is an rc PR, which carries the same label.
-    let open = r#"[{"number":40,"headRefName":"release/main","baseRefName":"next"},{"number":41,"headRefName":"release/livekit-api","baseRefName":"main"},{"number":99,"headRefName":"release/old-package","baseRefName":"main"},{"number":50,"headRefName":"release/livekit-rc","baseRefName":"main"}]"#;
+    // #40 is the open PR on the release branch, with a wrong base.
+    let open = r#"[{"number":40,"headRefName":"release/main","baseRefName":"next"}]"#;
     let mut gh = |args: &[&str]| -> Result<String, verwalter::Error> {
         calls.borrow_mut().push(args.join(" "));
         Ok(match args {
@@ -264,12 +263,11 @@ fn pr_sync_pushes_and_creates_updates_closes() {
     }
     assert!(has("pr edit 40 --base main"), "base corrected");
     assert!(
-        has("pr close 41") && has("pr close 99"),
-        "stale per-package PRs closed"
+        has("pr list --state open --head release/main"),
+        "only the release branch's PR is looked at"
     );
-    assert!(!has("pr close 50"), "rc PR left alone");
 
-    // Nothing planned: the release PR is closed too, the rc PR stays.
+    // Nothing planned: the release PR is closed.
     calls.borrow_mut().clear();
     assert!(
         verwalter::github::sync(&repo, &[], None, "origin", false, &mut gh)
@@ -277,7 +275,6 @@ fn pr_sync_pushes_and_creates_updates_closes() {
             .is_none()
     );
     assert!(has("pr close 40"));
-    assert!(!has("pr close 50"));
 
     // A fresh repo gets a new PR.
     calls.borrow_mut().clear();

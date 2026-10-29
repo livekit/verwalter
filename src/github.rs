@@ -9,9 +9,7 @@ use std::{path::Path, process::Command};
 
 use serde::Deserialize;
 
-use crate::{
-    apply::render_entry, branches, git, plan::PlannedRelease, prerelease, repo::Repo, Error,
-};
+use crate::{apply::render_entry, branches, git, plan::PlannedRelease, repo::Repo, Error};
 
 /// Runs `gh` with the given arguments and returns stdout. Injected so
 /// tests can fake GitHub.
@@ -163,8 +161,8 @@ pub fn attribute(repo: &mut Repo, gh: Gh) {
 }
 
 /// Push the release branch and make GitHub match the plan: one open
-/// release PR while something is planned, none otherwise. Pre-release PRs
-/// carry the same label and are left alone.
+/// release PR while something is planned, none otherwise. Only the PR on
+/// the release branch is touched: pre-release PRs carry the same label.
 pub fn sync(
     repo: &Repo,
     plan: &[PlannedRelease],
@@ -185,25 +183,19 @@ pub fn sync(
         "Release PR managed by verwalter",
     ])?;
 
+    let name = branches::branch_name(repo);
     let open: Vec<PullRequest> = serde_json::from_str(&gh(&[
         "pr",
         "list",
         "--state",
         "open",
-        "--label",
-        label,
-        "--limit",
-        "200",
+        "--head",
+        &name,
         "--json",
         "number,headRefName,baseRefName",
     ])?)?;
-    let is_rc = |pr: &PullRequest| {
-        repo.packages
-            .iter()
-            .any(|p| pr.head == prerelease::branch_name(repo, &p.name))
-    };
+    let existing = open.first();
 
-    let mut result = None;
     if let Some(branch) = branch {
         git::write(&repo.root, dry_run, &["push", "--force", "--quiet", remote, &format!("{branch}:{branch}")]).map_err(|e| {
             if e.to_string().contains("directory file conflict") {
@@ -213,8 +205,7 @@ pub fn sync(
                 e
             }
         })?;
-        let existing = open.iter().find(|pr| pr.head == branch);
-        result = Some(upsert_pr(
+        return Ok(Some(upsert_pr(
             gh,
             existing,
             branch,
@@ -222,25 +213,21 @@ pub fn sync(
             &branches::title(plan),
             &body(plan, repo),
             label,
-        )?);
+        )?));
     }
 
-    // Spec: with nothing left to release there is no open release PR. This
-    // also closes the per-package PRs of verwalter before 0.9.
-    for stale in open
-        .iter()
-        .filter(|pr| Some(pr.head.as_str()) != branch && !is_rc(pr))
-    {
+    // Spec: CloseReleasePullRequestWithNothingPending.
+    if let Some(stale) = existing {
         gh(&[
             "pr",
             "close",
             &stale.number.to_string(),
             "--delete-branch",
             "--comment",
-            "Superseded: the release PR is regenerated on every push.",
+            "Nothing left to release.",
         ])?;
     }
-    Ok(result)
+    Ok(None)
 }
 
 /// Open a PR for `head` against `base`, or bring `existing` (the open PR
