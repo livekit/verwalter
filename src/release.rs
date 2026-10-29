@@ -125,12 +125,20 @@ fn release_one(
     // Spec: TagRelease / ResumeUntaggedReleases. An existing tag, local
     // or on the remote, counts as done wherever it points.
     let mut fresh = false;
-    let changelog = fs::read_to_string(root.join(&package.changelog)).unwrap_or_default();
+    let changelog = package
+        .changelog
+        .as_ref()
+        .map(|c| fs::read_to_string(root.join(c)).unwrap_or_default())
+        .unwrap_or_default();
     if !git::ref_exists(root, &tag) {
         // Spec: ReleaseNeedsChangelogEntry. The release branch always writes
-        // one; a version edited by hand has none and is not a release.
+        // one; a version edited by hand has none and is not a release. A
+        // package without a changelog has nothing to tell them apart.
         let heading = format!("## {version}");
-        if options.package.is_none() && !changelog.lines().any(|l| l.trim() == heading) {
+        if options.package.is_none()
+            && package.changelog.is_some()
+            && !changelog.lines().any(|l| l.trim() == heading)
+        {
             eprintln!(
                 "warning: {name} {version} has no tag and no changelog entry; not released (edited by hand?). `release --package {name}` releases it anyway"
             );

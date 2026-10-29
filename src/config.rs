@@ -51,8 +51,11 @@ pub struct Package {
     /// Relative to `path`. `Config::parse` makes them repo-relative.
     pub versioned_files: Vec<VersionedFile>,
     /// Relative to `path`. Default: `CHANGELOG.md` in the package.
-    #[serde(default = "default_changelog")]
-    pub changelog: String,
+    /// `changelog = false` keeps no changelog: the release notes are
+    /// empty, and a version without a tag is released as is, because
+    /// there is no entry to tell a hand edit from a release.
+    #[serde(default = "default_changelog", deserialize_with = "changelog_or_off")]
+    pub changelog: Option<String>,
     /// Default: "v{version}" with one package, "{package}-v{version}" otherwise.
     pub tag_template: Option<String>,
     #[serde(default)]
@@ -150,8 +153,25 @@ pub struct Check {
     pub api: Option<String>,
 }
 
-fn default_changelog() -> String {
-    "CHANGELOG.md".into()
+fn default_changelog() -> Option<String> {
+    Some("CHANGELOG.md".into())
+}
+
+/// `changelog = "path"` or `changelog = false`.
+fn changelog_or_off<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Raw {
+        Path(String),
+        Off(bool),
+    }
+    match Raw::deserialize(d)? {
+        Raw::Path(p) => Ok(Some(p)),
+        Raw::Off(false) => Ok(None),
+        Raw::Off(true) => Err(serde::de::Error::custom(
+            "changelog: a path, or false for none",
+        )),
+    }
 }
 
 /// `file` relative to a package `path`, as a repo-relative path. `..`
@@ -206,7 +226,7 @@ impl Config {
                     }
                 }
             }
-            p.changelog = under(&p.path, &p.changelog);
+            p.changelog = p.changelog.as_deref().map(|c| under(&p.path, c));
         }
         let mut seen = std::collections::BTreeSet::new();
         for group in &config.fixed {
@@ -473,10 +493,20 @@ release = "tag"
         let a = &c.packages["a"];
         assert_eq!(a.versioned_files[0].path(), "crates/a/Cargo.toml");
         assert_eq!(a.versioned_files[1].path(), "crates/bindings/package.json");
-        assert_eq!(a.changelog, "crates/a/CHANGELOG.md");
+        assert_eq!(a.changelog.as_deref(), Some("crates/a/CHANGELOG.md"));
         let b = &c.packages["b"];
         assert_eq!(b.versioned_files[0].path(), "package.json");
-        assert_eq!(b.changelog, "docs/CHANGES.md");
+        assert_eq!(b.changelog.as_deref(), Some("docs/CHANGES.md"));
+        // Opt out.
+        let c = Config::parse(
+            "[packages.a]\npath = \"a\"\nversioned_files = [\"Cargo.toml\"]\nchangelog = false\n",
+        )
+        .unwrap();
+        assert_eq!(c.packages["a"].changelog, None);
+        assert!(Config::parse(
+            "[packages.a]\npath = \"a\"\nversioned_files = [\"Cargo.toml\"]\nchangelog = true\n"
+        )
+        .is_err());
     }
 
     #[test]

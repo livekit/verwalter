@@ -34,7 +34,7 @@ versioned_files = ["Cargo.toml"]
 ```
 
 Files are relative to `path`, and the changelog is `CHANGELOG.md` in the
-package unless set. A single package uses `path = "."`. A version in another text file takes
+package unless set, or `false` for none. A single package uses `path = "."`. A version in another text file takes
 a regex: `{ path = "version.go", regex = 'Version = "(?<version>[^"]+)"' }`.
 
 **2. Copy the workflows** from [examples/workflows](examples/workflows):

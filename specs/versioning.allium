@@ -115,8 +115,10 @@ entity Package {
     -- the version; files that disagree are a warning (VersionedFilesAgree).
     -- Paths are relative to the package's path; `..` reaches a sibling.
     versioned_files: Set<VersionedFile>
-    -- Relative to the package's path. Default: CHANGELOG.md.
-    changelog_file: String
+    -- Relative to the package's path. Default: CHANGELOG.md. None opts
+    -- out: no entry is written, the release notes are empty, and
+    -- ReleaseNeedsChangelogEntry does not apply.
+    changelog_file: String?
     version: Version
     dependencies: Set<Package>
     -- Template for the tag name. Default: "v{version}" in a single-package
@@ -553,7 +555,7 @@ rule TagRelease {
     when: release: Release.created
     requires: release.status = committed
     requires: release.package.release_mode != none
-    requires: release.has_changelog_entry
+    requires: release.has_changelog_entry or release.package.changelog_file = none
     ensures:
         release.status = tagged
         release.tag = tag_for(release.package.tag_template, release.package.name, release.version)

@@ -40,7 +40,7 @@ api = "cargo semver-checks --baseline-rev $VERWALTER_BASELINE_TAG 2>&1 | tee /de
 [packages.livekit-protocol]
 path = "livekit-protocol"
 versioned_files = ["Cargo.toml"]               # relative to path; the first file carries the version
-changelog = "CHANGELOG.md"                     # relative to path; this is the default
+changelog = "CHANGELOG.md"                     # relative to path; the default. `false` keeps no changelog
 tag_template = "{package}-v{version}"      # default in a monorepo, v{version} with one package
 release = "tag_and_release"                # none | tag | tag_and_release
 draft = false

@@ -171,8 +171,11 @@
           }
         },
         "changelog": {
-          "description": "Relative to `path`. Default: `CHANGELOG.md` in the package.",
-          "type": "string",
+          "description": "Relative to `path`. Default: `CHANGELOG.md` in the package.\n`changelog = false` keeps no changelog: the release notes are\nempty, and a version without a tag is released as is, because\nthere is no entry to tell a hand edit from a release.",
+          "type": [
+            "string",
+            "null"
+          ],
           "default": "CHANGELOG.md"
         },
         "tag_template": {

@@ -82,13 +82,15 @@ pub fn apply(
         }
     }
 
-    // Changelog.
-    let path = root.join(&package.changelog);
-    let before = fs::read_to_string(&path).unwrap_or_else(|_| "# Changelog\n".to_string());
-    let after = insert_entry(&before, &render_entry(release, changesets, plan));
-    if after != before {
-        fs::write(&path, after)?;
-        written.push(path);
+    // Changelog, unless the package keeps none.
+    if let Some(changelog) = &package.changelog {
+        let path = root.join(changelog);
+        let before = fs::read_to_string(&path).unwrap_or_else(|_| "# Changelog\n".to_string());
+        let after = insert_entry(&before, &render_entry(release, changesets, plan));
+        if after != before {
+            fs::write(&path, after)?;
+            written.push(path);
+        }
     }
 
     Ok(written)
