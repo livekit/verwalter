@@ -58,7 +58,7 @@ jobs:
           name: dist
           path: dist
       - id: verwalter
-        uses: lukasIO/verwalter@v0.18.1
+        uses: lukasIO/verwalter@v0.19.0
         with:
           command: release
           # Attached to the GitHub release when it is created. Leave out
@@ -96,7 +96,7 @@ jobs:
       # cargo, pip and pub keep pre-releases away from default resolution
       # by the version alone. npm does not: publish an rc with a dist-tag
       # (`--tag next` when VERWALTER_PRERELEASE is true).
-      - uses: lukasIO/verwalter@v0.18.1
+      - uses: lukasIO/verwalter@v0.19.0
         env:
           GH_TOKEN: ${{ github.token }}
         with:

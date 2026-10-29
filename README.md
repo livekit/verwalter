@@ -49,7 +49,7 @@ a regex: `{ path = "version.go", regex = 'Version = "(?<version>[^"]+)"' }`.
 Each one is a single step of the action:
 
 ```yaml
-- uses: lukasIO/verwalter@v0.18.1
+- uses: lukasIO/verwalter@v0.19.0
   with:
     command: pr        # check | pr | release | publish | pre-release | status
 ```
@@ -108,4 +108,4 @@ missing.
 
 Install the binary from the
 [releases page](https://github.com/lukasIO/verwalter/releases) to run any
-command locally, or `cargo install --git https://github.com/lukasIO/verwalter --tag v0.18.1`.
+command locally, or `cargo install --git https://github.com/lukasIO/verwalter --tag v0.19.0`.
