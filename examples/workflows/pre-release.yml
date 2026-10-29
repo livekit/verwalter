@@ -1,0 +1,33 @@
+# On demand: open an rc PR for one package, and its fixed group, from the
+# branch the workflow is run on. Merging the PR tags 1.6.0-rc.1; the next
+# run numbers rc.2. Changesets stay pending for the final release.
+name: Pre-release PR
+
+on:
+  workflow_dispatch:
+    inputs:
+      package:
+        description: Package to pre-release.
+        required: true
+      level:
+        description: Bump level of the rc. Defaults to the highest pending changeset level.
+        type: choice
+        options: [minor, patch, major]
+        default: minor
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  pr:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # the tags number the rc
+      - uses: lukasIO/verwalter@v0.16.0
+        with:
+          command: pre-release
+          args: ${{ inputs.package }} --level ${{ inputs.level }} --target ${{ github.ref_name }}
+          token: ${{ secrets.RELEASE_TOKEN || github.token }}

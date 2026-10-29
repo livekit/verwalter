@@ -40,9 +40,7 @@ per registry for `verwalter.toml`:
 | `release-pr.yml` | `push` to `main` | `pr` |
 | `release.yml` | `pull_request` closed, merged, head `release/*`, author `github-actions[bot]`, body with the verwalter marker | `release`, then `publish` |
 
-An rc workflow is one `workflow_dispatch` job. It runs
-`pre-release <package> --level <l> --target ${{ github.ref_name }}` with
-`fetch-depth: 0`, because the tags number the rc.
+| `pre-release.yml` | `workflow_dispatch` with `package` and `level` | `pre-release <package> --level <l> --target ${{ github.ref_name }}`, with `fetch-depth: 0` because the tags number the rc |
 
 Repository settings the workflows need:
 

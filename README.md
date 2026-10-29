@@ -37,13 +37,14 @@ changelog = "livekit-api/CHANGELOG.md"
 A single package uses `path = "."`. A version in another text file takes
 a regex: `{ path = "version.go", regex = 'Version = "(?<version>[^"]+)"' }`.
 
-**2. Copy the three workflows** from [examples/workflows](examples/workflows):
+**2. Copy the workflows** from [examples/workflows](examples/workflows):
 
 | Workflow | When | What |
 |---|---|---|
 | `changeset-check.yml` | A PR is opened or updated | Fails a PR that changes a package without a changeset, with a comment and a prefilled link. On a passing PR the comment lists the bumps it claims and the dependents released with them. |
 | `release-pr.yml` | A push to `main` | Opens or updates the one release PR. |
 | `release.yml` | The release PR merges | Builds, tags, creates the GitHub releases, then publishes. |
+| `pre-release.yml` | Run by hand, optional | Opens an rc PR for one package from the chosen branch. |
 
 Each one is a single step of the action:
 
