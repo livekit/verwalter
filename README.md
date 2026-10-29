@@ -118,7 +118,7 @@ See [examples/workflows](examples/workflows) for the three workflows:
 changeset check on PRs, release PRs on push, release after merge.
 
 ```yaml
-- uses: lukasIO/verwalter@v0.12.0
+- uses: lukasIO/verwalter@v0.13.0
   with:
     command: check   # check | plan | pr | release
 ```
