@@ -30,8 +30,12 @@ external entity PullRequest {
     changed_files: Set<String>
 }
 
+-- A tag belongs to a package when its name matches the package's
+-- tag_template; the version is the one the name carries.
 external entity GitTag {
     name: String
+    package: Package?
+    version: Version?
 }
 
 external entity GitHubRelease {
@@ -66,6 +70,7 @@ value Bump {
     level: BumpLevel
 }
 
+
 ------------------------------------------------------------
 -- Contracts
 ------------------------------------------------------------
@@ -92,6 +97,9 @@ contract VersionedFileHandler {
 ------------------------------------------------------------
 
 enum BumpLevel { major | minor | patch }
+
+-- custom: exists_url with {name} and {version}, answering 200 or 404.
+enum Registry { none | crates | npm | pypi | pubdev | custom }
 
 ------------------------------------------------------------
 -- Entities and Variants
@@ -127,13 +135,18 @@ entity Package {
     -- an error: a registry outage never reads as "not there yet".
     registry: Registry = config.publish.registry
     exists_url: String? = config.publish.exists_url
-    on_registry(version: Version): Boolean? when registry != none
+    -- null when registry = none.
+    on_registry(v): registry_has_version(registry, exists_url, name, v)
     -- The shell command that publishes this package, run in its path:
     -- the package's own, else config.publish.publish when the package is
     -- on the default registry, else the built-in command for its
     -- registry (cargo publish, npm publish, twine upload, dart pub
     -- publish), else none and `publish` refuses to start.
     publish_command: String?
+    -- True when config.publish.workspace is set and the package has no
+    -- publish command of its own and no registry other than the default:
+    -- the workspace command publishes it, and publish_command is unused.
+    in_workspace_publish: Boolean
     -- The shell command that checks the public API of this package on a
     -- contributor PR: the package's own, else config.check.api, else
     -- none and the check only asks for a changeset. It runs in the
@@ -151,9 +164,13 @@ entity Package {
     -- A package left at a pre-release has its promotion pending, with or
     -- without changesets: an rc is never the last word.
     has_pending_bump: pending_changesets.any(c => c.unreleased_for(this.name)) or version.is_prerelease
-    -- No tag at all: a registry with trusted publishing needs the first
-    -- upload done by hand, so the release PR and the handoff say so.
-    first_release: if registry != none then not registry.has_any_version(this) else not GitTags.any(t => t.package = this)
+    -- Nothing published yet: a registry with trusted publishing needs the
+    -- first upload done by hand, so the release PR and the handoff say so.
+    -- A registry with a package-level lookup answers; without one (none,
+    -- custom) no tag of another version means a first release.
+    first_release:
+        if registry in {none, custom}: not GitTags.any(t => t.package = this and t.version != version)
+        else: not registry_has_any_version(registry, name)
 }
 
 -- Exactly the changesets file format: `.changeset/<name>.md`, YAML front
@@ -190,7 +207,9 @@ entity ChangesetCheck {
     -- Covered packages whose changeset level is below what the API
     -- check proved, or whose check did not run.
     api_findings: Set<ApiFinding>
-    status: passed | failed | exempt
+    -- release_pull_request: the head branch carries the release prefix.
+    -- A release PR consumes changesets rather than adding one.
+    status: passed | failed | exempt | release_pull_request
 
     missing_packages: affected_packages where not (this in covered_packages)
 }
@@ -202,7 +221,7 @@ entity ChangesetCheck {
 value ApiFinding {
     package: Package
     claimed_level: BumpLevel
-    -- none when the command failed or printed something else
+    -- none when the command failed or printed something unreadable
     required_level: BumpLevel?
     output: String
 }
@@ -243,6 +262,10 @@ entity Release {
     tag: GitTag when status = tagged | drafted | published
     github_release: GitHubRelease when status = drafted | published
 
+    -- The release PR always writes one. A version with none was edited
+    -- by hand, not released by a release PR.
+    has_changelog_entry: changelog_has_entry(package.changelog_file, version)
+
     transitions status {
         committed -> tagged
         tagged -> drafted
@@ -278,7 +301,13 @@ config {
     publish: { jobs: Integer = 4, registry: Registry = none, exists_url: String?, publish: String?, workspace: String? }
     -- Default api_command for `verwalter check`, overridden per package.
     check: { api: String? }
-    -- Workspace members the consistency check skips, by name or path.
+    -- Files outside any package that pin every package's version: a
+    -- workspace Cargo.toml, Cargo.lock, package-lock.json. Every release,
+    -- pre-releases included, updates its own entry in each of them, so
+    -- the workspace still resolves.
+    pin_files: Set<String> = {}
+    -- Workspace members the consistency check skips, by name or path; a
+    -- trailing `*` matches a prefix (`examples/*`).
     ignore: Set<String> = {}
     -- Groups of packages that always release at one shared version: the
     -- highest version in the group, bumped by the highest level any
@@ -303,11 +332,15 @@ config {
 -- configured Package must exist. A private package may be configured: it
 -- is versioned and released on GitHub, just not published to a registry.
 -- The check fails on a mismatch, every other command warns, so a new
--- package cannot escape versioning.
+-- package cannot escape versioning. is_configured(m): a configured
+-- Package has the member's name, compared normalised (PEP 503:
+-- `play_py_ext` is `play-py-ext`). ignored(m) matches config.ignore
+-- against the name or the path.
 rule WorkspaceConsistencyCheck {
     when: ContributorPullRequestUpdated(pr)
     let members = workspace_members(pr.repository)
-    requires: members.all(m => m.private or m.name in Packages.name or m.name in config.ignore or m.path in config.ignore)
+    requires: members.all(m => m.private or is_configured(m) or ignored(m, config.ignore))
+    requires: filter(Packages, p => p.repository = pr.repository).all(p => package_present(p))
     ensures: WorkspaceConsistent(repository: pr.repository)
 }
 
@@ -325,35 +358,45 @@ rule ChangesetCheckOnContributorPullRequest {
     let affected = affected_packages(pr.changed_files)
     let covered = covered_packages(pr.changed_files)
     ensures:
-        if config.exempt_label in pr.labels:
-            ChangesetCheck.created(pull_request: pr, affected_packages: affected, covered_packages: covered, status: exempt)
+        if starts_with(pr.head_branch, config.release_branch_prefix):
+            ChangesetCheck.created(pull_request: pr, affected_packages: affected, covered_packages: covered, status: release_pull_request)
         else:
-            if affected.all(p => p in covered):
-                ChangesetCheck.created(pull_request: pr, affected_packages: affected, covered_packages: covered, status: passed)
+            if config.exempt_label in pr.labels:
+                ChangesetCheck.created(pull_request: pr, affected_packages: affected, covered_packages: covered, status: exempt)
             else:
-                ChangesetCheck.created(pull_request: pr, affected_packages: affected, covered_packages: covered, status: failed)
+                if affected.all(p => p in covered):
+                    ChangesetCheck.created(pull_request: pr, affected_packages: affected, covered_packages: covered, status: passed)
+                else:
+                    ChangesetCheck.created(pull_request: pr, affected_packages: affected, covered_packages: covered, status: failed)
 }
 
 -- The changeset level is the contributor's claim. For every affected
 -- package that a changeset covers and that has an api_command, the
 -- command is the oracle: its answer, translated to a digit for the
 -- package's version, must not exceed the claimed level. A finding fails
--- the check, and the comment names the level to use. An exempt PR runs
--- no command.
+-- the check, and the comment names the level to use. An exempt PR or a
+-- release PR runs no command. The command runs in the package's path
+-- with the claimed level and the baseline tag (the tag of the current
+-- version) in its environment. run_api_command returns the outcome,
+-- the kind of change when answered, and the output. The outcome is
+-- failed (non-zero exit), unreadable (it printed something other than
+-- major, minor or patch), silent (it printed nothing: it cannot tell)
+-- or answered.
 rule ApiCheckOnCoveredPackages {
     when: check: ChangesetCheck.created
-    requires: check.status != exempt
+    requires: check.status in {passed, failed}
     let checked = check.affected_packages where this in check.covered_packages and this.api_command != null
     ensures:
         for p in checked:
             let claimed = max(check.pull_request.changesets.bumps where package = p -> level)
-            let answer = p.api_command run with VERWALTER_LEVEL = claimed and VERWALTER_BASELINE_TAG = p.tag_for(p.version)
-            if answer failed:
-                check.api_findings += ApiFinding(package: p, claimed_level: claimed, required_level: none, output: answer.output)
-            else if answer.kind != none and claimed < required_level(p.version, answer.kind):
-                check.api_findings += ApiFinding(package: p, claimed_level: claimed, required_level: required_level(p.version, answer.kind), output: answer.output)
+            let answer = run_api_command(p.api_command, claimed, tag_for(p.tag_template, p.name, p.version))
+            if answer.outcome in {failed, unreadable}:
+                check.api_findings.add(ApiFinding(package: p, claimed_level: claimed, required_level: null, output: answer.output))
+            else:
+                if answer.outcome = answered and claimed < required_level(p.version, answer.kind):
+                    check.api_findings.add(ApiFinding(package: p, claimed_level: claimed, required_level: required_level(p.version, answer.kind), output: answer.output))
         if check.api_findings != {}:
-            check.status becomes failed
+            check.status = failed
 }
 
 -- Release PR lifecycle
@@ -415,19 +458,25 @@ rule CloseReleasePullRequestWithNothingPending {
         ensures: rpr.status = closed
 }
 
--- One package, one rc PR, apart from the release PR. Dependents are not
--- pre-released and not pinned to the rc; a maintainer requests them
--- separately, base package first if needed. The rc branch bumps the
--- package's own files and changelog only. Branch name: <prefix><package>-rc.
+-- One package, one rc PR, apart from the release PR. A member of a fixed
+-- group takes the whole group along at one rc version, on one branch
+-- named after the group's first member: <prefix><member>-rc. Dependents
+-- are not pre-released and their manifests are not pinned to the rc; a
+-- maintainer requests them separately, base package first if needed.
+-- The rc branch bumps the group's own files, their entries in
+-- config.pin_files and their changelogs only. The level is the
+-- maintainer's when given, else the highest the group's pending
+-- changesets name, else patch, capped by max_bump.
 rule MaintainerRequestsPreRelease {
-    when: MaintainerRequestsPreRelease(maintainer, package, target_branch)
-    let next = next_prerelease_version(package.version, package.pending_changesets)
+    when: MaintainerRequestsPreRelease(maintainer, package, target_branch, level?)
+    let group = fixed_group_of(package, config.fixed)
+    let next = next_prerelease_version(group, level, config.prerelease_label)
     ensures:
         ReleasePullRequest.created(
             repository: package.repository,
             pull_request: release_branch_pull_request(package, target_branch),
             kind: pre_release,
-            releases: {PlannedRelease(package: package, from_version: package.version, to_version: next)},
+            releases: group.map(m => PlannedRelease(package: m, from_version: m.version, to_version: next)),
             status: open
         )
 }
@@ -452,14 +501,15 @@ rule ApplyRelease {
 
 -- A pre-release keeps the changesets pending so the final release still
 -- lists them. A release deletes every changeset that names its package;
--- the PR carries every named package, so no line is left behind.
+-- the PR carries every named package, so no line is left behind. A
+-- changeset with no bump lines names nothing and goes with any release.
 -- Note: allium 3.2.4 does not witness bulk updates in a `for` clause, so
 -- `check` reports Changeset.consumed as unreachable. This is the intended path.
 rule ConsumeChangesets {
     when: PackageReleased(rpr, release)
     requires: rpr.kind = release
     for c in Changesets where status = pending and repository = rpr.repository:
-        requires: c.unreleased_for(release.package.name)
+        requires: c.unreleased_for(release.package.name) or c.bumps = {}
         ensures: c.status = consumed
 }
 
@@ -485,7 +535,9 @@ rule MaintainerClosesReleasePullRequest {
 -- alone with a warning, unless the maintainer names the package.
 rule TagRelease {
     when: release: Release.created
+    requires: release.status = committed
     requires: release.package.release_mode != none
+    requires: release.has_changelog_entry
     ensures:
         release.status = tagged
         release.tag = tag_for(release.package.tag_template, release.package.name, release.version)
@@ -493,23 +545,28 @@ rule TagRelease {
 
 -- Releases are tagged and created in dependency order, and a run stops
 -- at the first failure: a dependent is never released before its
--- dependency.
+-- dependency. A run that names a package handles that package only and
+-- reports it even when nothing was left to do, so a manual run can hand
+-- one release to the publish step again.
 rule ResumeUntaggedReleases {
-    when: ToolRunStarted(repository)
+    when: ToolRunStarted(repository, named?, publish_drafts)
     for release in Releases where package.repository = repository and status = committed:
+        requires: named = null or release.package = named
         requires: release.package.release_mode != none
-        requires: release.package.changelog_file has an entry for release.version
+        requires: release.has_changelog_entry or release.package = named
         ensures:
             release.status = tagged
             release.tag = tag_for(release.package.tag_template, release.package.name, release.version)
 }
 
+-- A run asked to publish creates the release published, draft or not.
 rule ResumeTaggedReleasesWithoutGitHubRelease {
-    when: ToolRunStarted(repository)
+    when: ToolRunStarted(repository, named?, publish_drafts)
     for release in Releases where package.repository = repository and status = tagged:
+        requires: named = null or release.package = named
         requires: release.package.release_mode = tag_and_release
         ensures:
-            if release.package.release_as_draft:
+            if release.package.release_as_draft and not publish_drafts:
                 release.status = drafted
                 release.github_release = github_release_for(release.tag, true)
             else:
@@ -517,8 +574,20 @@ rule ResumeTaggedReleasesWithoutGitHubRelease {
                 release.github_release = github_release_for(release.tag, false)
 }
 
+-- A run asked to publish flips every draft it handles once the assets
+-- are there: the WorkflowPublishesRelease step, from the command line.
+rule PublishDraftsOnToolRun {
+    when: ToolRunStarted(repository, named?, publish_drafts)
+    for release in Releases where package.repository = repository and status = drafted:
+        requires: publish_drafts
+        requires: named = null or release.package = named
+        ensures: release.status = published
+}
+
+-- The run's assets are attached when the release is created.
 rule CreateGitHubRelease {
     when: release: Release.status transitions_to tagged
+    requires: release.status = tagged
     requires: release.package.release_mode = tag_and_release
     ensures:
         if release.package.release_as_draft:
@@ -541,11 +610,14 @@ rule MaintainerAbandonsRelease {
     ensures: not exists release
 }
 
--- Assets can be attached to an existing release at any time, for example
--- after a failed upload; attaching is idempotent.
+-- Assets can be attached to an existing GitHub release, for example after
+-- a failed upload; attaching is idempotent. A draft takes them, a
+-- published release only when the workflow names its package: in a
+-- monorepo an asset must not land on every complete release. A tag-only
+-- release has no GitHub release to attach to.
 rule WorkflowAttachesAssets {
-    when: WorkflowAttachesAssets(workflow, release, assets)
-    requires: release.status != committed
+    when: WorkflowAttachesAssets(workflow, release, assets, package_named)
+    requires: release.status = drafted or (release.status = published and package_named)
     ensures: ReleaseAssetsAttached(release: release, assets: assets)
 }
 
@@ -678,39 +750,47 @@ surface PreReleaseRequest {
         package.pending_changesets
 
     provides:
-        MaintainerRequestsPreRelease(maintainer, package, target_branch)
+        MaintainerRequestsPreRelease(maintainer, package, target_branch, level)
 }
 
 -- After a merge the workflow receives every release the merge produced,
 -- dependencies before dependents. Publishing to the registry is the
 -- workflow's command; the tool runs that command once per tagged package
--- and owns the order and the stop.
+-- and owns the order and the stop. Packages in the workspace publish
+-- share one command, run once from the root, after what its members
+-- need from outside; each member's outcome is the registry's answer
+-- afterwards, or the command's exit status without a registry. Packages
+-- caught in a dependency cycle end as blocked.
+-- Note: allium 3.3.0 witnesses only the first branch of an `if` chain in
+-- a `for` clause, so `check` reports the other outcomes as unreachable.
 rule WorkflowPublishesInDependencyOrder {
     when: WorkflowRunsPublish(workflow, repository)
     let candidates = filter(Packages, p => p.repository = repository and p.release_mode != none and GitTags.any(t => t.package = p and t.version = p.version))
-    requires: candidates.all(p => p.publish_command != null)
+    requires: candidates.all(p => p.publish_command != null or p.in_workspace_publish)
     ensures:
         for p in candidates:
             -- A version the registry has is skipped before the command runs.
+            -- Otherwise started only after every in-repo dependency among
+            -- the candidates ended as published or exists. Independent
+            -- packages run at the same time, up to the job limit.
             if p.on_registry(p.version) = true:
-                PublishOutcome.created(package: p, status: exists)
+                PublishOutcome.created(package: p, status: `exists`)
+            else if p.dependencies.any(d => d in candidates and PublishOutcomes.any(o => o.package = d and o.status in {failed, blocked})):
+                PublishOutcome.created(package: p, status: blocked)
+            else if publish_command_succeeded(p):
+                PublishOutcome.created(package: p, status: published)
             else:
-                -- Started only after every in-repo dependency among the
-                -- candidates ended as published or exists. Independent
-                -- packages run at the same time, up to the job limit.
-                if p.dependencies.any(d => d in candidates and PublishOutcome with package = d and status in {failed, blocked}):
-                    PublishOutcome.created(package: p, status: blocked)
-                else:
-                    PublishOutcome.created(package: p, status: p.publish_command succeeded ? published : failed)
+                PublishOutcome.created(package: p, status: failed)
 }
 
 entity PublishOutcome {
     package: Package
-    status: published | exists | failed | blocked
+    status: published | `exists` | failed | blocked
 }
 
 invariant DependentsNeverPublishBeforeDependencies {
-    PublishOutcome.all(o => o.status != published or o.package.dependencies.all(d => not (PublishOutcome with package = d) or (PublishOutcome with package = d).status in {published, exists}))
+    PublishOutcomes.all(o => o.status != published or o.package.dependencies.all(d =>
+        PublishOutcomes.all(x => x.package != d or x.status in {published, `exists`})))
 }
 
 surface WorkflowPublishHandoff {
@@ -727,12 +807,17 @@ surface ToolRun {
     context repository: Repository
 
     provides:
-        ToolRunStarted(repository)
+        ToolRunStarted(repository, named, publish_drafts)
+        WorkflowRunsPublish(workflow, repository)
 }
 
+-- Every release the run tagged, created, published or attached assets
+-- to, every draft, and the named package's release: in dependency order,
+-- so the workflow can publish in that order. previous_version is the
+-- version under the next older changelog heading.
 surface WorkflowReleaseHandoff {
     facing workflow: Workflow
-    context release: Release where status != published
+    context release: Release
 
     exposes:
         release.package.name
@@ -740,13 +825,12 @@ surface WorkflowReleaseHandoff {
         release.package.first_release
         release.version
         release.version.is_prerelease
-        release.tag when release.status = tagged | drafted
+        release.tag when release.status = tagged | drafted | published
         release.status
-        release.package.dependencies
 
     provides:
         WorkflowPublishesRelease(workflow, release) when release.status = drafted
-        WorkflowAttachesAssets(workflow, release, assets) when release.status != committed
+        WorkflowAttachesAssets(workflow, release, assets, package_named) when release.status = drafted | published
 
     @guidance
         -- Recommended order in the workflow: build, then tag and create
