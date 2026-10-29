@@ -1270,7 +1270,7 @@ fn publish_runs_dependencies_first_and_blocks_dependents_of_a_failure() {
     );
     let repo = Repo::load(root).unwrap();
     assert_eq!(
-        repo.config.publish_command("livekit-protocol").as_deref(),
+        repo.config.publish_command("livekit-protocol", false).as_deref(),
         Some("exit 7")
     );
     let has_protocol = |url: &str| -> Result<u16, verwalter::Error> {
