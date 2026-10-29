@@ -62,12 +62,7 @@ impl Changeset {
             let bad = || ParseError::BadBumpLine(i + 1, line.to_string());
             let (name, level) = line.split_once(':').ok_or_else(bad)?;
             let name = name.trim().trim_matches(|c| c == '"' || c == '\'');
-            let level = match level.trim() {
-                "major" => BumpLevel::Major,
-                "minor" => BumpLevel::Minor,
-                "patch" => BumpLevel::Patch,
-                _ => return Err(bad()),
-            };
+            let level = level.trim().parse().map_err(|()| bad())?;
             bumps.push(Bump {
                 package_name: name.to_string(),
                 level,
@@ -89,6 +84,17 @@ impl Changeset {
             .iter()
             .find(|b| b.package_name == package)
             .map(|b| b.level)
+    }
+
+    /// `parse`, plus an error for a bump line naming a package not in
+    /// `known`.
+    pub fn parse_known(file: &str, content: &str, known: &[&str]) -> Result<Self, String> {
+        let c = Self::parse(file, content).map_err(|e| e.to_string())?;
+        let unknown = c.unknown_packages(known);
+        if !unknown.is_empty() {
+            return Err(format!("names unknown package {}", unknown.join(", ")));
+        }
+        Ok(c)
     }
 
     /// Bump lines naming a package that is not configured: a typo that

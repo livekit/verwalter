@@ -62,14 +62,7 @@ fn run() -> Result<(), Error> {
                 packages.push(p);
             }
             "--publish" => publish = true,
-            "--level" => {
-                level = Some(match args.next().ok_or(USAGE)?.as_str() {
-                    "major" => BumpLevel::Major,
-                    "minor" => BumpLevel::Minor,
-                    "patch" => BumpLevel::Patch,
-                    _ => return Err(USAGE.into()),
-                })
-            }
+            "--level" => level = Some(args.next().ok_or(USAGE)?.parse().map_err(|()| USAGE)?),
             _ => root = PathBuf::from(arg),
         }
     }
@@ -322,7 +315,7 @@ fn print_plan(repo: &Repo, releases: &[verwalter::plan::PlannedRelease]) {
             r.package,
             r.from,
             r.to,
-            format!("{:?}", r.level).to_lowercase()
+            r.level.to_string()
         );
     }
 }

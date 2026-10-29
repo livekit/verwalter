@@ -40,12 +40,6 @@ pub fn write(root: &Path, dry_run: bool, args: &[&str]) -> Result<String, Error>
     run(root, args)
 }
 
-pub fn is_repo(root: &Path) -> bool {
-    output(root, &["rev-parse", "--git-dir"])
-        .map(|o| o.status.success())
-        .unwrap_or(false)
-}
-
 pub fn ref_exists(root: &Path, name: &str) -> bool {
     output(
         root,
@@ -58,13 +52,6 @@ pub fn ref_exists(root: &Path, name: &str) -> bool {
     )
     .map(|o| o.status.success())
     .unwrap_or(false)
-}
-
-/// Whether `ancestor` is reachable from `descendant`.
-pub fn is_ancestor(root: &Path, ancestor: &str, descendant: &str) -> bool {
-    output(root, &["merge-base", "--is-ancestor", ancestor, descendant])
-        .map(|o| o.status.success())
-        .unwrap_or(false)
 }
 
 /// The commit that added `path`, as seen from `rev`.

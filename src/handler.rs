@@ -85,15 +85,13 @@ fn normalise_pyproject(content: &str) -> String {
 
 fn load(
     path: &str,
-    regex: Option<&str>,
     dependency: Option<&str>,
     content: &str,
 ) -> Result<(VersionedFileConfig, VersionedFile), Error> {
-    let regex = regex.map(|r| vec![r.to_string()]);
     let config = VersionedFileConfig::new(
         RelativePathBuf::from(path),
         dependency.map(String::from),
-        regex,
+        None,
     )?;
     let content = if is_pyproject(path) {
         normalise_pyproject(content)
@@ -115,7 +113,7 @@ pub fn read_version(path: &str, regex: Option<&str>, content: &str) -> Result<Ve
             .ok_or_else(|| format!("{path}: regex `{re}` has no `version` match"))?;
         return Ok(m.as_str().parse()?);
     }
-    Ok(load(path, regex, None, content)?.1.version()?)
+    Ok(load(path, None, content)?.1.version()?)
 }
 
 /// A regex file: the `version` group of every match becomes `version`,
@@ -190,7 +188,7 @@ pub fn write_version(
         // package's own version instead.
         return Ok(pyproject_pin(content, dep, version));
     }
-    let (config, file) = load(path, regex, dependency, content)?;
+    let (config, file) = load(path, dependency, content)?;
     let mut package = Package::new(
         Name::from(dependency.unwrap_or("package")),
         NO_TAGS,
@@ -221,7 +219,7 @@ pub fn write_version(
 }
 
 /// PEP 503 normalised name: lower case, runs of `-`, `_` and `.` as `-`.
-fn normalise_py(name: &str) -> String {
+pub(crate) fn normalise_py(name: &str) -> String {
     let mut out = String::new();
     let mut dash = false;
     for c in name.chars() {
@@ -241,7 +239,7 @@ fn normalise_py(name: &str) -> String {
 /// Every requirement string under `[project] dependencies` and
 /// `[project.optional-dependencies]`.
 fn pyproject_requirements(content: &str) -> Vec<String> {
-    let Ok(doc) = content.parse::<toml::Value>() else {
+    let Ok(doc) = content.parse::<toml::Table>() else {
         return Vec::new();
     };
     let Some(project) = doc.get("project") else {

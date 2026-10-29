@@ -4,8 +4,6 @@
 
 use std::collections::BTreeSet;
 
-use serde::Serialize;
-
 use crate::{
     config::ReleaseMode,
     git,
@@ -16,7 +14,7 @@ use crate::{
     Error,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PackageStatus {
     pub package: String,
     pub version: String,
@@ -37,15 +35,6 @@ pub struct PackageStatus {
 }
 
 pub fn status(repo: &Repo, remote: &str, gh: Gh) -> Result<Vec<PackageStatus>, Error> {
-    status_with(repo, remote, gh, &crate::registry::curl)
-}
-
-pub fn status_with(
-    repo: &Repo,
-    remote: &str,
-    gh: Gh,
-    http: crate::registry::Http,
-) -> Result<Vec<PackageStatus>, Error> {
     let root = repo.root.as_path();
     let remote_tags: BTreeSet<String> = git::run(root, &["ls-remote", "--tags", remote])
         .map(|out| {
@@ -156,7 +145,7 @@ pub fn status_with(
         } else {
             crate::registry::exists(
                 crate::registry::version_url(&repo.config, &p.name, &p.version),
-                http,
+                &crate::registry::curl,
             )
             .unwrap_or(None)
         };

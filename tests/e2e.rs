@@ -98,6 +98,17 @@ changelog = "livekit/CHANGELOG.md"
     Repo_(root)
 }
 
+/// A bare `origin` for `root`, removed when the guard drops.
+fn remote(root: &Path, name: &str) -> Repo_ {
+    let remote = std::env::temp_dir().join(format!(
+        "verwalter-it-{}-{name}-remote.git",
+        std::process::id()
+    ));
+    git(root, &["init", "-q", "--bare", remote.to_str().unwrap()]);
+    git(root, &["remote", "add", "origin", remote.to_str().unwrap()]);
+    Repo_(remote)
+}
+
 impl Drop for Repo_ {
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.0);
@@ -223,11 +234,7 @@ fn pr_sync_pushes_and_creates_updates_closes() {
     );
     git(root, &["add", "-A"]);
     git(root, &["commit", "-q", "-m", "add changeset"]);
-    let remote =
-        std::env::temp_dir().join(format!("verwalter-it-{}-pr-remote.git", std::process::id()));
-    let _ = fs::remove_dir_all(&remote);
-    git(root, &["init", "-q", "--bare", remote.to_str().unwrap()]);
-    git(root, &["remote", "add", "origin", remote.to_str().unwrap()]);
+    let _remote = remote(root, "pr");
 
     let repo = Repo::load(root).unwrap();
     let plan = plan(
@@ -312,20 +319,13 @@ fn pr_sync_pushes_and_creates_updates_closes() {
     assert!(has(
         "pr create --head release/main --base main --title release:"
     ));
-    let _ = fs::remove_dir_all(&remote);
 }
 
 #[test]
 fn release_tags_and_creates_github_releases_resumably() {
     let r = fixture("release");
     let root = &r.0;
-    let remote = std::env::temp_dir().join(format!(
-        "verwalter-it-{}-release-remote.git",
-        std::process::id()
-    ));
-    let _ = fs::remove_dir_all(&remote);
-    git(root, &["init", "-q", "--bare", remote.to_str().unwrap()]);
-    git(root, &["remote", "add", "origin", remote.to_str().unwrap()]);
+    let _remote = remote(root, "release");
     // Everything is already tagged except livekit, whose release PR just
     // merged: version bumped, changelog written. livekit-api is draft mode.
     git(root, &["tag", "livekit-protocol-v0.3.1"]);
@@ -408,20 +408,13 @@ fn release_tags_and_creates_github_releases_resumably() {
         "the draft is reported until the workflow publishes it"
     );
     assert_eq!(again[0].status, "drafted");
-    let _ = fs::remove_dir_all(&remote);
 }
 
 #[test]
 fn release_resumes_a_tag_without_github_release() {
     let r = fixture("release-resume");
     let root = &r.0;
-    let remote = std::env::temp_dir().join(format!(
-        "verwalter-it-{}-resume-remote.git",
-        std::process::id()
-    ));
-    let _ = fs::remove_dir_all(&remote);
-    git(root, &["init", "-q", "--bare", remote.to_str().unwrap()]);
-    git(root, &["remote", "add", "origin", remote.to_str().unwrap()]);
+    let _remote = remote(root, "resume");
     // The tag was pushed by a failed run, on an older commit.
     git(root, &["tag", "livekit-v0.7.0"]);
     git(root, &["tag", "livekit-api-v0.4.3"]);
@@ -451,20 +444,13 @@ fn release_resumes_a_tag_without_github_release() {
     assert!(!calls
         .iter()
         .any(|c| c.starts_with("release create livekit-api")));
-    let _ = fs::remove_dir_all(&remote);
 }
 
 #[test]
 fn release_with_assets_then_abandon() {
     let r = fixture("assets");
     let root = &r.0;
-    let remote = std::env::temp_dir().join(format!(
-        "verwalter-it-{}-assets-remote.git",
-        std::process::id()
-    ));
-    let _ = fs::remove_dir_all(&remote);
-    git(root, &["init", "-q", "--bare", remote.to_str().unwrap()]);
-    git(root, &["remote", "add", "origin", remote.to_str().unwrap()]);
+    let _remote = remote(root, "assets");
     git(root, &["tag", "livekit-api-v0.4.3"]);
     git(root, &["tag", "livekit-protocol-v0.3.1"]);
     git(root, &["push", "-q", "origin", "--tags"]);
@@ -529,7 +515,6 @@ fn release_with_assets_then_abandon() {
     let again =
         verwalter::release::abandon(&repo, "origin", "livekit-v0.7.0", false, &mut gh).unwrap();
     assert!(again.is_empty());
-    let _ = fs::remove_dir_all(&remote);
 }
 
 #[test]
@@ -545,11 +530,7 @@ fn prerelease_opens_an_rc_pr_without_consuming_changesets() {
     );
     git(root, &["add", "-A"]);
     git(root, &["commit", "-q", "-m", "add changeset"]);
-    let remote =
-        std::env::temp_dir().join(format!("verwalter-it-{}-rc-remote.git", std::process::id()));
-    let _ = fs::remove_dir_all(&remote);
-    git(root, &["init", "-q", "--bare", remote.to_str().unwrap()]);
-    git(root, &["remote", "add", "origin", remote.to_str().unwrap()]);
+    let _remote = remote(root, "rc");
     git(root, &["push", "-q", "origin", "main", "--tags"]);
 
     let repo = Repo::load(root).unwrap();
@@ -650,7 +631,6 @@ fn prerelease_opens_an_rc_pr_without_consuming_changesets() {
             .to_string(),
         "0.4.0"
     );
-    let _ = fs::remove_dir_all(&remote);
 }
 
 // Spec: config.fixed in a pre-release. An rc of one member carries the
@@ -672,13 +652,7 @@ fn prerelease_of_a_fixed_group_member_covers_the_group() {
     );
     git(root, &["add", "-A"]);
     git(root, &["commit", "-q", "-m", "fixed group"]);
-    let remote = std::env::temp_dir().join(format!(
-        "verwalter-it-{}-rc-fixed-remote.git",
-        std::process::id()
-    ));
-    let _ = fs::remove_dir_all(&remote);
-    git(root, &["init", "-q", "--bare", remote.to_str().unwrap()]);
-    git(root, &["remote", "add", "origin", remote.to_str().unwrap()]);
+    let _remote = remote(root, "rc-fixed");
     git(root, &["push", "-q", "origin", "main"]);
 
     let repo = Repo::load(root).unwrap();
@@ -747,7 +721,6 @@ fn prerelease_of_a_fixed_group_member_covers_the_group() {
         ],
         "livekit depends on protocol and gets the dependent patch"
     );
-    let _ = fs::remove_dir_all(&remote);
 }
 
 #[test]
@@ -761,13 +734,7 @@ fn dry_run_writes_nothing() {
     );
     git(root, &["add", "-A"]);
     git(root, &["commit", "-q", "-m", "add changeset"]);
-    let remote = std::env::temp_dir().join(format!(
-        "verwalter-it-{}-dry-remote.git",
-        std::process::id()
-    ));
-    let _ = fs::remove_dir_all(&remote);
-    git(root, &["init", "-q", "--bare", remote.to_str().unwrap()]);
-    git(root, &["remote", "add", "origin", remote.to_str().unwrap()]);
+    let _remote = remote(root, "dry");
     git(root, &["push", "-q", "origin", "main"]);
 
     let repo = Repo::load(root).unwrap();
@@ -811,20 +778,13 @@ fn dry_run_writes_nothing() {
         "nothing pushed"
     );
     assert!(git(root, &["tag", "--list"]).is_empty(), "no tag created");
-    let _ = fs::remove_dir_all(&remote);
 }
 
 #[test]
 fn release_finishes_a_partial_release_for_one_package() {
     let r = fixture("partial");
     let root = &r.0;
-    let remote = std::env::temp_dir().join(format!(
-        "verwalter-it-{}-partial-remote.git",
-        std::process::id()
-    ));
-    let _ = fs::remove_dir_all(&remote);
-    git(root, &["init", "-q", "--bare", remote.to_str().unwrap()]);
-    git(root, &["remote", "add", "origin", remote.to_str().unwrap()]);
+    let _remote = remote(root, "partial");
     // livekit: tagged, draft release without assets (the upload failed).
     // livekit-api: not tagged at all, but out of scope via --package.
     git(root, &["tag", "livekit-v0.7.0"]);
@@ -877,7 +837,6 @@ fn release_finishes_a_partial_release_for_one_package() {
         git(root, &["tag", "--list", "livekit-api-v0.4.3"]).is_empty(),
         "api not tagged"
     );
-    let _ = fs::remove_dir_all(&remote);
 }
 
 #[test]
@@ -908,13 +867,7 @@ fn release_error_names_the_resume_command() {
 fn status_reports_state_and_next_step() {
     let r = fixture("status");
     let root = &r.0;
-    let remote = std::env::temp_dir().join(format!(
-        "verwalter-it-{}-status-remote.git",
-        std::process::id()
-    ));
-    let _ = fs::remove_dir_all(&remote);
-    git(root, &["init", "-q", "--bare", remote.to_str().unwrap()]);
-    git(root, &["remote", "add", "origin", remote.to_str().unwrap()]);
+    let _remote = remote(root, "status");
     // protocol: complete. api: tagged locally only, draft without assets.
     // livekit: version committed, no tag; a changeset is pending.
     git(root, &["tag", "livekit-protocol-v0.3.1"]);
@@ -972,20 +925,13 @@ fn status_reports_state_and_next_step() {
         "untagged version comes first: {}",
         lk.next_step
     );
-    let _ = fs::remove_dir_all(&remote);
 }
 
 #[test]
 fn release_runs_in_dependency_order_and_stops_at_the_first_failure() {
     let r = fixture("order");
     let root = &r.0;
-    let remote = std::env::temp_dir().join(format!(
-        "verwalter-it-{}-order-remote.git",
-        std::process::id()
-    ));
-    let _ = fs::remove_dir_all(&remote);
-    git(root, &["init", "-q", "--bare", remote.to_str().unwrap()]);
-    git(root, &["remote", "add", "origin", remote.to_str().unwrap()]);
+    let _remote = remote(root, "order");
 
     // All three untagged: protocol first, then its dependents by name.
     let repo = Repo::load(root).unwrap();
@@ -1016,16 +962,7 @@ fn release_runs_in_dependency_order_and_stops_at_the_first_failure() {
         }
     };
     // Give it a remote so the tag push works and the gh failure is the first error.
-    let remote2 = std::env::temp_dir().join(format!(
-        "verwalter-it-{}-order-fail-remote.git",
-        std::process::id()
-    ));
-    let _ = fs::remove_dir_all(&remote2);
-    git(root2, &["init", "-q", "--bare", remote2.to_str().unwrap()]);
-    git(
-        root2,
-        &["remote", "add", "origin", remote2.to_str().unwrap()],
-    );
+    let _remote2 = remote(root2, "order-fail");
     let err = verwalter::release::run(&repo2, "origin", &Default::default(), &mut gh2)
         .unwrap_err()
         .to_string();
@@ -1039,8 +976,6 @@ fn release_runs_in_dependency_order_and_stops_at_the_first_failure() {
         "dependents untouched"
     );
     assert!(git(root2, &["tag", "--list", "livekit-v*"]).is_empty());
-    let _ = fs::remove_dir_all(&remote);
-    let _ = fs::remove_dir_all(&remote2);
 }
 
 // Spec: ReleaseNeedsChangelogEntry. A hand-edited version has no entry
@@ -1049,13 +984,7 @@ fn release_runs_in_dependency_order_and_stops_at_the_first_failure() {
 fn hand_bumped_version_is_not_released() {
     let r = fixture("hand-bump");
     let root = &r.0;
-    let remote = std::env::temp_dir().join(format!(
-        "verwalter-it-{}-hand-bump-remote.git",
-        std::process::id()
-    ));
-    let _ = fs::remove_dir_all(&remote);
-    git(root, &["init", "-q", "--bare", remote.to_str().unwrap()]);
-    git(root, &["remote", "add", "origin", remote.to_str().unwrap()]);
+    let _remote = remote(root, "hand-bump");
     git(root, &["tag", "livekit-protocol-v0.3.1"]);
     git(root, &["tag", "livekit-api-v0.4.3"]);
     git(root, &["tag", "livekit-v0.7.0"]);
@@ -1090,7 +1019,6 @@ fn hand_bumped_version_is_not_released() {
     assert_eq!(released.len(), 1);
     assert!(!released[0].first_release);
     assert!(!git(root, &["tag", "--list", "livekit-v0.7.1"]).is_empty());
-    let _ = fs::remove_dir_all(&remote);
 }
 
 // Spec: VersionedFilesAgree. The first file wins, the rest is a warning.
@@ -1421,13 +1349,7 @@ fn workspace_publish_command_runs_once_and_reports_per_member() {
 fn named_package_is_reported_even_when_complete() {
     let r = fixture("named");
     let root = &r.0;
-    let remote = std::env::temp_dir().join(format!(
-        "verwalter-it-{}-named-remote.git",
-        std::process::id()
-    ));
-    let _ = fs::remove_dir_all(&remote);
-    git(root, &["init", "-q", "--bare", remote.to_str().unwrap()]);
-    git(root, &["remote", "add", "origin", remote.to_str().unwrap()]);
+    let _remote = remote(root, "named");
     git(root, &["tag", "livekit-api-v0.4.3"]);
     git(root, &["push", "-q", "origin", "--tags"]);
     let repo = Repo::load(root).unwrap();
@@ -1447,7 +1369,6 @@ fn named_package_is_reported_even_when_complete() {
         (released[0].package.as_str(), released[0].status),
         ("livekit-api", "published")
     );
-    let _ = fs::remove_dir_all(&remote);
 }
 
 // Spec: ChangelogUpdated, "PR link and author". The commit that added a

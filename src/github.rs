@@ -183,18 +183,8 @@ pub fn sync(
         "Release PR managed by verwalter",
     ])?;
 
-    let name = branches::branch_name(repo);
-    let open: Vec<PullRequest> = serde_json::from_str(&gh(&[
-        "pr",
-        "list",
-        "--state",
-        "open",
-        "--head",
-        &name,
-        "--json",
-        "number,headRefName,baseRefName",
-    ])?)?;
-    let existing = open.first();
+    let existing = open_pr(gh, &branches::branch_name(repo))?;
+    let existing = existing.as_ref();
 
     if let Some(branch) = branch {
         git::write(&repo.root, dry_run, &["push", "--force", "--quiet", remote, &format!("{branch}:{branch}")]).map_err(|e| {
@@ -280,29 +270,70 @@ fn number_from_url(url: &str) -> Result<u64, Error> {
         .ok_or_else(|| format!("unexpected `gh pr create` output: {url}").into())
 }
 
-/// The PR body: one section per package with its changelog entry.
-/// Spec: Package.first_release, for a version not yet tagged.
-pub fn is_first_release(repo: &Repo, package: &str) -> bool {
-    let p = repo.packages.iter().find(|p| p.name == package);
-    p.and_then(|p| crate::release::first_release(repo, package, &p.version).ok())
-        .unwrap_or(false)
+/// Append `key=value` lines to `$GITHUB_OUTPUT` when running in Actions.
+pub fn append_output(lines: &str) -> Result<(), Error> {
+    if let Ok(path) = std::env::var("GITHUB_OUTPUT") {
+        use std::io::Write;
+        let mut f = std::fs::OpenOptions::new()
+            .append(true)
+            .create(true)
+            .open(path)?;
+        f.write_all(lines.as_bytes())?;
+    }
+    Ok(())
 }
 
+/// The open PR whose head is `head`, if any.
+pub fn open_pr(gh: Gh, head: &str) -> Result<Option<PullRequest>, Error> {
+    let open: Vec<PullRequest> = serde_json::from_str(&gh(&[
+        "pr",
+        "list",
+        "--state",
+        "open",
+        "--head",
+        head,
+        "--json",
+        "number,headRefName,baseRefName",
+    ])?)?;
+    Ok(open.into_iter().next())
+}
+
+/// One package's section of a PR body: heading, `note`, changelog entry.
+pub fn section(
+    release: &PlannedRelease,
+    repo: &Repo,
+    plan: &[PlannedRelease],
+    note: &str,
+) -> String {
+    format!(
+        "\n## {} `{}` → `{}`\n\n{note}{}",
+        release.package,
+        release.from,
+        release.to,
+        render_entry(release, &repo.changesets, plan)
+            .trim_start_matches(|c| c != '\n')
+            .trim_start()
+    )
+}
+
+/// The PR body: one section per package with its changelog entry.
 fn body(plan: &[PlannedRelease], repo: &Repo) -> String {
     let mut out = format!("{MARKER}\nMerging this PR releases:\n");
     for release in plan {
-        out.push_str(&format!(
-            "\n## {} `{}` → `{}`\n\n",
-            release.package, release.from, release.to
-        ));
-        if is_first_release(repo, &release.package) {
-            out.push_str("**First release**: no tag of this package exists yet. A registry with trusted publishing needs the first upload done by hand.\n\n");
-        }
-        out.push_str(
-            render_entry(release, &repo.changesets, plan)
-                .trim_start_matches(|c| c != '\n')
-                .trim_start(),
-        );
+        // Spec: Package.first_release, for a version not yet tagged.
+        let first = crate::release::first_release(
+            repo,
+            &release.package,
+            &release.from,
+            &crate::registry::curl,
+        )
+        .unwrap_or(false);
+        let note = if first {
+            "**First release**: no tag of this package exists yet. A registry with trusted publishing needs the first upload done by hand.\n\n"
+        } else {
+            ""
+        };
+        out.push_str(&section(release, repo, plan, note));
         if !release.changesets.is_empty() {
             out.push_str(&format!(
                 "\nChangesets: {}\n",

@@ -97,18 +97,10 @@ fn read_changesets(dir: &Path, known: &[&str]) -> Result<Vec<Changeset>, Error> 
             continue;
         }
         let content = fs::read_to_string(&path)?;
-        let changeset =
-            Changeset::parse(name, &content).map_err(|e| format!("{}: {e}", path.display()))?;
-        let unknown = changeset.unknown_packages(known);
-        if !unknown.is_empty() {
-            return Err(format!(
-                "{}: names unknown package {}",
-                path.display(),
-                unknown.join(", ")
-            )
-            .into());
-        }
-        out.push(changeset);
+        out.push(
+            Changeset::parse_known(name, &content, known)
+                .map_err(|e| format!("{}: {e}", path.display()))?,
+        );
     }
     out.sort_by(|a, b| a.file.cmp(&b.file));
     Ok(out)

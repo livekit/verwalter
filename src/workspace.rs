@@ -11,7 +11,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::config::Config;
+use crate::{config::Config, handler::normalise_py};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Member {
@@ -35,7 +35,7 @@ pub fn members(root: &Path) -> Vec<Member> {
 
 fn cargo_members(root: &Path) -> Vec<Member> {
     let Ok(doc) = fs::read_to_string(root.join("Cargo.toml"))
-        .and_then(|s| s.parse::<toml::Value>().map_err(std::io::Error::other))
+        .and_then(|s| s.parse::<toml::Table>().map_err(std::io::Error::other))
     else {
         return Vec::new();
     };
@@ -69,7 +69,7 @@ fn cargo_members(root: &Path) -> Vec<Member> {
         .filter_map(|dir| {
             let manifest = fs::read_to_string(dir.join("Cargo.toml"))
                 .ok()?
-                .parse::<toml::Value>()
+                .parse::<toml::Table>()
                 .ok()?;
             let package = manifest.get("package")?;
             let unpublished = |v: Option<&toml::Value>| match v {
@@ -141,7 +141,7 @@ fn pnpm_members(root: &Path) -> Vec<Member> {
 
 fn uv_members(root: &Path) -> Vec<Member> {
     let Ok(doc) = fs::read_to_string(root.join("pyproject.toml"))
-        .and_then(|s| s.parse::<toml::Value>().map_err(std::io::Error::other))
+        .and_then(|s| s.parse::<toml::Table>().map_err(std::io::Error::other))
     else {
         return Vec::new();
     };
@@ -165,7 +165,7 @@ fn uv_members(root: &Path) -> Vec<Member> {
         .filter_map(|dir| {
             let manifest = fs::read_to_string(dir.join("pyproject.toml"))
                 .ok()?
-                .parse::<toml::Value>()
+                .parse::<toml::Table>()
                 .ok()?;
             let project = manifest.get("project")?;
             // `Private :: Do Not Upload` is refused by PyPI; `[tool.uv]
@@ -268,7 +268,7 @@ pub fn check(root: &Path, config: &Config) -> Vec<Finding> {
         config
             .packages
             .keys()
-            .any(|k| normalise(k) == normalise(name))
+            .any(|k| normalise_py(k) == normalise_py(name))
     };
     for m in &members {
         if !m.private && !configured(&m.name) && !ignored(m) {
@@ -291,14 +291,6 @@ pub fn check(root: &Path, config: &Config) -> Vec<Finding> {
         }
     }
     findings
-}
-
-fn normalise(name: &str) -> String {
-    name.to_lowercase()
-        .split(['-', '_', '.'])
-        .filter(|s| !s.is_empty())
-        .collect::<Vec<_>>()
-        .join("-")
 }
 
 fn matches(pattern: &str, value: &str) -> bool {
