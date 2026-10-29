@@ -148,9 +148,9 @@ fn one_branch_from_one_changeset() {
     assert_eq!(branches::create(&repo, &[], "main").unwrap(), None);
 }
 
-// Spec: ConsumeChangeset. Merging the release PR consumes every changeset
-// of the released packages; a line naming a package that is not configured
-// stays behind. Tags play no part.
+// Spec: ConsumeChangesets. Merging the release PR deletes every changeset;
+// a changeset naming a package that is not configured is refused up
+// front. Tags play no part.
 #[test]
 fn merged_release_consumes_the_changesets() {
     let r = fixture("consume");
@@ -165,6 +165,15 @@ fn merged_release_consumes_the_changesets() {
         ".changeset/other.md",
         "---\nlivekit-protocol: patch\nsomething-else: patch\n---\ny\n",
     );
+    let err = Repo::load(root)
+        .err()
+        .expect("unknown package refused")
+        .to_string();
+    assert!(
+        err.contains("other.md: names unknown package something-else"),
+        "{err}"
+    );
+    fs::remove_file(root.join(".changeset/other.md")).unwrap();
     git(root, &["add", "-A"]);
     git(root, &["commit", "-q", "-m", "add changesets"]);
     let repo = Repo::load(root).unwrap();
@@ -177,14 +186,7 @@ fn merged_release_consumes_the_changesets() {
     git(root, &["merge", "-q", "--ff-only", "release/main"]);
 
     let repo = Repo::load(root).unwrap();
-    assert_eq!(
-        git(root, &["ls-tree", "--name-only", "HEAD", ".changeset/"]),
-        ".changeset/other.md"
-    );
-    assert_eq!(
-        git(root, &["show", "HEAD:.changeset/other.md"]),
-        "---\nsomething-else: patch\n---\ny"
-    );
+    assert!(git(root, &["ls-tree", "--name-only", "HEAD", ".changeset/"]).is_empty());
     assert!(plan(
         &repo.packages,
         &repo.changesets,

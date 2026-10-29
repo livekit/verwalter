@@ -182,7 +182,13 @@ pub fn run(root: &Path, config: &Config, pr: u64, gh: Gh) -> Result<Check, Error
             && !f.ends_with("README.md")
     }) {
         if let Ok(content) = fs::read_to_string(root.join(f)) {
-            changesets.push(Changeset::parse(f, &content)?);
+            let changeset = Changeset::parse(f, &content)?;
+            let known: Vec<&str> = config.packages.keys().map(String::as_str).collect();
+            let unknown = changeset.unknown_packages(&known);
+            if !unknown.is_empty() {
+                return Err(format!("{f}: names unknown package {}", unknown.join(", ")).into());
+            }
+            changesets.push(changeset);
         }
     }
     let check = evaluate(config, &pr.head, &labels, &changed, &changesets);

@@ -36,7 +36,6 @@ pub fn create(repo: &Repo, plan: &[PlannedRelease], base: &str) -> Result<Option
         return Ok(None);
     }
     let name = branch_name(repo);
-    let released: Vec<&str> = plan.iter().map(|r| r.package.as_str()).collect();
 
     commit_branch(root, base, &name, &title(plan), |worktree| {
         for release in plan {
@@ -50,21 +49,11 @@ pub fn create(repo: &Repo, plan: &[PlannedRelease], base: &str) -> Result<Option
                 true,
             )?;
         }
-        // Spec: ConsumeChangeset. Every released package's line leaves the
-        // front matter; a file goes with its last line. A line naming a
-        // package that is not configured stays behind.
+        // Spec: ConsumeChangesets. Every pending changeset names a package
+        // in this PR, so every file goes.
         let dir = worktree.join(crate::repo::CHANGESET_DIR);
         for c in &repo.changesets {
-            let names: Vec<&str> = c.bumps.iter().map(|b| b.package_name.as_str()).collect();
-            if c.bumps.is_empty() || names.iter().any(|n| released.contains(n)) {
-                let path = dir.join(&c.file);
-                match c.without(&released) {
-                    Some(content) => fs::write(&path, content)?,
-                    None => {
-                        let _ = fs::remove_file(&path);
-                    }
-                }
-            }
+            fs::remove_file(dir.join(&c.file))?;
         }
         Ok(())
     })?;

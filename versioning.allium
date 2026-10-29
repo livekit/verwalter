@@ -137,14 +137,12 @@ entity Changeset {
     file: String
     bumps: Set<Bump>
     summary: String
-    -- The release branch removes the bump line of every package it
-    -- releases. The file goes with its last line; a line naming a package
-    -- that is not configured stays. Nothing is derived from tags: a repo
-    -- that adopts the tool with tags behind its versions, or a package with
-    -- release_mode none, works the same.
+    -- The release PR carries every package a pending changeset names, so
+    -- the merge consumes every file whole. Nothing is derived from tags: a
+    -- repo that adopts the tool with tags behind its versions, or a package
+    -- with release_mode none, works the same.
     status: pending | consumed
 
-    fully_released: bumps.empty
     unreleased_for(name): bumps.any(b => b.package_name = name)
 
     transitions status {
@@ -277,8 +275,11 @@ rule ChangesetCheckOnContributorPullRequest {
 
 -- Release PR lifecycle
 
+-- A bump line must name a configured package; a typo is refused by every
+-- command, the changeset check included, rather than left in place.
 rule ContributorAddsChangeset {
     when: ContributorAddsChangeset(contributor, repository, file, bumps, summary)
+    requires: bumps.all(b => Packages.any(p => p.repository = repository and p.name = b.package_name))
     ensures: Changeset.created(repository: repository, file: file, bumps: bumps, summary: summary, status: pending)
 }
 
@@ -365,24 +366,16 @@ rule ApplyRelease {
 }
 
 -- A pre-release keeps the changesets pending so the final release still
--- lists them. The release branch drops the bump line of every package it
--- releases from every pending changeset.
+-- lists them. A release deletes every changeset that names its package;
+-- the PR carries every named package, so no line is left behind.
 -- Note: allium 3.2.4 does not witness bulk updates in a `for` clause, so
 -- `check` reports Changeset.consumed as unreachable. This is the intended path.
-rule ReleaseRemovesPackageFromChangeset {
+rule ConsumeChangesets {
     when: PackageReleased(rpr, release)
     requires: rpr.kind = release
     for c in Changesets where status = pending and repository = rpr.repository:
         requires: c.unreleased_for(release.package.name)
-        ensures: c.bumps = c.bumps.filter(b => b.package_name != release.package.name)
-}
-
--- The changeset file is deleted with its last line. A line naming a
--- package that is not configured keeps the file.
-rule ConsumeChangeset {
-    when: c: Changeset.fully_released
-    requires: c.status = pending
-    ensures: c.status = consumed
+        ensures: c.status = consumed
 }
 
 -- Closing has no lasting effect: the changesets stay pending, so the next

@@ -60,7 +60,7 @@ impl Repo {
             });
         }
 
-        let changesets = read_changesets(&root.join(CHANGESET_DIR))?;
+        let changesets = read_changesets(&root.join(CHANGESET_DIR), &names)?;
         Ok(Self {
             root: root.to_path_buf(),
             config,
@@ -70,8 +70,10 @@ impl Repo {
     }
 }
 
-/// Every `*.md` in the changeset directory except `README.md`.
-fn read_changesets(dir: &Path) -> Result<Vec<Changeset>, Error> {
+/// Every `*.md` in the changeset directory except `README.md`. A bump line
+/// naming a package that is not configured is an error, so a typo cannot
+/// sit in `.changeset/` unnoticed.
+fn read_changesets(dir: &Path, known: &[&str]) -> Result<Vec<Changeset>, Error> {
     let Ok(entries) = fs::read_dir(dir) else {
         return Ok(Vec::new());
     };
@@ -85,7 +87,18 @@ fn read_changesets(dir: &Path) -> Result<Vec<Changeset>, Error> {
             continue;
         }
         let content = fs::read_to_string(&path)?;
-        out.push(Changeset::parse(name, &content).map_err(|e| format!("{}: {e}", path.display()))?);
+        let changeset =
+            Changeset::parse(name, &content).map_err(|e| format!("{}: {e}", path.display()))?;
+        let unknown = changeset.unknown_packages(known);
+        if !unknown.is_empty() {
+            return Err(format!(
+                "{}: names unknown package {}",
+                path.display(),
+                unknown.join(", ")
+            )
+            .into());
+        }
+        out.push(changeset);
     }
     out.sort_by(|a, b| a.file.cmp(&b.file));
     Ok(out)

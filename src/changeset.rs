@@ -15,8 +15,6 @@ pub struct Changeset {
     pub file: String,
     pub bumps: Vec<Bump>,
     pub summary: String,
-    /// The file as read, so `without` can rewrite its front matter.
-    pub content: String,
     /// Changelog suffix naming the PR (or commit) and author that added
     /// the file, in the livekit changesets-changelog-github form:
     /// `- [#12](pr url) ([@user](profile url))`. Set by github::attribute.
@@ -80,7 +78,6 @@ impl Changeset {
             file: file.to_string(),
             bumps,
             summary: body.trim().to_string(),
-            content: content.to_string(),
             attribution: None,
         })
     }
@@ -94,24 +91,14 @@ impl Changeset {
             .map(|b| b.level)
     }
 
-    /// Spec: ReleaseRemovesPackageFromChangeset / ConsumeChangeset. The file
-    /// with the bump lines of `packages` removed, or None when no bump is
-    /// left and the file goes.
-    pub fn without(&self, packages: &[&str]) -> Option<String> {
-        let rest = self.content.trim_start().strip_prefix("---")?;
-        let (front, body) = rest.split_once("\n---")?;
-        let kept: Vec<&str> = front
-            .lines()
-            .filter(|l| !l.trim().is_empty())
-            .filter(|l| {
-                let name = l
-                    .split_once(':')
-                    .map(|(n, _)| n.trim().trim_matches(|c| c == '"' || c == '\''))
-                    .unwrap_or("");
-                !packages.contains(&name)
-            })
-            .collect();
-        (!kept.is_empty()).then(|| format!("---\n{}\n---{body}", kept.join("\n")))
+    /// Bump lines naming a package that is not configured: a typo that
+    /// would otherwise bump nothing and never be consumed.
+    pub fn unknown_packages<'a>(&'a self, known: &[&str]) -> Vec<&'a str> {
+        self.bumps
+            .iter()
+            .map(|b| b.package_name.as_str())
+            .filter(|n| !known.contains(n))
+            .collect()
     }
 }
 
@@ -150,32 +137,13 @@ Add RPC round-trip latency metric.
         assert_eq!(u.unreleased_for("livekit"), None);
     }
 
-    // Spec: ReleaseRemovesPackageFromChangeset, ConsumeChangeset. Quotes
-    // and the body survive; the last line takes the file with it.
     #[test]
-    fn without_drops_bump_lines_and_the_file_at_the_end() {
-        let c = Changeset::parse("b.md", UNQUOTED).unwrap();
-        let rest = c.without(&["livekit-protocol"]).unwrap();
-        assert_eq!(
-            rest,
-            "---\nlivekit-api: patch\n---\nNegotiated data channels\n"
-        );
-        let c = Changeset::parse("b.md", &rest).unwrap();
-        assert_eq!(c.unreleased_for("livekit-protocol"), None);
-        assert_eq!(c.unreleased_for("livekit-api"), Some(BumpLevel::Patch));
-        assert_eq!(c.without(&["livekit-api"]), None);
-
-        let q = Changeset::parse("a.md", QUOTED).unwrap();
-        assert_eq!(
-            q.without(&["livekit-server-sdk"]).unwrap(),
-            "---\n\"@livekit/rtc-node\": minor\n---\n\nAdd RPC round-trip latency metric.\n"
-        );
-        assert_eq!(
-            Changeset::parse("e.md", "---\n---\nempty\n")
-                .unwrap()
-                .without(&[]),
-            None
-        );
+    fn unknown_packages_are_listed() {
+        let u = Changeset::parse("b.md", UNQUOTED).unwrap();
+        assert!(u
+            .unknown_packages(&["livekit-protocol", "livekit-api"])
+            .is_empty());
+        assert_eq!(u.unknown_packages(&["livekit-api"]), ["livekit-protocol"]);
     }
 
     #[test]
