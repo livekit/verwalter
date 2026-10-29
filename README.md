@@ -13,7 +13,7 @@ Download a binary from the
 from source:
 
 ```bash
-cargo install --git https://github.com/lukasIO/verwalter --tag v0.8.0
+cargo install --git https://github.com/lukasIO/verwalter --tag v0.9.0
 ```
 
 In GitHub Actions use the action below.
@@ -102,7 +102,7 @@ See [examples/workflows](examples/workflows) for the three workflows:
 changeset check on PRs, release PRs on push, release after merge.
 
 ```yaml
-- uses: lukasIO/verwalter@v0.8.0
+- uses: lukasIO/verwalter@v0.9.0
   with:
     command: check   # check | plan | pr | release
 ```
