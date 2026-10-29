@@ -21,11 +21,10 @@ use crate::{
     Error,
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Options {
-    /// Shell command with `{package}`, `{version}` and `{tag}` placeholders.
-    pub command: String,
-    pub jobs: usize,
+    /// Overrides `[publish].jobs`.
+    pub jobs: Option<usize>,
     pub dry_run: bool,
 }
 
@@ -44,11 +43,15 @@ struct Candidate {
     version: crate::Version,
     tag: String,
     deps: Vec<String>,
+    /// Spec: Package.publish_command, resolved; the directory it runs in.
+    command: String,
+    path: String,
 }
 
 /// Every package whose current version is tagged, with its in-repo
-/// dependencies among those packages.
-fn candidates(repo: &Repo) -> BTreeMap<String, Candidate> {
+/// dependencies among those packages. A candidate without a publish
+/// command is an error before anything runs.
+fn candidates(repo: &Repo) -> Result<BTreeMap<String, Candidate>, Error> {
     let mut out = BTreeMap::new();
     for p in &repo.packages {
         let cfg = &repo.config.packages[&p.name];
@@ -59,12 +62,17 @@ fn candidates(repo: &Repo) -> BTreeMap<String, Candidate> {
         if !git::ref_exists(&repo.root, &tag) {
             continue;
         }
+        let command = repo.config.publish_command(&p.name).ok_or_else(|| {
+            format!("{}: no publish command: set `registry` or `publish` on the package, or `[publish]` defaults", p.name)
+        })?;
         out.insert(
             p.name.clone(),
             Candidate {
                 version: p.version.clone(),
                 tag,
                 deps: p.dependencies.clone(),
+                command,
+                path: cfg.path.clone(),
             },
         );
     }
@@ -72,20 +80,23 @@ fn candidates(repo: &Repo) -> BTreeMap<String, Candidate> {
     for c in out.values_mut() {
         c.deps.retain(|d| names.contains(d));
     }
-    out
+    Ok(out)
 }
 
-fn run_command(root: &std::path::Path, options: &Options, name: &str, c: &Candidate, first: bool) -> (bool, String, String) {
-    let command = options
+fn run_command(repo: &Repo, name: &str, c: &Candidate, first: bool) -> (bool, String, String) {
+    let command = c
         .command
         .replace("{package}", name)
         .replace("{version}", &c.version.to_string())
         .replace("{tag}", &c.tag);
+    let registry = format!("{:?}", repo.config.registry_of(name)).to_lowercase();
     let out = Command::new("sh")
         .arg("-c")
         .arg(&command)
-        .current_dir(root)
+        .current_dir(repo.root.join(&c.path))
         .env("VERWALTER_PACKAGE", name)
+        .env("VERWALTER_REGISTRY", registry)
+        .env("VERWALTER_ROOT", &repo.root)
         .env("VERWALTER_VERSION", c.version.to_string())
         .env("VERWALTER_TAG", &c.tag)
         .env("VERWALTER_PRERELEASE", c.version.is_prerelease().to_string())
@@ -104,8 +115,8 @@ fn run_command(root: &std::path::Path, options: &Options, name: &str, c: &Candid
 /// Run the publish command for every tagged package. Returns one outcome
 /// per package, in the order they finished.
 pub fn run(repo: &Repo, options: &Options, http: Http) -> Result<Vec<Outcome>, Error> {
-    let candidates = candidates(repo);
-    let jobs = options.jobs.max(1);
+    let candidates = candidates(repo)?;
+    let jobs = options.jobs.unwrap_or(repo.config.publish.jobs).max(1);
     let mut done: BTreeMap<String, &'static str> = BTreeMap::new();
     let mut outcomes = Vec::new();
     let mut running: BTreeSet<String> = BTreeSet::new();
@@ -145,8 +156,7 @@ pub fn run(repo: &Repo, options: &Options, http: Http) -> Result<Vec<Outcome>, E
                 if !c.deps.iter().all(|d| matches!(done.get(d).copied(), Some("published" | "exists" | "dry-run"))) {
                     continue;
                 }
-                let cfg = &repo.config.packages[name];
-                let on_registry = registry::exists(registry::version_url(cfg, name, &c.version), http)?;
+                let on_registry = registry::exists(registry::version_url(&repo.config, name, &c.version), http)?;
                 if on_registry == Some(true) {
                     done.insert(name.clone(), "exists");
                     outcomes.push(Outcome {
@@ -159,12 +169,12 @@ pub fn run(repo: &Repo, options: &Options, http: Http) -> Result<Vec<Outcome>, E
                     resolved = true;
                     continue;
                 }
-                let first = match registry::exists(registry::package_url(cfg, name), http)? {
+                let first = match registry::exists(registry::package_url(&repo.config, name), http)? {
                     Some(has_any) => !has_any,
                     None => crate::release::first_release_by_tags(repo, name, &c.version)?,
                 };
                 if options.dry_run {
-                    println!("would run for {name} {}: {}", c.version, options.command);
+                    println!("would run in {}: {}", c.path, c.command);
                     done.insert(name.clone(), "dry-run");
                     outcomes.push(Outcome {
                         package: name.clone(),
@@ -178,9 +188,8 @@ pub fn run(repo: &Repo, options: &Options, http: Http) -> Result<Vec<Outcome>, E
                 }
                 running.insert(name.clone());
                 let tx = tx.clone();
-                let root = repo.root.clone();
                 scope.spawn(move || {
-                    let (ok, output, status) = run_command(&root, options, name, c, first);
+                    let (ok, output, status) = run_command(repo, name, c, first);
                     let _ = tx.send((name.clone(), ok, output, status));
                 });
             }

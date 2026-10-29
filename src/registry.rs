@@ -8,7 +8,7 @@ use std::process::Command;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{config::Package, handler::to_pep440, Error, Version};
+use crate::{config::Config, handler::to_pep440, Error, Version};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -42,17 +42,16 @@ pub fn curl(url: &str) -> Result<u16, Error> {
 
 /// The URL that answers 200 when `version` of `name` is on the registry.
 /// None when the package has no registry configured.
-pub fn version_url(package: &Package, name: &str, version: &Version) -> Option<String> {
+pub fn version_url(config: &Config, name: &str, version: &Version) -> Option<String> {
     let v = version.to_string();
-    Some(match package.registry {
+    Some(match config.registry_of(name) {
         Registry::None => return None,
         Registry::Crates => format!("https://crates.io/api/v1/crates/{name}/{v}"),
         Registry::Npm => format!("https://registry.npmjs.org/{name}/{v}"),
         Registry::Pypi => format!("https://pypi.org/pypi/{name}/{}/json", to_pep440(version)),
         Registry::Pubdev => format!("https://pub.dev/api/packages/{name}/versions/{v}"),
-        Registry::Custom => package
-            .exists_url
-            .as_deref()?
+        Registry::Custom => config
+            .exists_url_of(name)?
             .replace("{name}", name)
             .replace("{version}", &v),
     })
@@ -60,8 +59,8 @@ pub fn version_url(package: &Package, name: &str, version: &Version) -> Option<S
 
 /// The URL that answers 200 when any version of `name` is on the registry:
 /// Spec Package.first_release.
-pub fn package_url(package: &Package, name: &str) -> Option<String> {
-    Some(match package.registry {
+pub fn package_url(config: &Config, name: &str) -> Option<String> {
+    Some(match config.registry_of(name) {
         Registry::None | Registry::Custom => return None,
         Registry::Crates => format!("https://crates.io/api/v1/crates/{name}"),
         Registry::Npm => format!("https://registry.npmjs.org/{name}"),
@@ -89,33 +88,33 @@ mod tests {
     use super::*;
     use crate::config::Config;
 
-    fn package(extra: &str) -> Package {
-        let c = Config::parse(&format!(
-            "[packages.x]\npath = \"x\"\nversioned_files = [\"x/Cargo.toml\"]\nchangelog = \"x/CHANGELOG.md\"\n{extra}\n"
+    fn config(top: &str, extra: &str) -> Config {
+        Config::parse(&format!(
+            "{top}\n[packages.x]\npath = \"x\"\nversioned_files = [\"x/Cargo.toml\"]\nchangelog = \"x/CHANGELOG.md\"\n{extra}\n"
         ))
-        .unwrap();
-        c.packages["x"].clone()
+        .unwrap()
     }
 
     #[test]
     fn urls_per_registry() {
         let v: Version = "1.6.0-rc.1".parse().unwrap();
-        assert_eq!(version_url(&package(""), "x", &v), None);
+        assert_eq!(version_url(&config("", ""), "x", &v), None);
         assert_eq!(
-            version_url(&package("registry = \"crates\""), "x", &v).unwrap(),
+            version_url(&config("", "registry = \"crates\""), "x", &v).unwrap(),
             "https://crates.io/api/v1/crates/x/1.6.0-rc.1"
         );
+        // The default registry applies to a package without one.
         assert_eq!(
-            version_url(&package("registry = \"npm\""), "@s/x", &v).unwrap(),
-            "https://registry.npmjs.org/@s/x/1.6.0-rc.1"
+            version_url(&config("[publish]\nregistry = \"npm\"", ""), "x", &v).unwrap(),
+            "https://registry.npmjs.org/x/1.6.0-rc.1"
         );
         assert_eq!(
-            version_url(&package("registry = \"pypi\""), "livekit-api", &v).unwrap(),
-            "https://pypi.org/pypi/livekit-api/1.6.0rc1/json"
+            version_url(&config("", "registry = \"pypi\""), "x", &v).unwrap(),
+            "https://pypi.org/pypi/x/1.6.0rc1/json"
         );
         assert_eq!(
             version_url(
-                &package("registry = \"custom\"\nexists_url = \"https://r/{name}/{version}/\""),
+                &config("", "registry = \"custom\"\nexists_url = \"https://r/{name}/{version}/\""),
                 "x",
                 &v
             )
@@ -123,9 +122,25 @@ mod tests {
             "https://r/x/1.6.0-rc.1/"
         );
         assert_eq!(
-            package_url(&package("registry = \"pubdev\""), "x").unwrap(),
+            package_url(&config("", "registry = \"pubdev\""), "x").unwrap(),
             "https://pub.dev/api/packages/x"
         );
+    }
+
+    // Spec: Package.publish_command resolution.
+    #[test]
+    fn publish_command_resolution() {
+        let c = config("[publish]\nregistry = \"crates\"\npublish = \"cargo publish --no-verify\"", "");
+        assert_eq!(c.publish_command("x").as_deref(), Some("cargo publish --no-verify"));
+        // Another registry does not inherit the default command.
+        let c = config("[publish]\nregistry = \"crates\"\npublish = \"cargo publish --no-verify\"", "registry = \"npm\"");
+        assert_eq!(c.publish_command("x").as_deref(), Some("npm publish --provenance --access public"));
+        // The package's own wins.
+        let c = config("[publish]\nregistry = \"npm\"", "publish = \"pnpm publish --no-git-checks\"");
+        assert_eq!(c.publish_command("x").as_deref(), Some("pnpm publish --no-git-checks"));
+        // Nothing applies.
+        assert_eq!(config("", "").publish_command("x"), None);
+        assert_eq!(config("", "registry = \"custom\"").publish_command("x"), None);
     }
 
     #[test]

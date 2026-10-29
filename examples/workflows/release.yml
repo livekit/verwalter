@@ -65,13 +65,11 @@ jobs:
           # for packages with `draft = true`, whose assets are built later.
           args: --asset dist/artifact.txt ${{ inputs.package && format('--package {0}', inputs.package) || '' }}
 
-  # `publish --each` runs your publish command once per tagged package,
-  # dependencies first, independent packages in parallel. A failure blocks
-  # the transitive dependents and nothing else. With `registry` set in
-  # verwalter.toml, a version the registry already has is skipped, so a
-  # re-run of this job is safe. The command gets {package}, {version} and
-  # {tag}, plus VERWALTER_PACKAGE, VERWALTER_VERSION, VERWALTER_TAG,
-  # VERWALTER_PRERELEASE and VERWALTER_FIRST_RELEASE in the environment.
+  # `publish` runs each package's publish command from verwalter.toml
+  # (`[publish]` defaults, `registry` and `publish` per package) once per
+  # tagged package, dependencies first, independent packages in parallel.
+  # A failure blocks the transitive dependents and nothing else. A version
+  # the registry already has is skipped, so a re-run of this job is safe.
   publish:
     needs: release
     if: needs.release.outputs.released == 'true' || github.event_name == 'workflow_dispatch'
@@ -88,11 +86,10 @@ jobs:
         with:
           name: dist
           path: dist
-      # scripts/publish.sh does the registry publish for one package:
-      # cargo publish, npm publish, pypa/gh-action-pypi-publish's twine,
-      # ... See examples/publish for commands per registry. For packages
-      # with `draft = true` it also uploads the assets built here and
-      # publishes the GitHub release:
+      # Set up the registry tooling the commands need: setup-node with
+      # registry-url for npm provenance, cargo login, twine, ...
+      # For packages with `draft = true`, the command also uploads the
+      # assets built here and publishes the GitHub release:
       #   gh release upload "$VERWALTER_TAG" dist/* --clobber
       #   gh release edit "$VERWALTER_TAG" --draft=false
       # cargo, pip and pub keep pre-releases away from default resolution
@@ -103,4 +100,3 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         with:
           command: publish
-          args: --each 'scripts/publish.sh' --jobs 4

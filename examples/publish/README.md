@@ -1,45 +1,49 @@
-# Publish commands for `verwalter publish --each`
+# Publish commands for `verwalter.toml`
 
-verwalter never publishes. `verwalter publish --each <command>` runs your
+verwalter never publishes. `verwalter publish` runs each package's publish
 command once per tagged package, dependencies first, and owns the order
-and the stop. Before each run it asks the registry named in
-`verwalter.toml` whether the version exists. If it does, the package is
+and the stop. The command comes from `verwalter.toml`: `publish` on the
+package, else `[publish].publish` for packages on the default registry,
+else the built-in command for the registry. Before each run the tool asks
+the registry whether the version exists. If it does, the package is
 skipped and the command does not run. So the command only publishes, and
 every error it returns is a real failure. Do not grep its output for
 "already exists". A revoked token, a missing `repository.url` for
 provenance and a conflict all come back as a 403 or a 422 from some
 registries.
 
-The command sees `VERWALTER_PACKAGE`, `VERWALTER_VERSION`, `VERWALTER_TAG`,
-`VERWALTER_PRERELEASE` and `VERWALTER_FIRST_RELEASE`. A `{package}`,
-`{version}` or `{tag}` in the command line is replaced too. A script per
-repository, `scripts/publish.sh`, is the usual shape:
+```toml
+[publish]
+registry = "crates"
+publish = "cargo publish --no-verify"
 
-```sh
-#!/bin/sh
-set -eu
-case "$VERWALTER_PACKAGE" in
-  livekit-protocol|livekit-api|livekit) cargo publish -p "$VERWALTER_PACKAGE" --no-verify ;;
-  @livekit/rtc-node) (cd packages/livekit-rtc && npm publish --provenance --access public) ;;
-  *) echo "no publish step for $VERWALTER_PACKAGE" >&2; exit 1 ;;
-esac
+[packages."@livekit/rtc-node"]
+registry = "npm"                                   # built-in: npm publish --provenance --access public
+
+[packages.livekit-rtc]
+registry = "pypi"
+publish = "python -m twine upload dist/livekit_rtc-*"
 ```
+
+The command runs in the package's `path` and sees `VERWALTER_PACKAGE`,
+`VERWALTER_VERSION`, `VERWALTER_TAG`, `VERWALTER_REGISTRY`,
+`VERWALTER_PRERELEASE`, `VERWALTER_FIRST_RELEASE` and `VERWALTER_ROOT`.
+`{package}`, `{version}` and `{tag}` in the command are replaced. Anything
+longer than a line is a script the command points at:
+`publish = "scripts/publish-wheels.sh"`.
 
 `VERWALTER_FIRST_RELEASE` is `true` when the registry has no version of
 the package at all. Trusted publishing cannot create a new package on
-crates.io, npm or PyPI, so the first upload is done by hand. A script
+crates.io, npm or PyPI, so the first upload is done by hand. A command
 stops early with a clear message:
 
-```sh
-if [ "$VERWALTER_FIRST_RELEASE" = true ]; then
-  echo "$VERWALTER_PACKAGE has no release yet. Publish the first version by hand, then re-run." >&2
-  exit 1
-fi
+```toml
+publish = "[ \"$VERWALTER_FIRST_RELEASE\" != true ] || { echo 'first release: publish by hand' >&2; exit 1; }; cargo publish"
 ```
 
-Without a `registry` in the config, the existence check is the command's
-job. The checks below are what the tool does for each registry, for a
-command that needs its own.
+Without a `registry`, the existence check is the command's job. The
+checks below are what the tool does for each registry, for a command that
+needs its own.
 
 ## crates.io
 

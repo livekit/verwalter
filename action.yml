@@ -3,7 +3,7 @@ description: Changeset-based versioning for single packages and monorepos. Runs 
 
 inputs:
   command:
-    description: "One of: check, plan, pr, release."
+    description: "One of: check, changeset, plan, pr, release, publish, pre-release, status."
     required: true
   pr:
     description: Pull request number for `check`. Defaults to the event's pull request.

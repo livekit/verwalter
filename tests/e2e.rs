@@ -1153,38 +1153,33 @@ fn publish_runs_dependencies_first_and_blocks_dependents_of_a_failure() {
     git(root, &["tag", "livekit-protocol-v0.3.1"]);
     git(root, &["tag", "livekit-api-v0.4.3"]);
     git(root, &["tag", "livekit-v0.7.0"]);
-    let repo = Repo::load(root).unwrap();
+    let base = fs::read_to_string(root.join("verwalter.toml")).unwrap();
+    // The command runs in the package's path, so the order file is shared
+    // through VERWALTER_ROOT. `[publish].publish` is the default for all.
+    let with_command = |command: &str| {
+        write(root, "verwalter.toml", &format!("{base}\n[publish]\npublish = '{command}'\n"));
+        Repo::load(root).unwrap()
+    };
     let no_registry = |_: &str| -> Result<u16, verwalter::Error> { Err("no registry configured".into()) };
+    let opts = verwalter::publish::Options { jobs: Some(4), dry_run: false };
+
+    // No command at all: an error before anything runs.
+    let err = verwalter::publish::run(&Repo::load(root).unwrap(), &opts, &no_registry).err().expect("no command");
+    assert!(err.to_string().contains("no publish command"), "{err}");
 
     // Everything succeeds: the order file shows protocol before the others.
-    let outcomes = verwalter::publish::run(
-        &repo,
-        &verwalter::publish::Options {
-            command: "echo $VERWALTER_PACKAGE $VERWALTER_VERSION $VERWALTER_TAG first=$VERWALTER_FIRST_RELEASE >> order".into(),
-            jobs: 4,
-            dry_run: false,
-        },
-        &no_registry,
-    )
-    .unwrap();
+    let repo = with_command("echo $VERWALTER_PACKAGE $VERWALTER_VERSION $VERWALTER_TAG $VERWALTER_REGISTRY first=$VERWALTER_FIRST_RELEASE $(pwd | xargs basename) >> $VERWALTER_ROOT/order");
+    let outcomes = verwalter::publish::run(&repo, &opts, &no_registry).unwrap();
     assert!(outcomes.iter().all(|o| o.status == "published"), "{outcomes:?}");
     let order = fs::read_to_string(root.join("order")).unwrap();
     let lines: Vec<&str> = order.lines().collect();
     assert_eq!(lines.len(), 3);
-    assert!(lines[0].starts_with("livekit-protocol 0.3.1 livekit-protocol-v0.3.1 first=true"), "{order}");
+    assert_eq!(lines[0], "livekit-protocol 0.3.1 livekit-protocol-v0.3.1 none first=true livekit-protocol", "{order}");
     fs::remove_file(root.join("order")).unwrap();
 
     // protocol fails: both dependents are blocked, nothing else ran.
-    let outcomes = verwalter::publish::run(
-        &repo,
-        &verwalter::publish::Options {
-            command: "echo {package} >> order; [ {package} != livekit-protocol ]".into(),
-            jobs: 4,
-            dry_run: false,
-        },
-        &no_registry,
-    )
-    .unwrap();
+    let repo = with_command("echo {package} >> $VERWALTER_ROOT/order; [ {package} != livekit-protocol ]");
+    let outcomes = verwalter::publish::run(&repo, &opts, &no_registry).unwrap();
     let by: std::collections::BTreeMap<&str, (&str, &str)> = outcomes
         .iter()
         .map(|o| (o.package.as_str(), (o.status, o.reason.as_str())))
@@ -1197,59 +1192,38 @@ fn publish_runs_dependencies_first_and_blocks_dependents_of_a_failure() {
     fs::remove_file(root.join("order")).unwrap();
 
     // api fails: livekit does not depend on it and still publishes.
-    let outcomes = verwalter::publish::run(
-        &repo,
-        &verwalter::publish::Options {
-            command: "[ {package} != livekit-api ]".into(),
-            jobs: 1,
-            dry_run: false,
-        },
-        &no_registry,
-    )
-    .unwrap();
+    let repo = with_command("[ {package} != livekit-api ]");
+    let outcomes = verwalter::publish::run(&repo, &verwalter::publish::Options { jobs: Some(1), dry_run: false }, &no_registry).unwrap();
     let by: std::collections::BTreeMap<&str, &str> =
         outcomes.iter().map(|o| (o.package.as_str(), o.status)).collect();
     assert_eq!(by["livekit-protocol"], "published");
     assert_eq!(by["livekit-api"], "failed");
     assert_eq!(by["livekit"], "published");
 
-    // With a registry that has protocol already, protocol is skipped and
-    // the dependents still run. A 503 is an error, not "missing".
-    let cfg = fs::read_to_string(root.join("verwalter.toml")).unwrap();
+    // protocol on crates with the package's own command; the registry has
+    // it already, so it is skipped and the dependents still run. A 503 is
+    // an error, not "missing".
     write(
         root,
         "verwalter.toml",
-        &cfg.replace(
+        &format!("{}\n[publish]\npublish = 'echo {{package}} >> $VERWALTER_ROOT/order'\n", base.replace(
             "changelog = \"livekit-protocol/CHANGELOG.md\"",
-            "changelog = \"livekit-protocol/CHANGELOG.md\"\nregistry = \"crates\"",
-        ),
+            "changelog = \"livekit-protocol/CHANGELOG.md\"\nregistry = \"crates\"\npublish = \"exit 7\"",
+        )),
     );
     let repo = Repo::load(root).unwrap();
+    assert_eq!(repo.config.publish_command("livekit-protocol").as_deref(), Some("exit 7"));
     let has_protocol = |url: &str| -> Result<u16, verwalter::Error> {
         Ok(if url.contains("livekit-protocol") { 200 } else { 404 })
     };
-    let outcomes = verwalter::publish::run(
-        &repo,
-        &verwalter::publish::Options {
-            command: "echo {package} >> order".into(),
-            jobs: 4,
-            dry_run: false,
-        },
-        &has_protocol,
-    )
-    .unwrap();
+    let outcomes = verwalter::publish::run(&repo, &opts, &has_protocol).unwrap();
     let by: std::collections::BTreeMap<&str, &str> =
         outcomes.iter().map(|o| (o.package.as_str(), o.status)).collect();
     assert_eq!(by["livekit-protocol"], "exists");
     assert_eq!(by["livekit-api"], "published");
     assert!(!fs::read_to_string(root.join("order")).unwrap().contains("protocol"));
     let down = |_: &str| -> Result<u16, verwalter::Error> { Ok(503) };
-    assert!(verwalter::publish::run(
-        &repo,
-        &verwalter::publish::Options { command: "true".into(), jobs: 1, dry_run: false },
-        &down
-    )
-    .is_err());
+    assert!(verwalter::publish::run(&repo, &opts, &down).is_err());
 }
 
 #[test]

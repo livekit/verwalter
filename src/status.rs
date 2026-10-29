@@ -149,7 +149,7 @@ pub fn status_with(repo: &Repo, remote: &str, gh: Gh, http: crate::registry::Htt
         let on_registry = if tag_state == "missing" {
             None
         } else {
-            crate::registry::exists(crate::registry::version_url(package, &p.name, &p.version), http)
+            crate::registry::exists(crate::registry::version_url(&repo.config, &p.name, &p.version), http)
                 .unwrap_or(None)
         };
         out.push(PackageStatus {

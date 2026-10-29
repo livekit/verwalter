@@ -103,13 +103,13 @@ cargo install --git https://github.com/lukasIO/verwalter --tag v0.13.0
 
 [examples/workflows](examples/workflows) has the three workflows to copy,
 and [examples/publish](examples/publish/README.md) has publish commands
-per registry for `publish --each`:
+per registry for `verwalter.toml`:
 
 | Workflow | Trigger | Command |
 |---|---|---|
 | `changeset-check.yml` | `pull_request` on `main` | `check` |
 | `release-pr.yml` | `push` to `main` | `pr` |
-| `release.yml` | `pull_request` closed, merged, head `release/*`, author `github-actions[bot]`, body with the verwalter marker | `release`, then `publish --each <your script>` |
+| `release.yml` | `pull_request` closed, merged, head `release/*`, author `github-actions[bot]`, body with the verwalter marker | `release`, then `publish` |
 
 An rc workflow is one `workflow_dispatch` job. It runs
 `pre-release <package> --level <l> --target ${{ github.ref_name }}` with
@@ -140,6 +140,11 @@ pin_files = ["Cargo.toml", "Cargo.lock"]   # workspace manifest and lock files
 ignore = ["examples/*"]         # workspace members the consistency check skips
 fixed = [["livekit-ffi", "livekit-ffi-node"]]  # groups that release at one shared version
 
+[publish]                        # defaults for `verwalter publish`
+jobs = 4                         # independent packages published at once
+registry = "crates"              # none | crates | npm | pypi | pubdev | custom
+publish = "cargo publish --no-verify"   # command for packages on that registry, run in their path
+
 [packages.livekit-protocol]
 path = "livekit-protocol"
 versioned_files = ["livekit-protocol/Cargo.toml"]
@@ -148,9 +153,21 @@ tag_template = "{package}-v{version}"      # default in a monorepo, v{version} w
 release = "tag_and_release"                # none | tag | tag_and_release
 draft = false
 max_bump = "minor"                         # optional ceiling on the bump level
-registry = "crates"                        # none | crates | npm | pypi | pubdev | custom
+registry = "npm"                           # overrides [publish].registry
+publish = "pnpm publish --no-git-checks"   # overrides the command; else the built-in one for the registry
 exists_url = "https://r/{name}/{version}"  # for custom: 200 when the version exists, 404 when not
 ```
+
+The publish command for a package is its own `publish`, else
+`[publish].publish` when the package is on the default registry, else the
+built-in command for its registry: `cargo publish`,
+`npm publish --provenance --access public`, `python -m twine upload dist/*`,
+`dart pub publish --force`. A package with none fails `publish` before
+anything runs. The command runs in the package's `path` with
+`VERWALTER_PACKAGE`, `VERWALTER_VERSION`, `VERWALTER_TAG`,
+`VERWALTER_REGISTRY`, `VERWALTER_PRERELEASE`, `VERWALTER_FIRST_RELEASE` and
+`VERWALTER_ROOT` set. `{package}`, `{version}` and `{tag}` in the command
+are replaced.
 
 Dependencies between packages are read from the manifests, not configured.
 
@@ -183,7 +200,7 @@ The first file of a package is its version.
 | One release PR | Every package with a pending bump goes in one PR. Each push regenerates the branch from `main` and updates the PR in place. With nothing pending, the PR is closed. | `pr`, `release_branch_prefix` |
 | Dependent bumps | A package whose in-repo dependency is released gets a bump too, transitively. Its dependency floor moves in its manifest and the lock files. | `dependent_bump_level`, `pin_files` |
 | Dependency order | Releases, tags and the handoff list go dependencies first. A failure stops before any dependent. | `release` |
-| Publish scheduler | Runs your publish command once per tagged package, dependencies first, independent packages in parallel. A failure blocks its transitive dependents and nothing else. A version the registry has is skipped before the command runs. Nothing is remembered: a re-run repeats the command. | `publish --each --jobs`, `registry` |
+| Publish scheduler | Runs each package's publish command once per tagged package, dependencies first, independent packages in parallel. A failure blocks its transitive dependents and nothing else. A version the registry has is skipped before the command runs. Nothing is remembered: a re-run repeats the command. | `publish`, `[publish]`, `registry`, `publish` per package |
 | Registry check | One GET per registry answers whether a version exists. 200 skips, 404 publishes, anything else fails. `status` shows the answer. | `registry`, `exists_url` |
 | Fixed groups | Members release at one version: the highest in the group, bumped by the highest level any member needs. A member without a changeset gets a "Released with" line. | `fixed` |
 | Bump ceiling | Caps what a changeset can do to a package. A group takes the lowest cap. | `max_bump` |
@@ -245,7 +262,7 @@ and `origin/<base>` are current.
 
 | Not covered | Why, and what to do instead |
 |---|---|
-| The registry publish itself | Your command, run by `publish --each`. The tool checks existence first, so the command never greps its own errors: a conflict and a bad token look alike. Commands per registry are in [examples/publish](examples/publish/README.md). |
+| The registry publish itself | Your command from `verwalter.toml`, run by `publish`. The tool checks existence first, so the command never greps its own errors: a conflict and a bad token look alike. Commands per registry are in [examples/publish](examples/publish/README.md). |
 | First upload of a new package under trusted publishing | No registry allows it. Upload the first version by hand. The PR body and `first_release` tell you when. |
 | Snapshot or nightly releases from any commit | Not built. Use an rc PR, or a workflow that publishes under a dist tag with a version the tool never sees. |
 | Cross-repo version coupling | A workflow precondition, not a tool concern. |
@@ -265,7 +282,7 @@ and `origin/<base>` are current.
 | `verwalter pr [--remote origin]` | Push the branch and open or update the PR. |
 | `verwalter release [--asset <file>]... [--package <name>] [--publish]` | Tag and create GitHub releases for every untagged version that has a changelog entry. Uploads assets to drafts or a named package. `--publish` flips a draft. |
 | `verwalter release --abandon <tag>` | Delete a GitHub release and its tag. |
-| `verwalter publish --each <command> [--jobs <n>]` | Run `command` once per tagged package, dependencies first, up to `n` at once. `{package}`, `{version}`, `{tag}` are replaced, and `VERWALTER_PACKAGE`, `VERWALTER_VERSION`, `VERWALTER_TAG`, `VERWALTER_PRERELEASE`, `VERWALTER_FIRST_RELEASE` are set. A failure blocks dependents. A version on the registry is skipped. |
+| `verwalter publish [--jobs <n>]` | Run each package's publish command once per tagged package, dependencies first, up to `n` at once. A failure blocks dependents. A version on the registry is skipped. |
 | `verwalter pre-release <package> [--target <branch>] [--level <l>]` | Open an rc PR for one package and its fixed group. Changesets stay pending. |
 
 All commands take `--config <file>` and an optional checkout path. `pr`,

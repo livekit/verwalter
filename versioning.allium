@@ -121,13 +121,19 @@ entity Package {
     -- applies to the group.
     max_bump: BumpLevel?
     -- Where the package is published: crates | npm | pypi | pubdev |
-    -- custom (an exists_url with {name} and {version}) | none. The tool
-    -- only asks whether a version is there; publishing stays the
-    -- workflow's. The answer is 200, 404, or an error: a registry outage
-    -- never reads as "not there yet".
-    registry: Registry = none
-    exists_url: String?
+    -- custom (an exists_url with {name} and {version}) | none. Defaults
+    -- to config.publish.registry. The tool only asks whether a version is
+    -- there; publishing is the command below. The answer is 200, 404, or
+    -- an error: a registry outage never reads as "not there yet".
+    registry: Registry = config.publish.registry
+    exists_url: String? = config.publish.exists_url
     on_registry(version: Version): Boolean? when registry != none
+    -- The shell command that publishes this package, run in its path:
+    -- the package's own, else config.publish.publish when the package is
+    -- on the default registry, else the built-in command for its
+    -- registry (cargo publish, npm publish, twine upload, dart pub
+    -- publish), else none and `publish` refuses to start.
+    publish_command: String?
 
     changesets: Changeset with repository = this.repository
     pending_changesets: changesets where status = pending
@@ -238,6 +244,10 @@ config {
     prerelease_label: String = "rc"
     -- PRs carrying this label need no changeset.
     exempt_label: String = "internal"
+    -- Defaults for `verwalter publish`: how many independent packages run
+    -- at once, the registry and the command every package takes unless
+    -- it sets its own.
+    publish: { jobs: Integer = 4, registry: Registry = none, exists_url: String?, publish: String? }
     -- Workspace members the consistency check skips, by name or path.
     ignore: Set<String> = {}
     -- Groups of packages that always release at one shared version: the
@@ -623,8 +633,9 @@ surface PreReleaseRequest {
 -- workflow's command; the tool runs that command once per tagged package
 -- and owns the order and the stop.
 rule WorkflowPublishesInDependencyOrder {
-    when: WorkflowRunsPublish(workflow, repository, command)
+    when: WorkflowRunsPublish(workflow, repository)
     let candidates = filter(Packages, p => p.repository = repository and p.release_mode != none and GitTags.any(t => t.package = p and t.version = p.version))
+    requires: candidates.all(p => p.publish_command != null)
     ensures:
         for p in candidates:
             -- A version the registry has is skipped before the command runs.
@@ -637,7 +648,7 @@ rule WorkflowPublishesInDependencyOrder {
                 if p.dependencies.any(d => d in candidates and PublishOutcome with package = d and status in {failed, blocked}):
                     PublishOutcome.created(package: p, status: blocked)
                 else:
-                    PublishOutcome.created(package: p, status: command succeeded ? published : failed)
+                    PublishOutcome.created(package: p, status: p.publish_command succeeded ? published : failed)
 }
 
 entity PublishOutcome {

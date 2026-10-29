@@ -57,13 +57,15 @@ pub struct Package {
     /// `max_bump = "minor"` bumps minor. In a fixed group the lowest
     /// ceiling applies to the group.
     pub max_bump: Option<BumpLevel>,
-    /// Where the package is published, for the exists check before a
-    /// publish command runs and for `status`. Default: no check.
-    #[serde(default)]
-    pub registry: crate::registry::Registry,
+    /// Where the package is published. Default: `[publish].registry`.
+    pub registry: Option<crate::registry::Registry>,
     /// For `registry = "custom"`: a URL with `{name}` and `{version}` that
     /// answers 200 when the version exists and 404 when it does not.
     pub exists_url: Option<String>,
+    /// Shell command that publishes this package, run in `path`. Default:
+    /// `[publish].publish` when on the default registry, else the built-in
+    /// command for the registry.
+    pub publish: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -97,7 +99,31 @@ pub struct Config {
     /// member needs. `fixed = [["play-core", "play-ffi"]]`.
     #[serde(default)]
     pub fixed: Vec<Vec<String>>,
+    /// Defaults for `verwalter publish`, overridden per package.
+    #[serde(default)]
+    pub publish: Publish,
     pub packages: BTreeMap<String, Package>,
+}
+
+/// Spec: config.publish. The default registry and command for every
+/// package; `registry` and `publish` on a package override them.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct Publish {
+    /// Packages run at once, independent ones only.
+    #[serde(default = "default_jobs")]
+    pub jobs: usize,
+    #[serde(default)]
+    pub registry: crate::registry::Registry,
+    /// For `registry = "custom"`: a URL with `{name}` and `{version}`.
+    pub exists_url: Option<String>,
+    /// Shell command, run in the package's path. Applies to packages on
+    /// the default registry; others take the built-in default for theirs.
+    pub publish: Option<String>,
+}
+
+fn default_jobs() -> usize {
+    4
 }
 
 fn default_base_branch() -> String {
@@ -134,6 +160,46 @@ impl Config {
             }
         }
         Ok(config)
+    }
+
+    /// Spec: Package.registry. The package's own, else the default.
+    pub fn registry_of(&self, package: &str) -> crate::registry::Registry {
+        self.packages[package].registry.unwrap_or(self.publish.registry)
+    }
+
+    /// Spec: Package.exists_url, with the same fallback.
+    pub fn exists_url_of(&self, package: &str) -> Option<&str> {
+        self.packages[package]
+            .exists_url
+            .as_deref()
+            .or(self.publish.exists_url.as_deref())
+    }
+
+    /// Spec: Package.publish_command. The package's own, else the default
+    /// when the package is on the default registry, else the built-in
+    /// command for its registry. None when nothing applies.
+    pub fn publish_command(&self, package: &str) -> Option<String> {
+        use crate::registry::Registry;
+        let p = &self.packages[package];
+        if let Some(c) = &p.publish {
+            return Some(c.clone());
+        }
+        let registry = self.registry_of(package);
+        if p.registry.is_none_or(|r| r == self.publish.registry) {
+            if let Some(c) = &self.publish.publish {
+                return Some(c.clone());
+            }
+        }
+        Some(
+            match registry {
+                Registry::Crates => "cargo publish",
+                Registry::Npm => "npm publish --provenance --access public",
+                Registry::Pypi => "python -m twine upload dist/*",
+                Registry::Pubdev => "dart pub publish --force",
+                Registry::None | Registry::Custom => return None,
+            }
+            .to_string(),
+        )
     }
 
     /// The other members of `package`'s fixed group, if it is in one.
@@ -303,6 +369,7 @@ release = "tag"
 
     #[test]
     fn unknown_keys_are_errors() {
-        assert!(Config::parse(&format!("{MONO}\npublish = \"cargo publish\"\n")).is_err());
+        assert!(Config::parse(&format!("{MONO}\npublsh = \"cargo publish\"\n")).is_err());
+        assert!(Config::parse(&format!("[publish]\njob = 2\n{MONO}\n")).is_err());
     }
 }

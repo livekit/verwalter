@@ -8,7 +8,7 @@ use verwalter::{
     version::BumpLevel, workspace, Error,
 };
 
-const USAGE: &str = "usage: verwalter <status|plan|branches|pr> [--config <file>] [--base <ref>] [--remote <name>] [--dry-run] [<checkout>]\n       verwalter changeset [--level major|minor|patch] [--package <name>]... [--base <ref>] [--summary <text>] [<checkout>]\n       verwalter release [--asset <file>]... [--package <name>] [--publish] [--abandon <tag>] [--remote <name>] [--dry-run] [<checkout>]\n       verwalter check --pr <number> [--config <file>] [--dry-run] [<checkout>]\n       verwalter publish --each <command> [--jobs <n>] [--dry-run] [<checkout>]\n       verwalter pre-release <package> [--target <branch>] [--level major|minor|patch] [--remote <name>] [--dry-run] [<checkout>]";
+const USAGE: &str = "usage: verwalter <status|plan|branches|pr> [--config <file>] [--base <ref>] [--remote <name>] [--dry-run] [<checkout>]\n       verwalter changeset [--level major|minor|patch] [--package <name>]... [--base <ref>] [--summary <text>] [<checkout>]\n       verwalter release [--asset <file>]... [--package <name>] [--publish] [--abandon <tag>] [--remote <name>] [--dry-run] [<checkout>]\n       verwalter check --pr <number> [--config <file>] [--dry-run] [<checkout>]\n       verwalter publish [--jobs <n>] [--dry-run] [<checkout>]\n       verwalter pre-release <package> [--target <branch>] [--level major|minor|patch] [--remote <name>] [--dry-run] [<checkout>]";
 
 fn main() -> ExitCode {
     match run() {
@@ -38,8 +38,7 @@ fn run() -> Result<(), Error> {
     let mut target: Option<String> = None;
     let mut summary: Option<String> = None;
     let mut packages: Vec<String> = Vec::new();
-    let mut each: Option<String> = None;
-    let mut jobs: usize = 4;
+    let mut jobs: Option<usize> = None;
     let mut level: Option<BumpLevel> = None;
     let mut dry_run = false;
     let mut only: Option<String> = None;
@@ -55,8 +54,7 @@ fn run() -> Result<(), Error> {
             "--abandon" => abandon = Some(args.next().ok_or(USAGE)?),
             "--target" => target = Some(args.next().ok_or(USAGE)?),
             "--summary" => summary = Some(args.next().ok_or(USAGE)?),
-            "--each" => each = Some(args.next().ok_or(USAGE)?),
-            "--jobs" => jobs = args.next().ok_or(USAGE)?.parse()?,
+            "--jobs" => jobs = Some(args.next().ok_or(USAGE)?.parse()?),
             "--dry-run" => dry_run = true,
             "--package" => {
                 let p = args.next().ok_or(USAGE)?;
@@ -210,11 +208,7 @@ fn run() -> Result<(), Error> {
             Ok(())
         }
         "publish" => {
-            let options = verwalter::publish::Options {
-                command: each.ok_or(USAGE)?,
-                jobs,
-                dry_run,
-            };
+            let options = verwalter::publish::Options { jobs, dry_run };
             let outcomes = verwalter::publish::run(&repo, &options, &verwalter::registry::curl)?;
             println!("{}", verwalter::publish::write_outputs(&outcomes)?);
             if verwalter::publish::failed(&outcomes) {
