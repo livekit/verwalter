@@ -6,7 +6,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::{changeset::Changeset, config::Config, handler, plan::PackageState, Error};
+use crate::{Version, changeset::Changeset, config::Config, handler, plan::PackageState, Error};
 
 pub const CONFIG_FILE: &str = "verwalter.toml";
 pub const CHANGESET_DIR: &str = ".changeset";
@@ -16,6 +16,9 @@ pub struct Repo {
     pub config: Config,
     pub packages: Vec<PackageState>,
     pub changesets: Vec<Changeset>,
+    /// Spec: VersionedFilesAgree. Files of one package that carry
+    /// different versions; the first file wins, the rest is reported.
+    pub warnings: Vec<String>,
 }
 
 impl Repo {
@@ -32,15 +35,21 @@ impl Repo {
         let names: Vec<&str> = config.packages.keys().map(String::as_str).collect();
 
         let mut packages = Vec::new();
+        let mut warnings = Vec::new();
         for (name, package) in &config.packages {
-            let mut version = None;
+            let mut version: Option<Version> = None;
             let mut dependencies = Vec::new();
             for file in &package.versioned_files {
                 let (file, regex) = (file.path(), file.regex());
                 let content =
                     fs::read_to_string(root.join(file)).map_err(|e| format!("{file}: {e}"))?;
-                if version.is_none() {
-                    version = handler::read_version(file, regex, &content).ok();
+                match (&version, handler::read_version(file, regex, &content).ok()) {
+                    (None, found) => version = found,
+                    (Some(first), Some(other)) if *first != other => warnings.push(format!(
+                        "{name}: {file} says {other}, {} says {first}; the next release aligns them",
+                        package.versioned_files[0].path()
+                    )),
+                    _ => {}
                 }
                 let others: Vec<&str> = names.iter().copied().filter(|n| n != name).collect();
                 for dep in handler::internal_dependencies(file, &content, &others)? {
@@ -66,6 +75,7 @@ impl Repo {
             config,
             packages,
             changesets,
+            warnings,
         })
     }
 }

@@ -94,7 +94,9 @@ Dependencies between packages are read from the manifests, not configured.
 Versioned files are handled by
 [knope-versioning](https://crates.io/crates/knope-versioning): `Cargo.toml`,
 `Cargo.lock`, `package.json`, `package-lock.json`, `pyproject.toml`,
-`pubspec.yaml`, `go.mod`, `pom.xml` and more.
+`pubspec.yaml`, `go.mod`, `pom.xml` and more. `uv.lock` is handled by the
+tool itself. The first file of a package is its version. Files of one
+package that disagree are reported as a warning.
 
 Any other text file takes a regex with a `version` capture group. Only the
 captured text changes. This covers `gradle.properties`, a `.podspec`, a

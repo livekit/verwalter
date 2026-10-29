@@ -18,6 +18,9 @@ pub struct Released {
     pub version: String,
     pub tag: String,
     pub prerelease: bool,
+    /// No earlier tag of the package: a registry with trusted publishing
+    /// needs this upload done by hand.
+    pub first_release: bool,
     /// committed | tagged | drafted | published, as in the spec.
     pub status: &'static str,
     /// In-repo dependencies released in the same run. They come earlier in
@@ -132,7 +135,17 @@ fn release_one(
     // Spec: TagRelease / ResumeUntaggedReleases. An existing tag, local
     // or on the remote, counts as done wherever it points.
     let mut fresh = false;
+    let changelog = fs::read_to_string(root.join(&package.changelog)).unwrap_or_default();
     if !git::ref_exists(root, &tag) {
+        // Spec: ReleaseNeedsChangelogEntry. The release branch always writes
+        // one; a version edited by hand has none and is not a release.
+        let heading = format!("## {version}");
+        if options.package.is_none() && !changelog.lines().any(|l| l.trim() == heading) {
+            eprintln!(
+                "warning: {name} {version} has no tag and no changelog entry; not released (edited by hand?). `release --package {name}` releases it anyway"
+            );
+            return Ok(None);
+        }
         if remote_has_tag(root, remote, &tag)? {
             git::run(
                 root,
@@ -179,10 +192,7 @@ fn release_one(
                 status = if draft { "drafted" } else { "published" };
             }
             None => {
-                let notes = changelog_section(
-                    &fs::read_to_string(root.join(&package.changelog)).unwrap_or_default(),
-                    &version.to_string(),
-                );
+                let notes = changelog_section(&changelog, &version.to_string());
                 let title = format!("{name} {version}");
                 let mut args = vec![
                     "release",
@@ -229,13 +239,16 @@ fn release_one(
     if !fresh && status != "drafted" && options.package.is_none() {
         return Ok(None);
     }
-    let changelog = fs::read_to_string(root.join(&package.changelog)).unwrap_or_default();
+    let first_release = crate::prerelease::released_versions(repo, name)?
+        .iter()
+        .all(|v| v == version);
     Ok(Some(Released {
         package: name.to_string(),
         previous_version: previous_version(&changelog, &version.to_string()),
         version: version.to_string(),
         tag,
         prerelease: version.is_prerelease(),
+        first_release,
         status,
         depends_on: Vec::new(),
     }))

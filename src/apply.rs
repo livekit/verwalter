@@ -17,7 +17,7 @@ use crate::{
     Error,
 };
 
-const LOCK_FILES: &[&str] = &["Cargo.lock", "package-lock.json", "deno.lock"];
+const LOCK_FILES: &[&str] = &["Cargo.lock", "package-lock.json", "deno.lock", "uv.lock"];
 
 fn is_lock_file(path: &str) -> bool {
     LOCK_FILES.contains(&path.rsplit('/').next().unwrap_or(path))

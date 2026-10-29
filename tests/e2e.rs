@@ -76,6 +76,11 @@ changelog = "livekit/CHANGELOG.md"
     );
     write(&root, "livekit-api/Cargo.toml", "[package]\nname = \"livekit-api\"\nversion = \"0.4.3\"\n\n[dependencies]\nlivekit-protocol = { workspace = true }\n");
     write(&root, "livekit/Cargo.toml", "[package]\nname = \"livekit\"\nversion = \"0.7.0\"\n\n[dependencies]\nlivekit-protocol = { workspace = true }\n");
+    // The release branch always writes the entry; a version without one
+    // was edited by hand and is not released.
+    write(&root, "livekit-protocol/CHANGELOG.md", "# Changelog\n\n## 0.3.1\n\n### Patch Changes\n\n- old\n");
+    write(&root, "livekit-api/CHANGELOG.md", "# Changelog\n\n## 0.4.3\n\n### Patch Changes\n\n- old\n");
+    write(&root, "livekit/CHANGELOG.md", "# Changelog\n\n## 0.7.0\n\n### Patch Changes\n\n- old\n");
     git(&root, &["add", "-A"]);
     git(&root, &["commit", "-q", "-m", "init"]);
     Repo_(root)
@@ -984,6 +989,7 @@ fn release_runs_in_dependency_order_and_stops_at_the_first_failure() {
     let order: Vec<&str> = released.iter().map(|r| r.package.as_str()).collect();
     assert_eq!(order, ["livekit-protocol", "livekit", "livekit-api"]);
     assert!(released[0].depends_on.is_empty());
+    assert!(released.iter().all(|r| r.first_release), "no earlier tags");
     assert_eq!(released[1].depends_on, ["livekit-protocol"]);
     assert_eq!(released[2].depends_on, ["livekit-protocol"]);
 
@@ -1026,6 +1032,77 @@ fn release_runs_in_dependency_order_and_stops_at_the_first_failure() {
     assert!(git(root2, &["tag", "--list", "livekit-v*"]).is_empty());
     let _ = fs::remove_dir_all(&remote);
     let _ = fs::remove_dir_all(&remote2);
+}
+
+// Spec: ReleaseNeedsChangelogEntry. A hand-edited version has no entry
+// and no tag; the run leaves it alone unless the package is named.
+#[test]
+fn hand_bumped_version_is_not_released() {
+    let r = fixture("hand-bump");
+    let root = &r.0;
+    let remote = std::env::temp_dir().join(format!(
+        "verwalter-it-{}-hand-bump-remote.git",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&remote);
+    git(root, &["init", "-q", "--bare", remote.to_str().unwrap()]);
+    git(root, &["remote", "add", "origin", remote.to_str().unwrap()]);
+    git(root, &["tag", "livekit-protocol-v0.3.1"]);
+    git(root, &["tag", "livekit-api-v0.4.3"]);
+    git(root, &["tag", "livekit-v0.7.0"]);
+    write(
+        root,
+        "livekit/Cargo.toml",
+        "[package]\nname = \"livekit\"\nversion = \"0.7.1\"\n\n[dependencies]\nlivekit-protocol = { workspace = true }\n",
+    );
+    git(root, &["commit", "-q", "-am", "bump by hand"]);
+    let repo = Repo::load(root).unwrap();
+    let mut gh = |args: &[&str]| -> Result<String, verwalter::Error> {
+        match args {
+            ["release", "view", "livekit-v0.7.1", ..] => Err("not found".into()),
+            ["release", "view", ..] => Ok(r#"{"isDraft":false,"assets":[]}"#.into()),
+            _ => Ok(String::new()),
+        }
+    };
+    let released = verwalter::release::run(&repo, "origin", &Default::default(), &mut gh).unwrap();
+    assert!(released.is_empty(), "{released:?}");
+    assert!(git(root, &["tag", "--list", "livekit-v0.7.1"]).is_empty());
+
+    let released = verwalter::release::run(
+        &repo,
+        "origin",
+        &verwalter::release::Options {
+            package: Some("livekit".into()),
+            ..Default::default()
+        },
+        &mut gh,
+    )
+    .unwrap();
+    assert_eq!(released.len(), 1);
+    assert!(!released[0].first_release);
+    assert!(!git(root, &["tag", "--list", "livekit-v0.7.1"]).is_empty());
+    let _ = fs::remove_dir_all(&remote);
+}
+
+// Spec: VersionedFilesAgree. The first file wins, the rest is a warning.
+#[test]
+fn versioned_files_that_disagree_are_reported() {
+    let r = fixture("drift");
+    let root = &r.0;
+    let cfg = fs::read_to_string(root.join("verwalter.toml")).unwrap();
+    write(
+        root,
+        "verwalter.toml",
+        &cfg.replace(
+            "versioned_files = [\"livekit/Cargo.toml\"]",
+            "versioned_files = [\"livekit/Cargo.toml\", { path = \"livekit/README.md\", regex = 'livekit = \"(?<version>[^\"]+)\"' }]",
+        ),
+    );
+    write(root, "livekit/README.md", "livekit = \"0.6.9\"\n");
+    let repo = Repo::load(root).unwrap();
+    assert_eq!(repo.packages.iter().find(|p| p.name == "livekit").unwrap().version.to_string(), "0.7.0");
+    assert_eq!(repo.warnings.len(), 1);
+    assert!(repo.warnings[0].contains("livekit/README.md says 0.6.9"), "{}", repo.warnings[0]);
 }
 
 #[test]

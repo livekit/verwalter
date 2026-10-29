@@ -99,7 +99,7 @@ fn run() -> Result<(), Error> {
     for f in &workspace::check(&repo.root, &repo.config) {
         eprintln!("warning: {f}");
     }
-    for w in verwalter::plan::fixed_group_drift(&repo.packages) {
+    for w in repo.warnings.iter().chain(&verwalter::plan::fixed_group_drift(&repo.packages)) {
         eprintln!("warning: {w}");
     }
     match command.as_str() {

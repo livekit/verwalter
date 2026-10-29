@@ -147,6 +147,9 @@ pub fn write_version(
             return Ok(content.to_string());
         }
     }
+    if let (true, Some(dep)) = (path.rsplit('/').next() == Some("uv.lock"), dependency) {
+        return uv_lock_pin(content, dep, version);
+    }
     if let (true, Some(dep)) = (is_pyproject(path), dependency) {
         // knope's pyproject handler has no dependency mode; it would set the
         // package's own version instead.
@@ -254,6 +257,48 @@ fn pyproject_pin(content: &str, dep: &str, version: &Version) -> String {
         }
     })
     .into_owned()
+}
+
+/// Spec: write_dependency_version for uv.lock, which knope does not know.
+/// The `[[package]]` entry of `dep` gets `version`, and every
+/// `requires-dist` specifier on `dep` moves its lower bound, as the
+/// pyproject pin does. Without that, `uv sync --locked` rejects the lock.
+fn uv_lock_pin(content: &str, dep: &str, version: &Version) -> Result<String, Error> {
+    let wanted = normalise_py(dep);
+    let new = to_pep440(version);
+    let mut doc: DocumentMut = content.parse()?;
+    let Some(packages) = doc.get_mut("package").and_then(|p| p.as_array_of_tables_mut()) else {
+        return Ok(content.to_string());
+    };
+    let spec = regex::Regex::new(r"^(>=|==|~=)\s*([0-9][0-9A-Za-z.+!*-]*)").expect("static regex");
+    for entry in packages.iter_mut() {
+        let name = entry.get("name").and_then(|n| n.as_str()).unwrap_or("");
+        if normalise_py(name) == wanted {
+            entry["version"] = toml_edit::value(new.as_str());
+        }
+        let Some(requires) = entry
+            .get_mut("metadata")
+            .and_then(|m| m.get_mut("requires-dist"))
+            .and_then(|r| r.as_array_mut())
+        else {
+            continue;
+        };
+        for req in requires.iter_mut() {
+            let Some(table) = req.as_inline_table_mut() else {
+                continue;
+            };
+            let name = table.get("name").and_then(|n| n.as_str()).unwrap_or("");
+            if normalise_py(name) != wanted {
+                continue;
+            }
+            let Some(old) = table.get("specifier").and_then(|s| s.as_str()).map(String::from) else {
+                continue;
+            };
+            let moved = spec.replace(&old, |c: &regex::Captures| format!("{}{new}", &c[1]));
+            table["specifier"] = moved.as_ref().into();
+        }
+    }
+    Ok(doc.to_string())
 }
 
 /// Spec: internal_dependencies. Which of `candidates` (the other package
@@ -472,6 +517,41 @@ version = "1.0.228"
             vec!["@livekit/protocol"],
             "devDependencies make no edge"
         );
+    }
+
+    const UV_LOCK: &str = r#"version = 1
+revision = 2
+
+[[package]]
+name = "livekit-api"
+version = "1.1.1"
+source = { editable = "livekit-api" }
+dependencies = [
+    { name = "livekit-protocol" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "aiohttp", specifier = ">=3.9" },
+    { name = "livekit-protocol", specifier = ">=1.1.0,<2.0.0" },
+]
+
+[[package]]
+name = "livekit-protocol"
+version = "1.1.0"
+source = { editable = "livekit-protocol" }
+"#;
+
+    // Spec: write_dependency_version for uv.lock.
+    #[test]
+    fn uv_lock_own_entry_and_requires_dist() {
+        let own = write_version("uv.lock", None, UV_LOCK, Some("livekit-protocol"), &v("1.2.0-rc.1")).unwrap();
+        assert!(own.contains("name = \"livekit-protocol\"\nversion = \"1.2.0rc1\""), "{own}");
+        assert!(own.contains("specifier = \">=1.2.0rc1,<2.0.0\""), "{own}");
+        assert!(own.contains("version = \"1.1.1\""), "api untouched");
+        assert!(own.contains("{ name = \"aiohttp\", specifier = \">=3.9\" }"), "others untouched");
+        let none = write_version("uv.lock", None, UV_LOCK, Some("nope"), &v("9.9.9")).unwrap();
+        assert_eq!(none, UV_LOCK);
     }
 
     const PYPROJECT: &str = r#"[project]

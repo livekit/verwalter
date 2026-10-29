@@ -281,6 +281,13 @@ fn number_from_url(url: &str) -> Result<u64, Error> {
 }
 
 /// The PR body: one section per package with its changelog entry.
+/// Spec: Package.first_release. No tag of the package exists.
+pub fn is_first_release(repo: &Repo, package: &str) -> bool {
+    crate::prerelease::released_versions(repo, package)
+        .map(|v| v.is_empty())
+        .unwrap_or(false)
+}
+
 fn body(plan: &[PlannedRelease], repo: &Repo) -> String {
     let mut out = format!("{MARKER}\nMerging this PR releases:\n");
     for release in plan {
@@ -288,6 +295,9 @@ fn body(plan: &[PlannedRelease], repo: &Repo) -> String {
             "\n## {} `{}` → `{}`\n\n",
             release.package, release.from, release.to
         ));
+        if is_first_release(repo, &release.package) {
+            out.push_str("**First release**: no tag of this package exists yet. A registry with trusted publishing needs the first upload done by hand.\n\n");
+        }
         out.push_str(
             render_entry(release, &repo.changesets, plan)
                 .trim_start_matches(|c| c != '\n')
@@ -328,6 +338,7 @@ mod tests {
                 "---\na: minor\n---\nAdd thing\nmore detail\n",
             )
             .unwrap()],
+            warnings: Vec::new(),
         }
     }
 
@@ -351,6 +362,7 @@ mod tests {
         let b = body(&plan, &r);
         assert!(b.starts_with(MARKER));
         assert!(b.contains("## a `1.0.0` → `1.1.0`"));
+        assert!(b.contains("**First release**"), "no a-v* tag exists here");
         assert!(b.contains("### Minor Changes\n\n- Add thing"));
         assert!(b.contains("Changesets: `x.md`"));
         assert!(b.contains("## b `2.0.0` → `2.0.1`"));

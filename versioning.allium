@@ -102,8 +102,9 @@ entity Package {
     name: String
     -- May mix formats (livekit-ffi lists Cargo.toml and package.json files).
     -- Each file goes to the VersionedFileHandler for its format. Lock files
-    -- (Cargo.lock, pnpm-lock.yaml) are versioned files too, edited directly
-    -- by a handler; the tool never runs a package manager.
+    -- (Cargo.lock, uv.lock) are versioned files too, edited directly by a
+    -- handler; the tool never runs a package manager. The first file is
+    -- the version; files that disagree are a warning (VersionedFilesAgree).
     versioned_files: Set<VersionedFile>
     changelog_file: String
     version: Version
@@ -129,6 +130,9 @@ entity Package {
     -- A package left at a pre-release has its promotion pending, with or
     -- without changesets: an rc is never the last word.
     has_pending_bump: pending_changesets.any(c => c.unreleased_for(this.name)) or version.is_prerelease
+    -- No tag at all: a registry with trusted publishing needs the first
+    -- upload done by hand, so the release PR and the handoff say so.
+    first_release: not GitTags.any(t => t.package = this)
 }
 
 -- Exactly the changesets file format: `.changeset/<name>.md`, YAML front
@@ -402,6 +406,9 @@ rule MaintainerClosesReleasePullRequest {
 -- Release that is not complete. A tag that already exists, local or on the
 -- remote, counts as done wherever it points: the tool cannot tell a release
 -- made long ago from a bump that skipped tagging.
+-- ReleaseNeedsChangelogEntry: a version with no tag and no changelog entry
+-- for it was edited by hand, not released by a release PR. It is left
+-- alone with a warning, unless the maintainer names the package.
 rule TagRelease {
     when: release: Release.created
     requires: release.package.release_mode != none
@@ -417,6 +424,7 @@ rule ResumeUntaggedReleases {
     when: ToolRunStarted(repository)
     for release in Releases where package.repository = repository and status = committed:
         requires: release.package.release_mode != none
+        requires: release.package.changelog_file has an entry for release.version
         ensures:
             release.status = tagged
             release.tag = tag_for(release.package.tag_template, release.package.name, release.version)
@@ -617,6 +625,7 @@ surface WorkflowReleaseHandoff {
     exposes:
         release.package.name
         release.previous_version
+        release.package.first_release
         release.version
         release.version.is_prerelease
         release.tag when release.status = tagged | drafted
