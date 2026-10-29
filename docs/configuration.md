@@ -2,6 +2,21 @@
 
 Every key of `verwalter.toml`, with its default or an example. The [README](../README.md) has the minimum to start.
 
+For completion and hover docs in editors that use Taplo or Tombi (the
+Even Better TOML extension for VS Code, Zed, Helix, Neovim), put this line
+first in the file:
+
+```toml
+#:schema https://raw.githubusercontent.com/lukasIO/verwalter/main/schemas/v1.json
+```
+
+The schema is generated from the config types by a test, which fails when
+[schemas/v1.json](../schemas/v1.json) is stale. To regenerate it, run
+`UPDATE_SCHEMA=1 cargo test schema_is_current`. An additive change, such as a
+new optional key, updates `v1.json` in place. A breaking change, such as a
+removed or renamed key or a new required key, freezes `v1.json` and adds
+`v2.json`.
+
 ```toml
 base_branch = "main"            # default
 exempt_label = "internal"       # default

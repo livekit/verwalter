@@ -11,6 +11,7 @@ use serde::Deserialize;
 use crate::{config::Config, handler::to_pep440, Error, Version};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum Registry {
     /// No check. The publish command handles it, or the package is private.
