@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.14.0
+
+### Minor Changes
+
+- `check` runs an API check per covered package: `[check].api` or the package's `api` command prints the kind of change the diff needs, verwalter translates it to the digit for the package's version, and fails the PR when the changeset claims less. The comment names the level to use. - [`cea5758`](https://github.com/lukasIO/verwalter/commit/cea57582571fab94239f64083113e4203f657b81) ([@lukasIO](https://github.com/lukasIO))
+- `verwalter publish [--jobs <n>]` runs each package's publish command once per tagged package, dependencies first, independent packages in parallel. A failure blocks the transitive dependents and nothing else, and the run exits non-zero. The command comes from `verwalter.toml`: `[publish]` holds the default `registry`, `publish` command and `jobs`, and a package overrides `registry` and `publish`. A package on another registry than the default takes the built-in command for it. The tool asks the registry whether the version exists before the command runs, skips it when it does, and fails on any answer other than 200 or 404. `status` shows the answer, and `first_release` means the registry has no version at all. The `depends_on` field leaves the release handoff. `[publish].workspace` hands every package on the default registry to one recursive command such as `pnpm -r publish`, run once from the root, with per-package reporting from the registry afterwards. - [`cf11da6`](https://github.com/lukasIO/verwalter/commit/cf11da60207ffa7e573b07f497e03909b608fb90) ([@lukasIO](https://github.com/lukasIO))
+
+### Patch Changes
+
+- The README and the example workflows point at `v0.13.0`. - [`83170da`](https://github.com/lukasIO/verwalter/commit/83170da6a8dfeb447347cd2d47e3fc350d4e7de3) ([@lukasIO](https://github.com/lukasIO))
+- The README is restructured: scope table, the release cycle, setup with the action inputs and outputs, a feature table, the mistakes the tool catches, the recovery table, what is not covered, and the commands. `examples/publish` shows publish steps that ask the registry before publishing, so a re-run skips an existing version and still fails on every other error. - [`68d305a`](https://github.com/lukasIO/verwalter/commit/68d305ab218c5dc3e3e437a572442b76c6f10f7e) ([@lukasIO](https://github.com/lukasIO))
+
 ## 0.13.0
 
 ### Minor Changes
