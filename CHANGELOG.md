@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.9.0
+
+### Minor Changes
+
+- One release PR for every package with a pending bump, instead of one stacked PR per package. The branch is `release/<base branch>`. Older per-package PRs are closed on the next run. - [`36d3074`](https://github.com/lukasIO/verwalter/commit/36d30745984188b57ba933ce128d63e0ecbd9cc7) ([@lukasIO](https://github.com/lukasIO))
+
+### Patch Changes
+
+- Point examples and README at v0.8.0 - [`0e3faaf`](https://github.com/lukasIO/verwalter/commit/0e3faafaf2cf3f8029b7f361e252337fdbb5b135) ([@lukasIO](https://github.com/lukasIO))
+
 ## 0.8.0
 
 ### Minor Changes
