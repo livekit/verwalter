@@ -223,8 +223,11 @@ impl Config {
     /// command for its registry. None when nothing applies.
     /// `pnpm` is whether the repo is a pnpm workspace: `npm publish`
     /// ships a `workspace:` range as is, `pnpm publish` resolves it to
-    /// the dependency's version.
-    pub fn publish_command(&self, package: &str, pnpm: bool) -> Option<String> {
+    /// the dependency's version. `prerelease` keeps an rc off npm's
+    /// `latest` dist-tag: the built-in command publishes it under `next`.
+    /// Other registries keep pre-releases out of default resolution by
+    /// the version alone.
+    pub fn publish_command(&self, package: &str, pnpm: bool, prerelease: bool) -> Option<String> {
         use crate::registry::Registry;
         let p = &self.packages[package];
         if let Some(c) = &p.publish {
@@ -239,8 +242,14 @@ impl Config {
         Some(
             match registry {
                 Registry::Crates => "cargo publish",
+                Registry::Npm if pnpm && prerelease => {
+                    "pnpm publish --provenance --access public --no-git-checks --tag next"
+                }
                 Registry::Npm if pnpm => {
                     "pnpm publish --provenance --access public --no-git-checks"
+                }
+                Registry::Npm if prerelease => {
+                    "npm publish --provenance --access public --tag next"
                 }
                 Registry::Npm => "npm publish --provenance --access public",
                 Registry::Pypi => "python -m twine upload dist/*",

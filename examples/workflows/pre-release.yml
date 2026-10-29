@@ -1,7 +1,8 @@
-# On demand: open an rc PR for one package from the branch the workflow
-# is run on. The rc also carries the package's fixed group and every
-# in-repo dependency with a pending changeset, pinned to each other. The
-# level comes from the pending changesets unless given. Merging the PR
+# On demand: open an rc PR from the branch the workflow is run on. With
+# no package, every package with a pending changeset is in it. With one,
+# that package, its fixed group and every in-repo dependency with a
+# pending changeset, pinned to each other. The level comes from the
+# pending changesets unless given. Merging the PR
 # tags 1.6.0-rc.1; the next run numbers rc.2. Changesets stay pending for
 # the final release.
 name: Pre-release PR
@@ -10,8 +11,9 @@ on:
   workflow_dispatch:
     inputs:
       package:
-        description: Package to pre-release.
-        required: true
+        description: Package to pre-release. Empty takes every package with a pending changeset.
+        required: false
+        default: ""
       level:
         description: Bump level of the rc. Empty takes the highest level the package's pending changesets name.
         type: choice

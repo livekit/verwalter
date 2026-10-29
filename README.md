@@ -88,8 +88,9 @@ missing.
 - **Publish** runs your command per package, independent packages in
   parallel. A version the registry already has is skipped. A failure blocks
   its dependents and nothing else.
-- **Pre-releases** on demand: `verwalter pre-release <package>` opens an rc
-  PR from any branch, with the dependencies that have pending changes.
+- **Pre-releases** on demand: `verwalter pre-release [package]` opens an rc
+  PR from any branch, for every package with pending changes or for one
+  and the dependencies it needs.
 - **Checks** on contributor PRs: a missing or invalid changeset, a package
   missing from the config, and with a tool such as cargo-semver-checks, a
   changeset level below what the API change needs.

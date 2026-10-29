@@ -139,7 +139,9 @@ entity Package {
     -- registry (cargo publish, npm publish, twine upload, dart pub
     -- publish), else none and `publish` refuses to start. In a pnpm
     -- workspace the npm default is pnpm publish: npm ships a
-    -- `workspace:` range as is, pnpm resolves it to the version.
+    -- `workspace:` range as is, pnpm resolves it to the version. For a
+    -- pre-release the npm default adds `--tag next`, so `latest` stays
+    -- on the last final version.
     publish_command: String?
     -- True when config.publish.workspace is set and the package has no
     -- publish command of its own and no registry other than the default:
@@ -478,9 +480,12 @@ rule CloseReleasePullRequestWithNothingPending {
 -- The level of the requested group is the maintainer's when given, else
 -- the highest its pending changesets name, else patch; a pulled-in
 -- group takes the level its own changesets name.
+-- Without a package, the rc carries every package with a pending
+-- changeset, with its group, on a branch named after the target branch
+-- (<prefix><target>-rc), and a given level applies to all of them.
 rule MaintainerRequestsPreRelease {
-    when: MaintainerRequestsPreRelease(maintainer, package, target_branch, level?)
-    let group = fixed_group_of(package, config.fixed)
+    when: MaintainerRequestsPreRelease(maintainer, package?, target_branch, level?)
+    let group = package != none ? fixed_group_of(package, config.fixed) : filter(Packages, p => p.has_pending_bump).flat_map(p => fixed_group_of(p, config.fixed))
     let pulled = closure(group, g => g.dependencies where this.has_pending_bump, d => fixed_group_of(d, config.fixed))
     let next = next_prerelease_version(group, level, config.prerelease_label)
     ensures:
@@ -765,6 +770,7 @@ surface PreReleaseRequest {
 
     provides:
         MaintainerRequestsPreRelease(maintainer, package, target_branch, level)
+        MaintainerRequestsPreRelease(maintainer, none, target_branch, level)
 }
 
 -- After a merge the workflow receives every release the merge produced,

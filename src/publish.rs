@@ -104,7 +104,7 @@ fn candidates(
             ws.members.push((p.name.clone(), p.version.clone(), tag));
             continue;
         }
-        let command = repo.config.publish_command(&p.name, in_pnpm_workspace(&repo.root, &cfg.path)).ok_or_else(|| {
+        let command = repo.config.publish_command(&p.name, in_pnpm_workspace(&repo.root, &cfg.path), p.version.is_prerelease()).ok_or_else(|| {
             format!("{}: no publish command: set `registry` or `publish` on the package, or `[publish]` defaults", p.name)
         })?;
         out.insert(

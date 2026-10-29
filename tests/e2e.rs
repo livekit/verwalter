@@ -545,7 +545,7 @@ fn prerelease_opens_an_rc_pr_without_consuming_changesets() {
     };
     let (releases, pr) = verwalter::prerelease::open(
         &repo,
-        "livekit-protocol",
+        Some("livekit-protocol"),
         "main",
         None,
         "origin",
@@ -616,7 +616,7 @@ fn prerelease_opens_an_rc_pr_without_consuming_changesets() {
         &["merge", "-q", "--no-edit", "release/livekit-protocol-rc"],
     );
     let repo = Repo::load(root).unwrap();
-    let next = verwalter::prerelease::plan(&repo, "livekit-protocol", None).unwrap();
+    let next = verwalter::prerelease::plan(&repo, Some("livekit-protocol"), None).unwrap();
     assert_eq!(next[0].to.to_string(), "0.4.0-rc.2");
     let p = plan(
         &repo.packages,
@@ -668,9 +668,16 @@ fn prerelease_of_a_fixed_group_member_covers_the_group() {
             _ => String::new(),
         })
     };
-    let (releases, pr) =
-        verwalter::prerelease::open(&repo, "livekit-api", "main", None, "origin", false, &mut gh)
-            .unwrap();
+    let (releases, pr) = verwalter::prerelease::open(
+        &repo,
+        Some("livekit-api"),
+        "main",
+        None,
+        "origin",
+        false,
+        &mut gh,
+    )
+    .unwrap();
     // api was asked for, protocol comes along; the version moves from the
     // group's highest (0.4.3) by the level of protocol's changeset.
     let got: Vec<(&str, &str, &str)> = releases
@@ -1296,7 +1303,7 @@ fn publish_runs_dependencies_first_and_blocks_dependents_of_a_failure() {
     let repo = Repo::load(root).unwrap();
     assert_eq!(
         repo.config
-            .publish_command("livekit-protocol", false)
+            .publish_command("livekit-protocol", false, false)
             .as_deref(),
         Some("exit 7")
     );
@@ -1581,7 +1588,7 @@ fn prerelease_of_a_dependent_carries_pending_dependencies() {
     let repo = Repo::load(root).unwrap();
 
     // api depends on protocol, which has a pending changeset: both go.
-    let plan = verwalter::prerelease::plan(&repo, "livekit-api", None).unwrap();
+    let plan = verwalter::prerelease::plan(&repo, Some("livekit-api"), None).unwrap();
     let got: Vec<(&str, String, Vec<String>)> = plan
         .iter()
         .map(|p| {
@@ -1605,7 +1612,7 @@ fn prerelease_of_a_dependent_carries_pending_dependencies() {
     );
     // livekit depends on protocol too, but protocol has no dependency with
     // a changeset, and livekit itself is not requested: protocol alone.
-    let plan = verwalter::prerelease::plan(&repo, "livekit-protocol", None).unwrap();
+    let plan = verwalter::prerelease::plan(&repo, Some("livekit-protocol"), None).unwrap();
     assert_eq!(
         plan.iter().map(|p| p.package.as_str()).collect::<Vec<_>>(),
         ["livekit-protocol"]
@@ -1618,9 +1625,16 @@ fn prerelease_of_a_dependent_carries_pending_dependencies() {
             _ => String::new(),
         })
     };
-    let (releases, pr) =
-        verwalter::prerelease::open(&repo, "livekit-api", "main", None, "origin", false, &mut gh)
-            .unwrap();
+    let (releases, pr) = verwalter::prerelease::open(
+        &repo,
+        Some("livekit-api"),
+        "main",
+        None,
+        "origin",
+        false,
+        &mut gh,
+    )
+    .unwrap();
     assert_eq!(releases.len(), 2);
     assert_eq!(pr.head, "release/livekit-api-rc");
     let show = |f: &str| git(root, &["show", &format!("release/livekit-api-rc:{f}")]);
@@ -1634,4 +1648,19 @@ fn prerelease_of_a_dependent_carries_pending_dependencies() {
     );
     assert!(show("livekit/Cargo.toml").contains("version = \"0.7.0\""));
     assert!(show(".changeset/x.md").contains("livekit-protocol: minor"));
+
+    // No package: everything with a pending changeset, named after the
+    // target branch. livekit has no changeset and is left out.
+    let all = verwalter::prerelease::plan(&repo, None, None).unwrap();
+    assert_eq!(
+        all.iter().map(|p| p.package.as_str()).collect::<Vec<_>>(),
+        ["livekit-protocol", "livekit-api"]
+    );
+    assert_eq!(
+        verwalter::prerelease::branch_name(&repo, None, "main"),
+        "release/main-rc"
+    );
+    let (_, pr) =
+        verwalter::prerelease::open(&repo, None, "main", None, "origin", false, &mut gh).unwrap();
+    assert_eq!(pr.head, "release/main-rc");
 }

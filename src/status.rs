@@ -107,7 +107,10 @@ pub fn status(repo: &Repo, remote: &str, gh: Gh) -> Result<Vec<PackageStatus>, E
             .map(|pr| pr.number);
         let rc_pr = open
             .iter()
-            .find(|pr| pr.head == prerelease::branch_name(repo, &p.name))
+            .find(|pr| {
+                pr.head == prerelease::branch_name(repo, Some(&p.name), &repo.config.base_branch)
+                    || pr.head == prerelease::branch_name(repo, None, &repo.config.base_branch)
+            })
             .map(|pr| pr.number);
 
         let next_step = if package.release == ReleaseMode::None {
