@@ -66,10 +66,11 @@ jobs:
           args: --asset dist/artifact.txt ${{ inputs.package && format('--package {0}', inputs.package) || '' }}
 
   # `publish` runs each package's publish command from verwalter.toml
-  # (`[publish]` defaults, `registry` and `publish` per package) once per
-  # tagged package, dependencies first, independent packages in parallel.
-  # A failure blocks the transitive dependents and nothing else. A version
-  # the registry already has is skipped, so a re-run of this job is safe.
+  # (`[publish]` defaults, `registry` and `publish` per package) for the
+  # packages this run released, dependencies first, independent packages
+  # in parallel. A failure blocks the transitive dependents and nothing
+  # else. A version the registry already has is skipped, so a re-run of
+  # this job is safe. Without `releases`, every tagged package is run.
   publish:
     needs: release
     if: needs.release.outputs.released == 'true' || github.event_name == 'workflow_dispatch'
@@ -100,3 +101,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         with:
           command: publish
+          releases: ${{ needs.release.outputs.releases }}

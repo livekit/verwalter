@@ -46,7 +46,6 @@ pub fn create(repo: &Repo, plan: &[PlannedRelease], base: &str) -> Result<Option
                 &repo.changesets,
                 plan,
                 release,
-                true,
             )?;
         }
         // Spec: ConsumeChangesets. Every pending changeset names a package

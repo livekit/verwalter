@@ -20,6 +20,9 @@ inputs:
   args:
     description: Extra arguments passed through to verwalter.
     default: ""
+  releases:
+    description: "`publish` only: the `releases` output of the `release` step. Only those packages are published. Without it, every tagged package is."
+    default: ""
 
 outputs:
   released:
@@ -76,12 +79,14 @@ runs:
         PR: ${{ inputs.pr }}
         ARGS: ${{ inputs.args }}
         DRY_RUN: ${{ inputs.dry-run }}
+        RELEASES: ${{ inputs.releases }}
       run: |
         set -euo pipefail
         git config --global user.name "github-actions[bot]"
         git config --global user.email "github-actions[bot]@users.noreply.github.com"
         if [ "$DRY_RUN" = "true" ]; then ARGS="$ARGS --dry-run"; fi
         case "$COMMAND" in
-          check) verwalter check --pr "$PR" $ARGS ;;
-          *)     verwalter "$COMMAND" $ARGS ;;
+          check)   verwalter check --pr "$PR" $ARGS ;;
+          publish) if [ -n "$RELEASES" ]; then verwalter publish --releases "$RELEASES" $ARGS; else verwalter publish $ARGS; fi ;;
+          *)       verwalter "$COMMAND" $ARGS ;;
         esac

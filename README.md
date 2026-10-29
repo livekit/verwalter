@@ -89,7 +89,7 @@ missing.
   parallel. A version the registry already has is skipped. A failure blocks
   its dependents and nothing else.
 - **Pre-releases** on demand: `verwalter pre-release <package>` opens an rc
-  PR from any branch.
+  PR from any branch, with the dependencies that have pending changes.
 - **Checks** on contributor PRs: a missing or invalid changeset, a package
   missing from the config, and with a tool such as cargo-semver-checks, a
   changeset level below what the API change needs.

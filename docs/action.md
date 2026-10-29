@@ -17,6 +17,7 @@
 | `version` | verwalter release to download. Defaults to the version the action was checked out at. |
 | `dry-run` | `"true"` passes `--dry-run`. Reads still run, writes are printed. |
 | `args` | Extra arguments passed to the command. |
+| `releases` | `publish` only: the `releases` output of the `release` step. Only those packages are published. |
 
 | Output (`release` only) | Meaning |
 |---|---|

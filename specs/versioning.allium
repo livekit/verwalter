@@ -463,25 +463,30 @@ rule CloseReleasePullRequestWithNothingPending {
         ensures: rpr.status = closed
 }
 
--- One package, one rc PR, apart from the release PR. A member of a fixed
--- group takes the whole group along at one rc version, on one branch
--- named after the group's first member: <prefix><member>-rc. Dependents
--- are not pre-released and their manifests are not pinned to the rc; a
--- maintainer requests them separately, base package first if needed.
--- The rc branch bumps the group's own files, their entries in
--- config.pin_files and their changelogs only. The level is the
--- maintainer's when given, else the highest the group's pending
--- changesets name, else patch.
+-- One rc PR, apart from the release PR, on one branch named after the
+-- requested package's fixed group: <prefix><first member>-rc. The rc
+-- carries the requested package, its fixed group, and every in-repo
+-- dependency with a pending changeset, transitively, with its own group:
+-- an rc of a dependent must not ship against a dependency whose change
+-- is only on the base branch. Each group has one rc version, and the
+-- pins between the carried packages move to the rc versions.
+-- Dependents outside the rc are not pre-released and not pinned to it.
+-- The rc branch bumps the carried packages' own files, their entries
+-- in config.pin_files, the pins among them and their changelogs.
+-- The level of the requested group is the maintainer's when given, else
+-- the highest its pending changesets name, else patch; a pulled-in
+-- group takes the level its own changesets name.
 rule MaintainerRequestsPreRelease {
     when: MaintainerRequestsPreRelease(maintainer, package, target_branch, level?)
     let group = fixed_group_of(package, config.fixed)
+    let pulled = closure(group, g => g.dependencies where this.has_pending_bump, d => fixed_group_of(d, config.fixed))
     let next = next_prerelease_version(group, level, config.prerelease_label)
     ensures:
         ReleasePullRequest.created(
             repository: package.repository,
             pull_request: release_branch_pull_request(package, target_branch),
             kind: pre_release,
-            releases: group.map(m => PlannedRelease(package: m, from_version: m.version, to_version: next)),
+            releases: group.map(m => PlannedRelease(package: m, from_version: m.version, to_version: next)) + pulled.map(p => PlannedRelease(package: p, from_version: p.version, to_version: next_prerelease_version(fixed_group_of(p, config.fixed), none, config.prerelease_label))),
             status: open
         )
 }
@@ -770,9 +775,12 @@ surface PreReleaseRequest {
 -- caught in a dependency cycle end as blocked.
 -- Note: allium 3.3.0 witnesses only the first branch of an `if` chain in
 -- a `for` clause, so `check` reports the other outcomes as unreachable.
+-- `releases`, when the workflow hands over the list from `release`, keeps
+-- the run to the packages it released: without it, every tagged package
+-- runs its command again, and only a registry can tell that apart.
 rule WorkflowPublishesInDependencyOrder {
-    when: WorkflowRunsPublish(workflow, repository)
-    let candidates = filter(Packages, p => p.repository = repository and p.release_mode != none and GitTags.any(t => t.package = p and t.version = p.version))
+    when: WorkflowRunsPublish(workflow, repository, releases?)
+    let candidates = filter(Packages, p => p.repository = repository and p.release_mode != none and GitTags.any(t => t.package = p and t.version = p.version) and (releases = none or p in releases))
     requires: candidates.all(p => p.publish_command != null or p.in_workspace_publish)
     ensures:
         for p in candidates:
@@ -815,7 +823,7 @@ surface ToolRun {
 
     provides:
         ToolRunStarted(repository, named, publish_drafts)
-        WorkflowRunsPublish(workflow, repository)
+        WorkflowRunsPublish(workflow, repository, releases)
 }
 
 -- Every release the run tagged, created, published or attached assets

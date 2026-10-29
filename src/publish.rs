@@ -26,6 +26,10 @@ pub struct Options {
     /// Overrides `[publish].jobs`.
     pub jobs: Option<usize>,
     pub dry_run: bool,
+    /// Spec: WorkflowRunsPublish.releases. The packages this run released,
+    /// from the `release` step's output. None publishes every tagged
+    /// package, for a re-run by hand.
+    pub only: Option<BTreeSet<String>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -54,14 +58,17 @@ struct Candidate {
 /// Name of the synthetic candidate for `[publish].workspace`.
 const WORKSPACE: &str = "[workspace]";
 
-/// Every package whose current version is tagged, with its in-repo
-/// dependencies among those packages. A candidate without a publish
-/// command is an error before anything runs.
-fn candidates(repo: &Repo) -> Result<BTreeMap<String, Candidate>, Error> {
+/// Every package whose current version is tagged, or only those in
+/// `only`, with its in-repo dependencies among those packages. A
+/// candidate without a publish command is an error before anything runs.
+fn candidates(
+    repo: &Repo,
+    only: Option<&BTreeSet<String>>,
+) -> Result<BTreeMap<String, Candidate>, Error> {
     let mut out = BTreeMap::new();
     for p in &repo.packages {
         let cfg = &repo.config.packages[&p.name];
-        if cfg.release == ReleaseMode::None {
+        if cfg.release == ReleaseMode::None || only.is_some_and(|o| !o.contains(&p.name)) {
             continue;
         }
         let tag = repo.config.tag_for(&p.name, &p.version);
@@ -207,7 +214,7 @@ fn run_command(repo: &Repo, name: &str, c: &Candidate, first: bool) -> (bool, St
 /// Run the publish command for every tagged package. Returns one outcome
 /// per package, in the order they finished.
 pub fn run(repo: &Repo, options: &Options, http: Http) -> Result<Vec<Outcome>, Error> {
-    let candidates = candidates(repo)?;
+    let candidates = candidates(repo, options.only.as_ref())?;
     let jobs = options.jobs.unwrap_or(repo.config.publish.jobs).max(1);
     let mut done: BTreeMap<String, &'static str> = BTreeMap::new();
     let mut outcomes = Vec::new();

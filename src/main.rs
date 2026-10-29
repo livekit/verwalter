@@ -8,7 +8,7 @@ use verwalter::{
     version::BumpLevel, workspace, Error,
 };
 
-const USAGE: &str = "usage: verwalter <status|plan|branches|pr> [--config <file>] [--base <ref>] [--remote <name>] [--dry-run] [<checkout>]\n       verwalter changeset [--level major|minor|patch] [--package <name>]... [--base <ref>] [--summary <text>] [<checkout>]\n       verwalter release [--asset <file>]... [--package <name>] [--publish] [--abandon <tag>] [--remote <name>] [--dry-run] [<checkout>]\n       verwalter check --pr <number> [--config <file>] [--dry-run] [<checkout>]\n       verwalter publish [--jobs <n>] [--dry-run] [<checkout>]\n       verwalter pre-release <package> [--target <branch>] [--level major|minor|patch] [--remote <name>] [--dry-run] [<checkout>]";
+const USAGE: &str = "usage: verwalter <status|plan|branches|pr> [--config <file>] [--base <ref>] [--remote <name>] [--dry-run] [<checkout>]\n       verwalter changeset [--level major|minor|patch] [--package <name>]... [--base <ref>] [--summary <text>] [<checkout>]\n       verwalter release [--asset <file>]... [--package <name>] [--publish] [--abandon <tag>] [--remote <name>] [--dry-run] [<checkout>]\n       verwalter check --pr <number> [--config <file>] [--dry-run] [<checkout>]\n       verwalter publish [--releases <json>] [--jobs <n>] [--dry-run] [<checkout>]\n       verwalter pre-release <package> [--target <branch>] [--level major|minor|patch] [--remote <name>] [--dry-run] [<checkout>]";
 
 fn main() -> ExitCode {
     match run() {
@@ -39,6 +39,7 @@ fn run() -> Result<(), Error> {
     let mut summary: Option<String> = None;
     let mut packages: Vec<String> = Vec::new();
     let mut jobs: Option<usize> = None;
+    let mut releases_only: Option<std::collections::BTreeSet<String>> = None;
     let mut level: Option<BumpLevel> = None;
     let mut dry_run = false;
     let mut only: Option<String> = None;
@@ -55,6 +56,30 @@ fn run() -> Result<(), Error> {
             "--target" => target = Some(args.next().ok_or(USAGE)?),
             "--summary" => summary = Some(args.next().ok_or(USAGE)?),
             "--jobs" => jobs = Some(args.next().ok_or(USAGE)?.parse()?),
+            // The `releases` output of `release`: a JSON list of objects
+            // with a `package`, or of names. Empty means nothing to publish.
+            "--releases" => {
+                #[derive(serde::Deserialize)]
+                #[serde(untagged)]
+                enum Item {
+                    Named { package: String },
+                    Name(String),
+                }
+                let text = args.next().ok_or(USAGE)?;
+                let items: Vec<Item> = if text.trim().is_empty() {
+                    Vec::new()
+                } else {
+                    serde_json::from_str(&text)?
+                };
+                releases_only = Some(
+                    items
+                        .into_iter()
+                        .map(|i| match i {
+                            Item::Named { package } | Item::Name(package) => package,
+                        })
+                        .collect(),
+                );
+            }
             "--dry-run" => dry_run = true,
             "--package" => {
                 let p = args.next().ok_or(USAGE)?;
@@ -232,7 +257,11 @@ fn run() -> Result<(), Error> {
             Ok(())
         }
         "publish" => {
-            let options = verwalter::publish::Options { jobs, dry_run };
+            let options = verwalter::publish::Options {
+                jobs,
+                dry_run,
+                only: releases_only,
+            };
             let outcomes = verwalter::publish::run(&repo, &options, &verwalter::registry::curl)?;
             println!("{}", verwalter::publish::write_outputs(&outcomes)?);
             if verwalter::publish::failed(&outcomes) {

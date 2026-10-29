@@ -686,8 +686,9 @@ fn prerelease_of_a_fixed_group_member_covers_the_group() {
     assert_eq!(
         got,
         [
-            ("livekit-api", "0.4.3", "0.5.0-rc.1"),
-            ("livekit-protocol", "0.3.1", "0.5.0-rc.1")
+            // Dependencies first, like a release plan: api depends on protocol.
+            ("livekit-protocol", "0.3.1", "0.5.0-rc.1"),
+            ("livekit-api", "0.4.3", "0.5.0-rc.1")
         ]
     );
     assert_eq!(pr.head, "release/livekit-api-rc");
@@ -700,7 +701,7 @@ fn prerelease_of_a_fixed_group_member_covers_the_group() {
         root,
         &["show", "release/livekit-api-rc:livekit-api/CHANGELOG.md"]
     )
-    .contains("- Released with livekit-protocol@0.5.0-rc.1"));
+    .contains("- Updated dependencies: livekit-protocol@0.5.0-rc.1"), "api depends on protocol, so the dependency line wins over the group line, as in a release plan");
 
     // The final release plan aligns the group the same way.
     let plan = plan(
@@ -1163,6 +1164,7 @@ fn publish_runs_dependencies_first_and_blocks_dependents_of_a_failure() {
     let opts = verwalter::publish::Options {
         jobs: Some(4),
         dry_run: false,
+        only: None,
     };
 
     // No command at all: an error before anything runs.
@@ -1184,6 +1186,30 @@ fn publish_runs_dependencies_first_and_blocks_dependents_of_a_failure() {
     assert_eq!(
         lines[0], "livekit-protocol 0.3.1 livekit-protocol-v0.3.1 none first=true livekit-protocol",
         "{order}"
+    );
+    fs::remove_file(root.join("order")).unwrap();
+
+    // Spec: WorkflowRunsPublish.releases. Only the packages this run
+    // released are run; a tagged dependency outside the list is not.
+    let only = verwalter::publish::Options {
+        jobs: Some(4),
+        dry_run: false,
+        only: Some(["livekit-api".to_string()].into_iter().collect()),
+    };
+    let outcomes = verwalter::publish::run(&repo, &only, &no_registry).unwrap();
+    assert_eq!(
+        outcomes
+            .iter()
+            .map(|o| o.package.as_str())
+            .collect::<Vec<_>>(),
+        ["livekit-api"]
+    );
+    assert_eq!(
+        fs::read_to_string(root.join("order"))
+            .unwrap()
+            .lines()
+            .count(),
+        1
     );
     fs::remove_file(root.join("order")).unwrap();
 
@@ -1218,6 +1244,7 @@ fn publish_runs_dependencies_first_and_blocks_dependents_of_a_failure() {
         &verwalter::publish::Options {
             jobs: Some(1),
             dry_run: false,
+            only: None,
         },
         &no_registry,
     )
@@ -1298,6 +1325,7 @@ fn workspace_publish_command_runs_once_and_reports_per_member() {
     let opts = verwalter::publish::Options {
         jobs: Some(4),
         dry_run: false,
+        only: None,
     };
     let outcomes = verwalter::publish::run(&repo, &opts, &no_registry).unwrap();
     let by: std::collections::BTreeMap<&str, &str> = outcomes
@@ -1501,4 +1529,82 @@ fn api_check_compares_the_claimed_level_with_the_commands_answer() {
     );
     verwalter::check::api_check(root, &config, &mut check, &changesets).unwrap();
     assert!(!root.join("calls").exists());
+}
+
+// Spec: MaintainerRequestsPreRelease. An rc of a dependent carries every
+// in-repo dependency with a pending changeset, at its own rc version,
+// and pins the dependent to it. A dependency without a pending changeset,
+// and dependents outside the rc, are left alone.
+#[test]
+fn prerelease_of_a_dependent_carries_pending_dependencies() {
+    let r = fixture("rc-deps");
+    let root = &r.0;
+    git(root, &["tag", "livekit-protocol-v0.3.1"]);
+    git(root, &["tag", "livekit-api-v0.4.3"]);
+    // protocol and api change; livekit depends on protocol only.
+    write(
+        root,
+        ".changeset/x.md",
+        "---\nlivekit-protocol: minor\nlivekit-api: patch\n---\nx\n",
+    );
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-q", "-m", "changesets"]);
+    let _remote = remote(root, "rc-deps");
+    git(root, &["push", "-q", "origin", "main", "--tags"]);
+    let repo = Repo::load(root).unwrap();
+
+    // api depends on protocol, which has a pending changeset: both go.
+    let plan = verwalter::prerelease::plan(&repo, "livekit-api", None).unwrap();
+    let got: Vec<(&str, String, Vec<String>)> = plan
+        .iter()
+        .map(|p| {
+            (
+                p.package.as_str(),
+                p.to.to_string(),
+                p.bumped_dependencies.clone(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        got,
+        [
+            ("livekit-protocol", "0.4.0-rc.1".to_string(), vec![]),
+            (
+                "livekit-api",
+                "0.4.4-rc.1".to_string(),
+                vec!["livekit-protocol".to_string()]
+            ),
+        ]
+    );
+    // livekit depends on protocol too, but protocol has no dependency with
+    // a changeset, and livekit itself is not requested: protocol alone.
+    let plan = verwalter::prerelease::plan(&repo, "livekit-protocol", None).unwrap();
+    assert_eq!(
+        plan.iter().map(|p| p.package.as_str()).collect::<Vec<_>>(),
+        ["livekit-protocol"]
+    );
+
+    let mut gh = |args: &[&str]| -> Result<String, verwalter::Error> {
+        Ok(match args {
+            ["pr", "list", ..] => "[]".into(),
+            ["pr", "create", ..] => "https://github.com/x/y/pull/3".into(),
+            _ => String::new(),
+        })
+    };
+    let (releases, pr) =
+        verwalter::prerelease::open(&repo, "livekit-api", "main", None, "origin", false, &mut gh)
+            .unwrap();
+    assert_eq!(releases.len(), 2);
+    assert_eq!(pr.head, "release/livekit-api-rc");
+    let show = |f: &str| git(root, &["show", &format!("release/livekit-api-rc:{f}")]);
+    assert!(show("livekit-protocol/Cargo.toml").contains("0.4.0-rc.1"));
+    assert!(show("livekit-api/Cargo.toml").contains("0.4.4-rc.1"));
+    // The workspace pin moves to the rc; livekit, outside the rc, is untouched.
+    assert!(
+        show("Cargo.toml").contains("livekit-protocol = { version = \"0.4.0-rc.1\""),
+        "{}",
+        show("Cargo.toml")
+    );
+    assert!(show("livekit/Cargo.toml").contains("version = \"0.7.0\""));
+    assert!(show(".changeset/x.md").contains("livekit-protocol: minor"));
 }

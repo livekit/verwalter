@@ -24,9 +24,11 @@ fn is_lock_file(path: &str) -> bool {
 }
 
 /// Write one release into the working tree under `root`. `packages` is
-/// every package in the repo, for the pins in dependents. `pins = false`
-/// leaves dependents alone: a pre-release of one package is not something
-/// its dependents should pin to. Returns the paths whose content changed.
+/// every package in the repo, for the pins in dependents. Only dependents
+/// that are in `plan` are pinned: a release plan carries every dependent
+/// anyway, and an rc pins only the packages it carries, so a dependent
+/// outside the rc never points at it. Returns the paths whose content
+/// changed.
 pub fn apply(
     root: &Path,
     config: &Config,
@@ -34,7 +36,6 @@ pub fn apply(
     changesets: &[Changeset],
     plan: &[PlannedRelease],
     release: &PlannedRelease,
-    pins: bool,
 ) -> Result<Vec<PathBuf>, Error> {
     let name = release.package.as_str();
     let package = config
@@ -70,9 +71,9 @@ pub fn apply(
     for file in &config.pin_files {
         rewrite(file, None, Some(name))?;
     }
-    let dependents = packages
-        .iter()
-        .filter(|p| pins && p.dependencies.iter().any(|d| d == name));
+    let dependents = packages.iter().filter(|p| {
+        p.dependencies.iter().any(|d| d == name) && plan.iter().any(|r| r.package == p.name)
+    });
     for dependent in dependents {
         if let Some(d) = config.packages.get(&dependent.name) {
             for file in d.versioned_files.iter().filter(|f| !is_lock_file(f.path())) {
@@ -251,7 +252,7 @@ changelog = "livekit-api/CHANGELOG.md"
         .unwrap()];
         let p = plan(&state(), &changesets, BumpLevel::Patch);
 
-        let written = apply(&repo.0, &config, &state(), &changesets, &p, &p[0], true).unwrap();
+        let written = apply(&repo.0, &config, &state(), &changesets, &p, &p[0]).unwrap();
         let names: Vec<String> = written
             .iter()
             .map(|w| w.strip_prefix(&repo.0).unwrap().display().to_string())
@@ -294,7 +295,7 @@ changelog = "livekit-api/CHANGELOG.md"
         let p = plan(&state(), &changesets, BumpLevel::Patch);
         let api = p.iter().find(|r| r.package == "livekit-api").unwrap();
 
-        apply(&repo.0, &config, &state(), &changesets, &p, api, true).unwrap();
+        apply(&repo.0, &config, &state(), &changesets, &p, api).unwrap();
         assert!(repo
             .read("livekit-api/Cargo.toml")
             .contains("version = \"0.4.4\""));
