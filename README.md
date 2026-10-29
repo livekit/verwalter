@@ -96,7 +96,9 @@ cargo install --git https://github.com/lukasIO/verwalter --tag v0.13.0
 
 ### The workflows
 
-[examples/workflows](examples/workflows) has the three workflows to copy:
+[examples/workflows](examples/workflows) has the three workflows to copy,
+and [examples/publish](examples/publish/README.md) has publish steps that
+are safe to re-run:
 
 | Workflow | Trigger | Command |
 |---|---|---|
@@ -231,7 +233,7 @@ and `origin/<base>` are current.
 
 | Not covered | Why, and what to do instead |
 |---|---|
-| Registry publish and "already exists" retries | The workflow's job. Make the publish step skip an existing version (`skip-existing`, `--skip-existing`, a `pnpm publish` error check). Then a re-run is safe. |
+| Registry publish and re-runs | The workflow's job. Ask the registry whether the version exists before publishing, and skip only then. Every other error must fail. Do not grep the error output: a conflict and a bad token look alike. Snippets per registry are in [examples/publish](examples/publish/README.md). |
 | First upload of a new package under trusted publishing | No registry allows it. Upload the first version by hand. The PR body and `first_release` tell you when. |
 | Snapshot or nightly releases from any commit | Not built. Use an rc PR, or a workflow that publishes under a dist tag with a version the tool never sees. |
 | Cross-repo version coupling | A workflow precondition, not a tool concern. |
