@@ -88,27 +88,33 @@ pub fn next_version(current: &Version, pending: impl IntoIterator<Item = BumpLev
 
 /// Spec: next_prerelease_version. `1.5.1` + minor gives `1.6.0-rc.1`;
 /// with `1.6.0-rc.1` already released, `1.6.0-rc.2`. The target is bumped
-/// from the latest stable release so that a later `major` request from an
-/// rc moves to the next major, not to the rc's own target. `label` is
-/// `rc` by default (config: prerelease_label).
+/// from the latest stable version, the higher of the current one and the
+/// newest stable tag, so that a later `major` request from an rc moves
+/// to the next major, not to the rc's own target, and a version that
+/// moved past its tags, by hand or because tags are missing, is never
+/// pulled back. `label` is `rc` by default (config: prerelease_label).
 pub fn next_prerelease_version(
     current: &Version,
     released: &[Version],
     level: BumpLevel,
     label: &str,
 ) -> Version {
+    let current_stable = if current.is_prerelease() {
+        // An rc's own target is not a base: 1.6.0-rc.1 + major is 2.0.0,
+        // not 2.0.0 from 1.6.0 plus the rc's stable component 1.6.0.
+        None
+    } else {
+        Some(current.clone())
+    };
     let base = released
         .iter()
         .filter(|r| !r.is_prerelease())
         .max()
         .cloned()
-        .unwrap_or_else(|| {
-            if current.is_prerelease() {
-                Version::Stable(current.stable_component())
-            } else {
-                current.clone()
-            }
-        });
+        .into_iter()
+        .chain(current_stable)
+        .max()
+        .unwrap_or_else(|| Version::Stable(current.stable_component()));
     let target = bump(&base, level).stable_component();
     let marker = format!("-{label}.");
     let last = released
@@ -207,6 +213,14 @@ mod tests {
 
         // The final release from the rc: the pending minor resolves to 1.6.0.
         assert_eq!(next_version(&h, [BumpLevel::Minor]), v("1.6.0"));
+
+        // The version moved past its tags, by hand or with tags missing:
+        // the rc is bumped from the version, never pulled back to a tag.
+        let released = [v("0.3.27")];
+        assert_eq!(
+            next_prerelease_version(&v("0.3.54"), &released, BumpLevel::Patch, "rc"),
+            v("0.3.55-rc.1")
+        );
     }
 
     // Spec: the pending level wins over the rc's target. A release is
