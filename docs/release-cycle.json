@@ -1,0 +1,35 @@
+{
+  "name": "verwalter release cycle",
+  "grid": { "cols": 30, "rows": 16, "cellSize": 40 },
+  "animationSpeed": 1,
+  "elements": [
+    { "id": "pr", "type": "graphic-tile", "x": 1, "y": 5, "w": 2, "h": 2, "icon": "Code", "title": "PR" },
+    { "id": "pr-note", "type": "badge", "x": 0, "y": 7, "w": 4, "h": 1, "text": "+ .changeset/x.md", "borderless": true },
+    { "id": "main", "type": "graphic-tile", "x": 6, "y": 5, "w": 2, "h": 2, "icon": "Branches", "title": "MAIN" },
+    { "id": "merge", "type": "badge", "x": 3, "y": 4, "w": 3, "h": 1, "text": "merge", "borderless": true },
+    { "id": "rpr", "type": "graphic-tile", "x": 11, "y": 5, "w": 2, "h": 2, "icon": "GitHub", "title": "RELEASE PR", "tileStyle": "accent" },
+    { "id": "rpr-note", "type": "badge", "x": 10, "y": 7, "w": 4, "h": 1, "text": "release/main, one per repo", "borderless": true },
+    { "id": "pr-cmd", "type": "badge", "x": 8, "y": 4, "w": 3, "h": 1, "text": "verwalter pr, every push", "borderless": true },
+    { "id": "wf", "type": "section", "x": 15, "y": 3, "w": 14, "h": 7, "title": "Release workflow", "texture": "diagonal" },
+    { "id": "build", "type": "graphic-tile", "x": 16, "y": 5, "w": 2, "h": 2, "icon": "Layers", "title": "BUILD" },
+    { "id": "release", "type": "graphic-tile", "x": 20, "y": 5, "w": 2, "h": 2, "icon": "Rocket", "title": "RELEASE", "tileStyle": "accent" },
+    { "id": "release-note", "type": "badge", "x": 19, "y": 7, "w": 4, "h": 1, "text": "tags + GitHub releases", "borderless": true },
+    { "id": "publish", "type": "graphic-tile", "x": 25, "y": 5, "w": 2, "h": 2, "icon": "Cloud", "title": "PUBLISH", "tileStyle": "accent" },
+    { "id": "publish-note", "type": "badge", "x": 24, "y": 7, "w": 4, "h": 1, "text": "your command per package", "borderless": true },
+    { "id": "order-note", "type": "badge", "x": 18, "y": 8, "w": 8, "h": 1, "text": "dependencies first, independent packages in parallel", "borderless": true },
+    { "id": "maint", "type": "badge", "x": 13, "y": 4, "w": 3, "h": 1, "text": "maintainer merges", "borderless": true },
+    { "id": "branch", "type": "graphic-tile", "x": 1, "y": 11, "w": 2, "h": 2, "icon": "Branches", "title": "ANY BRANCH" },
+    { "id": "rc", "type": "graphic-tile", "x": 11, "y": 11, "w": 2, "h": 2, "icon": "Star", "title": "RC PR" },
+    { "id": "rc-cmd", "type": "badge", "x": 5, "y": 10, "w": 4, "h": 1, "text": "verwalter pre-release, on demand", "borderless": true },
+    { "id": "rc-note", "type": "badge", "x": 10, "y": 13, "w": 4, "h": 1, "text": "1.6.0-rc.1, changesets stay", "borderless": true }
+  ],
+  "arrows": [
+    { "id": "a1", "from": "pr", "to": "main", "color": "var(--color-fg4)", "shimmer": true, "shimmerColor": "#1FD5F9", "animationIndex": 0, "arrowEnds": "forward" },
+    { "id": "a2", "from": "main", "to": "rpr", "color": "var(--color-fg4)", "shimmer": true, "shimmerColor": "#1FD5F9", "animationIndex": 1, "arrowEnds": "forward" },
+    { "id": "a3", "from": "rpr", "to": "build", "color": "var(--color-fg4)", "shimmer": true, "shimmerColor": "#1FD5F9", "animationIndex": 2, "arrowEnds": "forward" },
+    { "id": "a4", "from": "build", "to": "release", "color": "var(--color-fg4)", "shimmer": true, "shimmerColor": "#1FD5F9", "animationIndex": 3, "arrowEnds": "forward" },
+    { "id": "a5", "from": "release", "to": "publish", "color": "var(--color-fg4)", "shimmer": true, "shimmerColor": "#1FD5F9", "animationIndex": 4, "arrowEnds": "forward" },
+    { "id": "a6", "from": "branch", "to": "rc", "color": "var(--color-fg4)", "shimmer": true, "shimmerColor": "#1FD5F9", "animationIndex": 5, "arrowEnds": "forward" },
+    { "id": "a7", "from": "rc", "to": "build", "color": "var(--color-fg4)", "shimmer": true, "shimmerColor": "#1FD5F9", "animationIndex": 6, "arrowEnds": "forward", "fromAnchor": { "side": "right", "offset": 1 }, "toAnchor": { "side": "bottom", "offset": 1 }, "waypoints": [[17, 12]] }
+  ]
+}

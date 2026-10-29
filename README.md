@@ -6,11 +6,10 @@ keeps one release PR open. Merging it bumps versions, writes changelogs,
 tags, creates GitHub releases and runs your publish commands, dependencies
 first.
 
-```
-PR with .changeset/x.md ──merge──▶ main ──verwalter pr──▶ release PR
-                                                              │ merge
-              verwalter publish ◀── verwalter release ◀───────┘
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/release-cycle-dark.svg">
+  <img alt="The release cycle: a PR with a changeset merges to main, verwalter pr keeps one release PR open, merging it runs the release workflow: build, release, publish. An rc PR can be opened from any branch." src="docs/release-cycle-light.svg">
+</picture>
 
 The behaviour is specified in [versioning.allium](versioning.allium).
 
