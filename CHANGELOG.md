@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.18.0
+
+### Minor Changes
+
+- `pre-release` takes no package and no level. The rc carries every package with a pending changeset and the fixed groups they are in, each at its own rc version from its changesets, pinned to each other, on `release/<target>-rc`. The example workflow has no inputs. - [`c1f65f6`](https://github.com/lukasIO/verwalter/commit/c1f65f6a2c57cf5be341ac7c55d586a282f80709) ([@lukasIO](https://github.com/lukasIO))
+
+### Patch Changes
+
+- The rc example workflow takes the level from the pending changesets unless one is given. - [`94e89f7`](https://github.com/lukasIO/verwalter/commit/94e89f789c3ec8fbf8dd41994a7cfe7494f6b5f9) ([@lukasIO](https://github.com/lukasIO))
+- README, docs and example workflows pin v0.17.0. - [`5bca7be`](https://github.com/lukasIO/verwalter/commit/5bca7be7a4b42a6b228e723c7f8d36bb0045ec34) ([@lukasIO](https://github.com/lukasIO))
+- The built-in npm and pnpm publish commands add `--tag next` for a pre-release version. - [`75f2dba`](https://github.com/lukasIO/verwalter/commit/75f2dbabf015ab77ae12b889e10c05b1b957fa47) ([@lukasIO](https://github.com/lukasIO))
+- In a pnpm workspace the built-in npm publish command is `pnpm publish`, which resolves `workspace:` ranges to versions. `npm publish` ships them as is. - [`e585556`](https://github.com/lukasIO/verwalter/commit/e5855562a0d7af391f4a66bb1a3f3d387015f12f) ([@lukasIO](https://github.com/lukasIO))
+
 ## 0.17.0
 
 ### Minor Changes
