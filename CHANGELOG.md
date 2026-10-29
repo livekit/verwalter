@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.18.1
+
+### Patch Changes
+
+- The registry check sends a `verwalter/<version>` User-Agent. crates.io answers 403 to curl's default one, so every crates.io existence check failed. - [`fbf9ebc`](https://github.com/lukasIO/verwalter/commit/fbf9ebcb7e6800381caa6332010211ee7a7748a5) ([@lukasIO](https://github.com/lukasIO))
+- README, docs and example workflows pin v0.18.0. - [`6a3ac3d`](https://github.com/lukasIO/verwalter/commit/6a3ac3d7d6af1b5403a787d904dd960df5e14925) ([@lukasIO](https://github.com/lukasIO))
+- A package with `registry = "none"` set on itself and no `publish` command is released on GitHub only: `publish` leaves it out instead of failing on a missing command. - [`1667755`](https://github.com/lukasIO/verwalter/commit/166775526d8dda16a8ecb9ec0b791905ba0c57e3) ([@lukasIO](https://github.com/lukasIO))
+- An rc is bumped from the higher of the current version and the newest stable tag. A version ahead of its tags was pulled back to the tag before. - [`2182a69`](https://github.com/lukasIO/verwalter/commit/2182a694ff9a8d768eb7c711c3f591aae9b31b0a) ([@lukasIO](https://github.com/lukasIO))
+
 ## 0.18.0
 
 ### Minor Changes
