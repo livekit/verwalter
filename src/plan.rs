@@ -17,6 +17,22 @@ pub struct PackageState {
     pub version: Version,
     /// In-repo packages this one depends on (handler::internal_dependencies).
     pub dependencies: Vec<String>,
+    /// Config: ceiling on the bump level.
+    pub max_bump: Option<BumpLevel>,
+    /// Config: the other members of this package's fixed group.
+    pub fixed_with: Vec<String>,
+}
+
+impl PackageState {
+    pub fn new(name: &str, version: Version, dependencies: Vec<String>) -> Self {
+        Self {
+            name: name.to_string(),
+            version,
+            dependencies,
+            max_bump: None,
+            fixed_with: Vec::new(),
+        }
+    }
 }
 
 /// One package's part of the release PR.
@@ -31,6 +47,37 @@ pub struct PlannedRelease {
     /// Planned packages this one depends on, for the "updated dependencies"
     /// changelog line.
     pub bumped_dependencies: Vec<String>,
+    /// The other members of its fixed group, released at the same version.
+    pub fixed_with: Vec<String>,
+}
+
+/// Fixed groups whose members are not at one version: a warning until the
+/// next release aligns them.
+pub fn fixed_group_drift(packages: &[PackageState]) -> Vec<String> {
+    let mut out = Vec::new();
+    for p in packages {
+        if p.fixed_with.iter().any(|o| o.as_str() < p.name.as_str()) {
+            continue; // reported once, by the first member in name order
+        }
+        let members: Vec<&PackageState> = std::iter::once(p)
+            .chain(
+                p.fixed_with
+                    .iter()
+                    .filter_map(|o| packages.iter().find(|q| &q.name == o)),
+            )
+            .collect();
+        if members.iter().any(|m| m.version != p.version) {
+            let list: Vec<String> = members
+                .iter()
+                .map(|m| format!("{} {}", m.name, m.version))
+                .collect();
+            out.push(format!(
+                "fixed group is not at one version ({}); the next release aligns it",
+                list.join(", ")
+            ));
+        }
+    }
+    out
 }
 
 /// Dependencies first: by depth in the dependency graph, then by name.
@@ -87,10 +134,14 @@ pub fn plan(
         }
     }
 
-    // Dependent bumps, to a fixpoint: a package whose planned dependency is
-    // bumped gets at least `dependent_level`.
+    // Dependent bumps and fixed groups, to a fixpoint: a package whose
+    // planned dependency is bumped gets at least `dependent_level`; a
+    // fixed group with any planned member is planned whole, at the highest
+    // level in it. Every level is capped by the package's max_bump, and a
+    // group by the lowest max_bump among its members.
+    let cap = |name: &str, l: BumpLevel| by_name[name].max_bump.map_or(l, |m| l.min(m));
     loop {
-        let before = level.len();
+        let before = level.clone();
         for p in packages {
             if p.dependencies
                 .iter()
@@ -99,7 +150,21 @@ pub fn plan(
                 level.entry(&p.name).or_insert(dependent_level);
             }
         }
-        if level.len() == before {
+        for p in packages.iter().filter(|p| !p.fixed_with.is_empty()) {
+            let members =
+                std::iter::once(p.name.as_str()).chain(p.fixed_with.iter().map(String::as_str));
+            let Some(l) = members.clone().filter_map(|m| level.get(m).copied()).max() else {
+                continue;
+            };
+            let l = members.clone().fold(l, |l, m| cap(m, l));
+            for m in members {
+                level.insert(&by_name[m].name, l);
+            }
+        }
+        for (name, l) in level.iter_mut() {
+            *l = cap(name, *l);
+        }
+        if level == before {
             break;
         }
     }
@@ -116,13 +181,22 @@ pub fn plan(
         .into_iter()
         .map(|name| {
             let p = by_name[name];
+            // A fixed group moves from its highest version.
+            let base = p
+                .fixed_with
+                .iter()
+                .map(|o| &by_name[o.as_str()].version)
+                .chain(std::iter::once(&p.version))
+                .max()
+                .unwrap();
             PlannedRelease {
                 package: p.name.clone(),
                 from: p.version.clone(),
-                to: next_version(&p.version, [level[name]]),
+                to: next_version(base, [level[name]]),
                 level: level[name],
                 changesets: files.remove(name).unwrap_or_default(),
                 bumped_dependencies: planned_deps(name).into_iter().map(String::from).collect(),
+                fixed_with: p.fixed_with.clone(),
             }
         })
         .collect()
@@ -133,11 +207,11 @@ mod tests {
     use super::*;
 
     fn pkg(name: &str, version: &str, deps: &[&str]) -> PackageState {
-        PackageState {
-            name: name.into(),
-            version: version.parse().unwrap(),
-            dependencies: deps.iter().map(|d| d.to_string()).collect(),
-        }
+        PackageState::new(
+            name,
+            version.parse().unwrap(),
+            deps.iter().map(|d| d.to_string()).collect(),
+        )
     }
 
     fn cs(file: &str, bumps: &[(&str, BumpLevel)]) -> Changeset {
@@ -212,6 +286,70 @@ mod tests {
             names(&p),
             ["livekit-protocol", "livekit-api", "livekit", "livekit-ffi"]
         );
+    }
+
+    // Spec: config.fixed. The group moves from its highest version by the
+    // highest level in it; a member without a changeset comes along.
+    #[test]
+    fn fixed_group_releases_at_one_version() {
+        let mut packages = vec![
+            pkg("core", "0.3.1", &[]),
+            pkg("ffi", "0.2.0", &["core"]),
+            pkg("other", "1.0.0", &[]),
+        ];
+        packages[0].fixed_with = vec!["ffi".into()];
+        packages[1].fixed_with = vec!["core".into()];
+        let changesets = [cs("x.md", &[("ffi", BumpLevel::Minor)])];
+        let p = plan(&packages, &changesets, BumpLevel::Patch);
+        let got: Vec<(&str, &str, &str)> = p
+            .iter()
+            .map(|r| {
+                (
+                    r.package.as_str(),
+                    r.to.to_string().leak() as &str,
+                    r.level.to_string().leak() as &str,
+                )
+            })
+            .collect();
+        assert_eq!(got, [("core", "0.4.0", "minor"), ("ffi", "0.4.0", "minor")]);
+        assert_eq!(p[0].fixed_with, ["ffi"]);
+        assert!(p[0].changesets.is_empty());
+    }
+
+    // Spec: Package.max_bump caps the level; in a fixed group the lowest
+    // cap applies to the group.
+    #[test]
+    fn max_bump_caps_the_level() {
+        let mut packages = vec![
+            pkg("a", "0.9.0", &[]),
+            pkg("b", "0.9.0", &[]),
+            pkg("c", "2.0.0", &[]),
+        ];
+        packages[0].max_bump = Some(BumpLevel::Minor);
+        packages[1].fixed_with = vec!["c".into()];
+        packages[2].fixed_with = vec!["b".into()];
+        packages[2].max_bump = Some(BumpLevel::Patch);
+        let changesets = [cs(
+            "x.md",
+            &[("a", BumpLevel::Major), ("b", BumpLevel::Major)],
+        )];
+        let p = plan(&packages, &changesets, BumpLevel::Patch);
+        let got: Vec<(&str, &str)> = p
+            .iter()
+            .map(|r| (r.package.as_str(), r.to.to_string().leak() as &str))
+            .collect();
+        assert_eq!(got, [("a", "0.10.0"), ("b", "2.0.1"), ("c", "2.0.1")]);
+    }
+
+    #[test]
+    fn drift_is_reported_once_per_group() {
+        let mut packages = vec![pkg("core", "0.3.1", &[]), pkg("ffi", "0.2.0", &[])];
+        assert!(fixed_group_drift(&packages).is_empty());
+        packages[0].fixed_with = vec!["ffi".into()];
+        packages[1].fixed_with = vec!["core".into()];
+        let w = fixed_group_drift(&packages);
+        assert_eq!(w.len(), 1);
+        assert!(w[0].contains("core 0.3.1, ffi 0.2.0"), "{}", w[0]);
     }
 
     // Spec: next_version of a pre-release is the promote step.

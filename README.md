@@ -59,6 +59,7 @@ dependent_bump_level = "patch"
 prerelease_label = "rc"          # 1.6.0-rc.1; written as 1.6.0rc1 in pyproject.toml
 pin_files = ["Cargo.toml", "Cargo.lock"]   # workspace manifest and lock files
 ignore = ["examples/*"]         # workspace members the consistency check skips
+fixed = [["livekit-ffi", "livekit-ffi-node"]]  # groups that release at one shared version
 
 [packages.livekit-protocol]
 path = "livekit-protocol"
@@ -67,7 +68,18 @@ changelog = "livekit-protocol/CHANGELOG.md"
 tag_template = "{package}-v{version}"      # default in a monorepo, v{version} with one package
 release = "tag_and_release"                # none | tag | tag_and_release
 draft = false
+max_bump = "minor"                         # optional ceiling on the bump level
 ```
+
+A fixed group releases at one version: the highest version in the group,
+bumped by the highest level any member needs. A member without a changeset
+of its own comes along with a "Released with" changelog line. A pre-release
+of a member takes the whole group. If the committed versions of a group
+differ, every command warns until the next release aligns them.
+
+`max_bump` caps what a changeset can do to a package: with `minor`, a
+`major` changeset bumps the minor version. In a fixed group the lowest
+cap applies to the group.
 
 Every publishable workspace member must be listed, or named in `ignore`.
 `verwalter check` fails when a Cargo, pnpm or uv workspace member without a

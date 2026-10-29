@@ -55,6 +55,8 @@ impl Repo {
                 name: name.clone(),
                 version,
                 dependencies,
+                max_bump: package.max_bump,
+                fixed_with: config.fixed_with(name),
             });
         }
 

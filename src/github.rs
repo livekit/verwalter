@@ -320,16 +320,8 @@ mod tests {
             root: PathBuf::from("."),
             config,
             packages: vec![
-                PackageState {
-                    name: "a".into(),
-                    version: "1.0.0".parse().unwrap(),
-                    dependencies: vec![],
-                },
-                PackageState {
-                    name: "b".into(),
-                    version: "2.0.0".parse().unwrap(),
-                    dependencies: vec!["a".into()],
-                },
+                PackageState::new("a", "1.0.0".parse().unwrap(), vec![]),
+                PackageState::new("b", "2.0.0".parse().unwrap(), vec!["a".into()]),
             ],
             changesets: vec![Changeset::parse(
                 "x.md",

@@ -543,7 +543,7 @@ fn prerelease_opens_an_rc_pr_without_consuming_changesets() {
             _ => String::new(),
         })
     };
-    let (release, pr) = verwalter::prerelease::open(
+    let (releases, pr) = verwalter::prerelease::open(
         &repo,
         "livekit-protocol",
         "main",
@@ -553,6 +553,8 @@ fn prerelease_opens_an_rc_pr_without_consuming_changesets() {
         &mut gh,
     )
     .unwrap();
+    let release = &releases[0];
+    assert_eq!(releases.len(), 1);
     assert_eq!(
         (
             release.from.to_string().as_str(),
@@ -615,7 +617,7 @@ fn prerelease_opens_an_rc_pr_without_consuming_changesets() {
     );
     let repo = Repo::load(root).unwrap();
     let next = verwalter::prerelease::plan(&repo, "livekit-protocol", None).unwrap();
-    assert_eq!(next.to.to_string(), "0.4.0-rc.2");
+    assert_eq!(next[0].to.to_string(), "0.4.0-rc.2");
     let p = plan(
         &repo.packages,
         &repo.changesets,
@@ -628,6 +630,103 @@ fn prerelease_opens_an_rc_pr_without_consuming_changesets() {
             .to
             .to_string(),
         "0.4.0"
+    );
+    let _ = fs::remove_dir_all(&remote);
+}
+
+// Spec: config.fixed in a pre-release. An rc of one member carries the
+// whole group at the shared version.
+#[test]
+fn prerelease_of_a_fixed_group_member_covers_the_group() {
+    let r = fixture("rc-fixed");
+    let root = &r.0;
+    let cfg = fs::read_to_string(root.join("verwalter.toml")).unwrap();
+    write(
+        root,
+        "verwalter.toml",
+        &format!("fixed = [[\"livekit-protocol\", \"livekit-api\"]]\n{cfg}"),
+    );
+    write(
+        root,
+        ".changeset/ndc.md",
+        "---\nlivekit-protocol: minor\n---\nx\n",
+    );
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-q", "-m", "fixed group"]);
+    let remote = std::env::temp_dir().join(format!(
+        "verwalter-it-{}-rc-fixed-remote.git",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&remote);
+    git(root, &["init", "-q", "--bare", remote.to_str().unwrap()]);
+    git(root, &["remote", "add", "origin", remote.to_str().unwrap()]);
+    git(root, &["push", "-q", "origin", "main"]);
+
+    let repo = Repo::load(root).unwrap();
+    assert_eq!(
+        verwalter::plan::fixed_group_drift(&repo.packages).len(),
+        1,
+        "0.3.1 and 0.4.3 differ"
+    );
+    let mut gh = |args: &[&str]| -> Result<String, verwalter::Error> {
+        Ok(match args {
+            ["pr", "list", ..] => "[]".into(),
+            ["pr", "create", ..] => "https://github.com/x/y/pull/9".into(),
+            _ => String::new(),
+        })
+    };
+    let (releases, pr) =
+        verwalter::prerelease::open(&repo, "livekit-api", "main", None, "origin", false, &mut gh)
+            .unwrap();
+    // api was asked for, protocol comes along; the version moves from the
+    // group's highest (0.4.3) by the level of protocol's changeset.
+    let got: Vec<(&str, &str, &str)> = releases
+        .iter()
+        .map(|r| {
+            (
+                r.package.as_str(),
+                r.from.to_string().leak() as &str,
+                r.to.to_string().leak() as &str,
+            )
+        })
+        .collect();
+    assert_eq!(
+        got,
+        [
+            ("livekit-api", "0.4.3", "0.5.0-rc.1"),
+            ("livekit-protocol", "0.3.1", "0.5.0-rc.1")
+        ]
+    );
+    assert_eq!(pr.head, "release/livekit-api-rc");
+    assert!(git(
+        root,
+        &["show", "release/livekit-api-rc:livekit-protocol/Cargo.toml"]
+    )
+    .contains("0.5.0-rc.1"));
+    assert!(git(
+        root,
+        &["show", "release/livekit-api-rc:livekit-api/CHANGELOG.md"]
+    )
+    .contains("- Released with livekit-protocol@0.5.0-rc.1"));
+
+    // The final release plan aligns the group the same way.
+    let plan = plan(
+        &repo.packages,
+        &repo.changesets,
+        repo.config.dependent_bump_level,
+    );
+    let got: Vec<(&str, &str)> = plan
+        .iter()
+        .map(|r| (r.package.as_str(), r.to.to_string().leak() as &str))
+        .collect();
+    assert_eq!(
+        got,
+        [
+            ("livekit-protocol", "0.5.0"),
+            ("livekit", "0.7.1"),
+            ("livekit-api", "0.5.0")
+        ],
+        "livekit depends on protocol and gets the dependent patch"
     );
     let _ = fs::remove_dir_all(&remote);
 }

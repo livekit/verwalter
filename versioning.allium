@@ -115,6 +115,10 @@ entity Package {
     -- When true the GitHub release stays a draft until the repo workflow
     -- has attached its assets and publishes it.
     release_as_draft: Boolean
+    -- Ceiling on the bump level: a major changeset on a package with
+    -- max_bump minor bumps minor. In a fixed group the lowest ceiling
+    -- applies to the group.
+    max_bump: BumpLevel?
 
     changesets: Changeset with repository = this.repository
     pending_changesets: changesets where status = pending
@@ -224,6 +228,13 @@ config {
     exempt_label: String = "internal"
     -- Workspace members the consistency check skips, by name or path.
     ignore: Set<String> = {}
+    -- Groups of packages that always release at one shared version: the
+    -- highest version in the group, bumped by the highest level any
+    -- member needs. A member with no changeset of its own comes along.
+    -- A pre-release of a member takes the whole group. Members whose
+    -- committed versions differ are warned about until a release aligns
+    -- them. A package is in at most one group.
+    fixed: Set<Set<Package>> = {}
     -- Release PRs are recognisable by branch prefix and label so that repo
     -- workflows can gate them (approvals, registry checks). Gating itself
     -- is a workflow concern, not the tool's.
@@ -287,8 +298,9 @@ rule OpenOrUpdateReleasePullRequest {
     -- step): the rc already encodes the bump of the pending changesets.
     -- 0.x follows the changesets rules: major gives 1.0.0, minor bumps
     -- the minor component. (knope and rust-sdks today bump one level
-    -- lower on 0.x; this is a deliberate change.)
-    let planned = pending.map(p => PlannedRelease(package: p, from_version: p.version, to_version: next_version(p.version, p.pending_changesets, config.dependent_bump_level)))
+    -- lower on 0.x; this is a deliberate change.) The level is capped by
+    -- max_bump; a fixed group moves whole, from its highest version.
+    let planned = pending.map(p => PlannedRelease(package: p, from_version: p.version, to_version: next_version(p.version, p.pending_changesets, config.dependent_bump_level, p.max_bump, config.fixed)))
     let open = filter(ReleasePullRequests, r => r.repository = repository and r.status = open and r.kind = release)
     requires: not pending.empty
     ensures:
@@ -496,6 +508,15 @@ invariant FinalReleasesTargetBaseBranch {
 invariant ReleasePullRequestCoversDependents {
     filter(ReleasePullRequests, r => r.status = open and r.kind = release).all(rpr =>
         rpr.releases.all(r => r.package.dependents.all(d => rpr.releases.any(x => x.package = d))))
+}
+
+-- A fixed group is in a PR whole, at one version.
+invariant FixedGroupReleasesTogether {
+    filter(ReleasePullRequests, r => r.status = open).all(rpr =>
+        config.fixed.all(g =>
+            g.all(p => rpr.releases.any(x => x.package = p)) or g.all(p => not rpr.releases.any(x => x.package = p)))
+        and config.fixed.all(g =>
+            rpr.releases.all(a => rpr.releases.all(b => not (a.package in g and b.package in g) or a.to_version = b.to_version))))
 }
 
 ------------------------------------------------------------

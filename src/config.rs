@@ -53,6 +53,10 @@ pub struct Package {
     pub release: ReleaseMode,
     #[serde(default)]
     pub draft: bool,
+    /// Ceiling on the bump level: a `major` changeset on a package with
+    /// `max_bump = "minor"` bumps minor. In a fixed group the lowest
+    /// ceiling applies to the group.
+    pub max_bump: Option<BumpLevel>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -81,6 +85,11 @@ pub struct Config {
     /// name or path; a trailing `*` matches a prefix (`examples/*`).
     #[serde(default)]
     pub ignore: Vec<String>,
+    /// Groups of packages that always release at one shared version: the
+    /// highest version in the group, bumped by the highest level any
+    /// member needs. `fixed = [["play-core", "play-ffi"]]`.
+    #[serde(default)]
+    pub fixed: Vec<Vec<String>>,
     pub packages: BTreeMap<String, Package>,
 }
 
@@ -104,8 +113,29 @@ fn default_prerelease_label() -> String {
 }
 
 impl Config {
-    pub fn parse(text: &str) -> Result<Self, toml::de::Error> {
-        toml::from_str(text)
+    pub fn parse(text: &str) -> Result<Self, crate::Error> {
+        let config: Self = toml::from_str(text)?;
+        let mut seen = std::collections::BTreeSet::new();
+        for group in &config.fixed {
+            for name in group {
+                if !config.packages.contains_key(name) {
+                    return Err(format!("fixed group names unknown package {name}").into());
+                }
+                if !seen.insert(name) {
+                    return Err(format!("{name} is in two fixed groups").into());
+                }
+            }
+        }
+        Ok(config)
+    }
+
+    /// The other members of `package`'s fixed group, if it is in one.
+    pub fn fixed_with(&self, package: &str) -> Vec<String> {
+        self.fixed
+            .iter()
+            .find(|g| g.iter().any(|n| n == package))
+            .map(|g| g.iter().filter(|n| *n != package).cloned().collect())
+            .unwrap_or_default()
     }
 
     /// Spec: Package.tag_template default.
@@ -242,6 +272,26 @@ release = "tag"
         let single = Config::parse(SINGLE).unwrap();
         assert_eq!(single.tag_for("livekit-client", &v), "v1.2.0");
         assert_eq!(single.packages["livekit-client"].release, ReleaseMode::Tag);
+    }
+
+    #[test]
+    fn fixed_groups_are_validated() {
+        let c = Config::parse(&format!(
+            "fixed = [[\"livekit-protocol\", \"livekit-ffi\"]]\n{MONO}"
+        ))
+        .unwrap();
+        assert_eq!(c.fixed_with("livekit-ffi"), ["livekit-protocol"]);
+        assert!(c.fixed_with("nobody").is_empty());
+        let e =
+            Config::parse(&format!("fixed = [[\"livekit-protocol\", \"x\"]]\n{MONO}")).unwrap_err();
+        assert!(e.to_string().contains("unknown package x"));
+        let e = Config::parse(&format!(
+            "fixed = [[\"livekit-protocol\"], [\"livekit-protocol\"]]\n{MONO}"
+        ))
+        .unwrap_err();
+        assert!(e.to_string().contains("two fixed groups"));
+        let c = Config::parse(&format!("{MONO}\nmax_bump = \"minor\"\n")).unwrap();
+        assert_eq!(c.packages["livekit-ffi"].max_bump, Some(BumpLevel::Minor));
     }
 
     #[test]

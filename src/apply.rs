@@ -118,6 +118,19 @@ pub fn render_entry(
             .filter(|c| c.unreleased_for(&release.package) == Some(level))
             .map(|c| bullet(&c.summary, c.attribution.as_deref()))
             .collect();
+        if level == release.level
+            && release.changesets.is_empty()
+            && release.bumped_dependencies.is_empty()
+            && !release.fixed_with.is_empty()
+        {
+            let members: Vec<String> = release
+                .fixed_with
+                .iter()
+                .filter_map(|m| plan.iter().find(|r| &r.package == m))
+                .map(|r| format!("{}@{}", r.package, r.to))
+                .collect();
+            lines.push(format!("- Released with {}", members.join(", ")));
+        }
         if level == BumpLevel::Patch && !release.bumped_dependencies.is_empty() {
             let deps: Vec<String> = release
                 .bumped_dependencies
@@ -218,16 +231,12 @@ changelog = "livekit-api/CHANGELOG.md"
 
     fn state() -> Vec<PackageState> {
         vec![
-            PackageState {
-                name: "livekit-protocol".into(),
-                version: "0.3.1".parse().unwrap(),
-                dependencies: vec![],
-            },
-            PackageState {
-                name: "livekit-api".into(),
-                version: "0.4.3".parse().unwrap(),
-                dependencies: vec!["livekit-protocol".into()],
-            },
+            PackageState::new("livekit-protocol", "0.3.1".parse().unwrap(), vec![]),
+            PackageState::new(
+                "livekit-api",
+                "0.4.3".parse().unwrap(),
+                vec!["livekit-protocol".into()],
+            ),
         ]
     }
 

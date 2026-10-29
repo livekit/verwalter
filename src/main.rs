@@ -89,6 +89,9 @@ fn run() -> Result<(), Error> {
     for f in &findings {
         eprintln!("warning: {f}");
     }
+    for w in verwalter::plan::fixed_group_drift(&repo.packages) {
+        eprintln!("warning: {w}");
+    }
     match command.as_str() {
         "plan" => {
             print_plan(&repo, &releases);
@@ -155,12 +158,14 @@ fn run() -> Result<(), Error> {
             let target = target.unwrap_or_else(|| repo.config.base_branch.clone());
             github::attribute(&mut repo, &mut gh(&root, &remote, dry_run));
             let mut gh = gh(&repo.root, &remote, dry_run);
-            let (r, pr) = prerelease::open(&repo, &package, &target, level, &remote, dry_run, &mut gh)
+            let (releases, pr) = prerelease::open(&repo, &package, &target, level, &remote, dry_run, &mut gh)
                 .map_err(|e| format!("{e}\nresume with: verwalter pre-release {package} --target {target}  (the rc branch and PR are updated in place)"))?;
-            println!(
-                "#{}  {}  {} -> {}  on {}",
-                pr.number, pr.head, r.from, r.to, pr.base
-            );
+            for r in &releases {
+                println!(
+                    "#{}  {}  {} {} -> {}  on {}",
+                    pr.number, pr.head, r.package, r.from, r.to, pr.base
+                );
+            }
             Ok(())
         }
         "check" => {
@@ -225,10 +230,12 @@ fn print_plan(repo: &Repo, releases: &[verwalter::plan::PlannedRelease]) {
     }
     let width = releases.iter().map(|r| r.package.len()).max().unwrap_or(0);
     for r in releases {
-        let via = if r.changesets.is_empty() {
+        let via = if !r.changesets.is_empty() {
+            r.changesets.join(", ")
+        } else if !r.bumped_dependencies.is_empty() {
             format!("deps: {}", r.bumped_dependencies.join(", "))
         } else {
-            r.changesets.join(", ")
+            format!("fixed with {}", r.fixed_with.join(", "))
         };
         println!(
             "{:width$}  {} -> {}  {:<5}  [{via}]",
