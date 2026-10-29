@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.1
+
+### Patch Changes
+
+- Point examples and README at v0.8.0 - [`0e3faaf`](https://github.com/lukasIO/verwalter/commit/0e3faafaf2cf3f8029b7f361e252337fdbb5b135) ([@lukasIO](https://github.com/lukasIO))
+
 ## 0.8.0
 
 ### Minor Changes
