@@ -1,7 +1,7 @@
 # The GitHub Action
 
 ```yaml
-- uses: lukasIO/verwalter@v0.14.1
+- uses: lukasIO/verwalter@v0.15.0
   with:
     command: pr        # check | changeset | plan | pr | release | publish | pre-release | status
     token: ${{ secrets.RELEASE_TOKEN || github.token }}
