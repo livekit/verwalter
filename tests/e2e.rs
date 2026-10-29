@@ -1105,6 +1105,40 @@ fn versioned_files_that_disagree_are_reported() {
     assert!(repo.warnings[0].contains("livekit/README.md says 0.6.9"), "{}", repo.warnings[0]);
 }
 
+// Spec: ContributorWritesChangeset.
+#[test]
+fn changeset_command_covers_the_changed_packages() {
+    let r = fixture("changeset-cmd");
+    let root = &r.0;
+    git(root, &["checkout", "-q", "-b", "feat"]);
+    write(root, "livekit-api/src.rs", "x");
+    write(root, "livekit-protocol/x.proto", "y");
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-q", "-m", "Add thing: v2"]);
+    write(root, "livekit/untracked.rs", "z");
+    let repo = Repo::load(root).unwrap();
+    let path = verwalter::check::write_changeset(&repo, "main", verwalter::version::BumpLevel::Minor, None)
+        .unwrap()
+        .unwrap();
+    assert!(path.ends_with(".changeset/add_thing_v2.md"), "{}", path.display());
+    let content = fs::read_to_string(&path).unwrap();
+    assert_eq!(
+        content,
+        "---\nlivekit: minor\nlivekit-api: minor\nlivekit-protocol: minor\n---\n\nAdd thing: v2\n"
+    );
+    // Now covered: nothing to write. A second summary gets its own file.
+    let repo = Repo::load(root).unwrap();
+    assert!(verwalter::check::write_changeset(&repo, "main", verwalter::version::BumpLevel::Patch, None).unwrap().is_none());
+    write(root, "livekit/more.rs", "w");
+    fs::remove_file(&path).unwrap();
+    let repo = Repo::load(root).unwrap();
+    let again = verwalter::check::write_changeset(&repo, "main", verwalter::version::BumpLevel::Patch, Some("Fix: it"))
+        .unwrap()
+        .unwrap();
+    assert!(again.ends_with("fix_it.md"));
+    assert!(fs::read_to_string(&again).unwrap().starts_with("---\nlivekit: patch\nlivekit-api: patch\nlivekit-protocol: patch\n---"));
+}
+
 #[test]
 fn named_package_is_reported_even_when_complete() {
     let r = fixture("named");

@@ -162,6 +162,7 @@ and `origin/<base>` are current.
 | `verwalter release [--asset <file>]... [--package <name>] [--publish]` | Tag and create GitHub releases for every untagged version. Uploads assets to drafts or a named package, `--publish` flips a draft. |
 | `verwalter release --abandon <tag>` | Delete a GitHub release and its tag. |
 | `verwalter check --pr <n>` | Changeset check for a contributor PR, with comment. |
+| `verwalter changeset [--level <l>] [--summary <text>]` | Write a changeset for the packages the branch changes and no pending changeset covers. The summary defaults to the last commit subject. |
 | `verwalter pre-release <package> [--target <branch>] [--level <l>]` | Open an rc PR for one package. Changesets stay pending. |
 
 All commands take `--config <file>` and an optional checkout path. `pr`,

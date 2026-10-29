@@ -8,7 +8,7 @@ use verwalter::{
     version::BumpLevel, workspace, Error,
 };
 
-const USAGE: &str = "usage: verwalter <status|plan|branches|pr> [--config <file>] [--base <ref>] [--remote <name>] [--dry-run] [<checkout>]\n       verwalter release [--asset <file>]... [--package <name>] [--publish] [--abandon <tag>] [--remote <name>] [--dry-run] [<checkout>]\n       verwalter check --pr <number> [--config <file>] [--dry-run] [<checkout>]\n       verwalter pre-release <package> [--target <branch>] [--level major|minor|patch] [--remote <name>] [--dry-run] [<checkout>]";
+const USAGE: &str = "usage: verwalter <status|plan|branches|pr> [--config <file>] [--base <ref>] [--remote <name>] [--dry-run] [<checkout>]\n       verwalter changeset [--level major|minor|patch] [--base <ref>] [--summary <text>] [<checkout>]\n       verwalter release [--asset <file>]... [--package <name>] [--publish] [--abandon <tag>] [--remote <name>] [--dry-run] [<checkout>]\n       verwalter check --pr <number> [--config <file>] [--dry-run] [<checkout>]\n       verwalter pre-release <package> [--target <branch>] [--level major|minor|patch] [--remote <name>] [--dry-run] [<checkout>]";
 
 fn main() -> ExitCode {
     match run() {
@@ -36,6 +36,7 @@ fn run() -> Result<(), Error> {
     let mut assets: Vec<String> = Vec::new();
     let mut abandon: Option<String> = None;
     let mut target: Option<String> = None;
+    let mut summary: Option<String> = None;
     let mut level: Option<BumpLevel> = None;
     let mut dry_run = false;
     let mut only: Option<String> = None;
@@ -50,6 +51,7 @@ fn run() -> Result<(), Error> {
             "--asset" => assets.push(args.next().ok_or(USAGE)?),
             "--abandon" => abandon = Some(args.next().ok_or(USAGE)?),
             "--target" => target = Some(args.next().ok_or(USAGE)?),
+            "--summary" => summary = Some(args.next().ok_or(USAGE)?),
             "--dry-run" => dry_run = true,
             "--package" => only = Some(args.next().ok_or(USAGE)?),
             "--publish" => publish = true,
@@ -103,6 +105,21 @@ fn run() -> Result<(), Error> {
         eprintln!("warning: {w}");
     }
     match command.as_str() {
+        "changeset" => {
+            let base = base.unwrap_or_else(|| {
+                let remote_base = format!("{remote}/{}", repo.config.base_branch);
+                if verwalter::git::ref_exists(&repo.root, &remote_base) {
+                    remote_base
+                } else {
+                    repo.config.base_branch.clone()
+                }
+            });
+            match check::write_changeset(&repo, &base, level.unwrap_or(BumpLevel::Patch), summary.as_deref())? {
+                Some(path) => println!("{}", path.strip_prefix(&repo.root).unwrap_or(&path).display()),
+                None => println!("every changed package has a pending changeset"),
+            }
+            Ok(())
+        }
         "plan" => {
             print_plan(&repo, &releases);
             Ok(())

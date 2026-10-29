@@ -77,6 +77,80 @@ fn in_package(file: &str, package_path: &str) -> bool {
 
 pub const MARKER: &str = "<!-- verwalter changeset-check -->";
 
+/// Spec: ContributorWritesChangeset. The local counterpart of the check:
+/// the packages that the branch and working tree change against `base`
+/// and that no pending changeset covers get one file with `level` each.
+/// `summary` defaults to the last commit's subject. Returns the file, or
+/// None when nothing is missing.
+pub fn write_changeset(
+    repo: &crate::repo::Repo,
+    base: &str,
+    level: crate::version::BumpLevel,
+    summary: Option<&str>,
+) -> Result<Option<std::path::PathBuf>, Error> {
+    let root = &repo.root;
+    let merge_base = crate::git::run(root, &["merge-base", base, "HEAD"])?;
+    let mut changed: Vec<String> = crate::git::run(root, &["diff", "--name-only", merge_base.trim()])?
+        .lines()
+        .map(String::from)
+        .collect();
+    changed.extend(
+        crate::git::run(root, &["ls-files", "--others", "--exclude-standard"])?
+            .lines()
+            .map(String::from),
+    );
+    let check = evaluate(&repo.config, "", &[], &changed, &repo.changesets);
+    let missing = check.missing();
+    if missing.is_empty() {
+        return Ok(None);
+    }
+    let summary = match summary {
+        Some(s) => s.to_string(),
+        None => crate::git::run(root, &["log", "-1", "--format=%s"])?.trim().to_string(),
+    };
+    let front: String = missing
+        .iter()
+        .map(|p| format!("{}: {level}\n", quote(p)))
+        .collect();
+    let dir = root.join(CHANGESET_DIR);
+    fs::create_dir_all(&dir)?;
+    let base_name = slug(&summary);
+    let mut path = dir.join(format!("{base_name}.md"));
+    let mut n = 2;
+    while path.exists() {
+        path = dir.join(format!("{base_name}_{n}.md"));
+        n += 1;
+    }
+    fs::write(&path, format!("---\n{front}---\n\n{summary}\n"))?;
+    Ok(Some(path))
+}
+
+/// Names with characters outside `[A-Za-z0-9_-]` (`@scope/name`) are quoted.
+fn quote(name: &str) -> String {
+    if name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_')) {
+        name.to_string()
+    } else {
+        format!("\"{name}\"")
+    }
+}
+
+fn slug(title: &str) -> String {
+    let slug: String = title
+        .to_lowercase()
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .collect::<Vec<_>>()
+        .join("_")
+        .chars()
+        .take(60)
+        .collect();
+    if slug.is_empty() {
+        "changeset".to_string()
+    } else {
+        slug
+    }
+}
+
 /// The PR comment for a failed check, with a link that opens GitHub's
 /// new-file page with a patch changeset for the missing packages.
 pub fn comment(
@@ -89,20 +163,7 @@ pub fn comment(
     let missing = check.missing();
     let front: String = missing.iter().map(|p| format!("{p}: patch\n")).collect();
     let content = format!("---\n{front}---\n\n{title}\n");
-    let slug: String = title
-        .to_lowercase()
-        .split(|c: char| !c.is_ascii_alphanumeric())
-        .filter(|w| !w.is_empty())
-        .collect::<Vec<_>>()
-        .join("_")
-        .chars()
-        .take(60)
-        .collect();
-    let slug = if slug.is_empty() {
-        "changeset".to_string()
-    } else {
-        slug
-    };
+    let slug = slug(title);
     let link = format!(
         "https://github.com/{repo_slug}/new/{head_branch}?filename={CHANGESET_DIR}/{slug}.md&value={}",
         urlencode(&content)
@@ -124,7 +185,8 @@ pub fn comment(
         out.push('\n');
     }
     out.push_str(&format!(
-        "\n[**Create a changeset for the missing packages**]({link}) (prefilled with `patch`; edit the bump levels as needed).\n\n\
+        "\n[**Create a changeset for the missing packages**]({link}) (prefilled with `patch`; edit the bump levels as needed), \
+         or run `verwalter changeset --level <patch|minor|major>` on the branch.\n\n\
          If this change needs no release, add the `{}` label.\n",
         config.exempt_label
     ));
