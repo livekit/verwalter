@@ -96,20 +96,22 @@ fn run() -> Result<(), Error> {
         }
         "branches" => {
             let base = base.unwrap_or_else(|| repo.config.base_branch.clone());
-            for b in branches::create(&repo, &releases, &base)? {
-                println!("{}  on {}", b.name, b.target);
+            match branches::create(&repo, &releases, &base)? {
+                Some(b) => println!("{b}  on {}", repo.config.base_branch),
+                None => println!("nothing to release"),
             }
             Ok(())
         }
         "pr" => {
             let base = base.unwrap_or_else(|| format!("{remote}/{}", repo.config.base_branch));
             github::attribute(&mut repo, &mut gh(&root, &remote, dry_run));
-            let branches = branches::create(&repo, &releases, &base)?;
+            let branch = branches::create(&repo, &releases, &base)?;
             let mut gh = gh(&repo.root, &remote, dry_run);
-            let prs = github::sync(&repo, &releases, &branches, &remote, dry_run, &mut gh)
-                .map_err(|e| format!("{e}\nresume with: verwalter pr  (branches are regenerated, PRs updated in place; --dry-run shows the steps)"))?;
-            for pr in prs {
-                println!("#{}  {}  on {}", pr.number, pr.head, pr.base);
+            let pr = github::sync(&repo, &releases, branch.as_deref(), &remote, dry_run, &mut gh)
+                .map_err(|e| format!("{e}\nresume with: verwalter pr  (the branch is regenerated, the PR updated in place; --dry-run shows the steps)"))?;
+            match pr {
+                Some(pr) => println!("#{}  {}  on {}", pr.number, pr.head, pr.base),
+                None => println!("nothing to release"),
             }
             Ok(())
         }
@@ -213,7 +215,7 @@ fn gh<'a>(root: &'a Path, remote: &str, dry_run: bool) -> GhRunner<'a> {
 
 fn print_plan(repo: &Repo, releases: &[verwalter::plan::PlannedRelease]) {
     println!(
-        "{} packages, {} pending changesets, {} releases",
+        "{} packages, {} pending changesets, {} releases in one PR",
         repo.packages.len(),
         repo.changesets.len(),
         releases.len()
@@ -223,17 +225,13 @@ fn print_plan(repo: &Repo, releases: &[verwalter::plan::PlannedRelease]) {
     }
     let width = releases.iter().map(|r| r.package.len()).max().unwrap_or(0);
     for r in releases {
-        let on = r
-            .stacked_on
-            .as_deref()
-            .map_or(String::new(), |p| format!("  on {p}"));
         let via = if r.changesets.is_empty() {
             format!("deps: {}", r.bumped_dependencies.join(", "))
         } else {
             r.changesets.join(", ")
         };
         println!(
-            "{:width$}  {} -> {}  {:<5} {on}  [{via}]",
+            "{:width$}  {} -> {}  {:<5}  [{via}]",
             r.package,
             r.from,
             r.to,

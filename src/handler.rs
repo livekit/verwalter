@@ -259,7 +259,7 @@ fn pyproject_pin(content: &str, dep: &str, version: &Version) -> String {
 /// Spec: internal_dependencies. Which of `candidates` (the other package
 /// names in the repo) this manifest depends on. Only runtime dependencies
 /// count: a devDependency (package.json) does not make a package a
-/// dependent for bumps or stacking, as in changesets.
+/// dependent for bumps and ordering, as in changesets.
 pub fn internal_dependencies(
     path: &str,
     content: &str,
@@ -300,7 +300,7 @@ pub fn internal_dependencies(
                 .collect()
         }
         // ponytail: pubspec.yaml and go.mod report no dependencies yet; add
-        // a branch when a monorepo in that language needs stacking.
+        // a branch when a monorepo in that language needs dependency ordering.
         _ => Vec::new(),
     };
     Ok(found)
@@ -409,7 +409,7 @@ serde = "1"
         assert_eq!(
             deps,
             vec!["webrtc-sys", "livekit"],
-            "still a dependency for stacking and bumps"
+            "still a dependency for ordering and bumps"
         );
         // The root manifest is where the pin lives.
         let root = "[workspace]\nmembers = [\"livekit-ffi\"]\n\n[workspace.dependencies]\nwebrtc-sys = { version = \"0.3.51\", path = \"webrtc-sys\" }\n";

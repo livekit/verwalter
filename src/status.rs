@@ -102,7 +102,8 @@ pub fn status(repo: &Repo, remote: &str, gh: Gh) -> Result<Vec<PackageStatus>, E
             .map(|r| r.to.to_string());
         let release_pr = open
             .iter()
-            .find(|pr| pr.head == crate::branches::branch_name(repo, &p.name))
+            .find(|pr| pr.head == crate::branches::branch_name(repo))
+            .filter(|_| next_version.is_some())
             .map(|pr| pr.number);
         let rc_pr = open
             .iter()

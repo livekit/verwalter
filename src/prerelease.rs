@@ -1,5 +1,5 @@
 //! Spec: rule MaintainerRequestsPreRelease and surface PreReleaseRequest.
-//! One package, one rc PR, never stacked, against any branch. The branch
+//! One package, one rc PR, apart from the release PR, against any branch. The branch
 //! bumps the package's own files and changelog only: changesets stay, so
 //! the final release still lists them, and dependents are not pinned to
 //! an rc. After the merge, `verwalter release` tags it as a pre-release.
@@ -61,7 +61,6 @@ pub fn plan(repo: &Repo, package: &str, level: Option<BumpLevel>) -> Result<Plan
         level,
         changesets,
         bumped_dependencies: Vec::new(),
-        stacked_on: None,
     })
 }
 

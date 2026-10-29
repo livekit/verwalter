@@ -1,7 +1,7 @@
 # verwalter
 
 Changeset-based versioning for single packages and monorepos, in any language.
-It bumps versions, writes changelogs, opens stacked release PRs, tags and
+It bumps versions, writes changelogs, opens one release PR, tags and
 creates GitHub releases. Publishing to a registry stays in your workflow.
 
 The behaviour is specified in [versioning.allium](versioning.allium).
@@ -34,14 +34,12 @@ In GitHub Actions use the action below.
    If a versioned package changed without one, `verwalter check` fails the PR.
    The `internal` label exempts a PR.
 
-2. On every push to `main`, `verwalter pr` opens or updates one release PR per
-   package with pending changesets. Dependents get a `patch` bump. In a
-   monorepo the PRs stack: the package others depend on is at the bottom, its
-   dependents target its branch. Branches are regenerated on every run. A
-   release branch also leaves a changeset for the dependents it pins but
-   does not release. Merging only the bottom PR keeps their bumps pending.
+2. On every push to `main`, `verwalter pr` opens or updates one release PR
+   with every package that has pending changesets. Dependents get a `patch`
+   bump and ride in the same PR. The branch (`release/main`) is regenerated
+   from `main` on every run and the PR is updated in place.
 
-3. A maintainer merges a release PR. The workflow builds, then
+3. A maintainer merges the release PR. The workflow builds, then
    `verwalter release --asset <file>...` tags the version and creates the GitHub
    release with the assets, then the workflow publishes to the registry. The
    step that cannot be undone comes last. Its `releases` output tells the
@@ -130,7 +128,7 @@ Add `--dry-run` to any command to see its steps first.
 | Draft never published | `verwalter release --package <name> --publish`. |
 | Registry publish | Re-run the publish job. The tag and release stay; the tool does not touch registries. Dependents were not published (the publish runs in dependency order and stops at the first failure); the re-run picks them up, or dispatch the workflow with `package=<dependent>` once the dependency is on the registry. |
 | The commit itself is broken | `verwalter release --abandon <tag>` removes the release and the tag. Add a changeset and release the next version. |
-| Release PR missing or stale | `verwalter pr`. Branches are regenerated, PRs updated in place. |
+| Release PR missing or stale | `verwalter pr`. The branch is regenerated, the PR updated in place. |
 | Push rejected with "directory file conflict" | A branch named like the prefix (`release`) exists. Rename it or set `release_branch_prefix`. |
 | rc PR missing or stale | `verwalter pre-release <name> --target <branch>`. |
 
@@ -142,9 +140,9 @@ and `origin/<base>` are current.
 | Command | What it does |
 |---|---|
 | `verwalter status` | Per package: version, tag, GitHub release, pending changesets, open PRs, next step. |
-| `verwalter plan` | Print the release plan: next versions and stack order. |
-| `verwalter branches [--base <ref>]` | Create the release branches locally. |
-| `verwalter pr [--remote origin]` | Push the branches and open or update the PRs. |
+| `verwalter plan` | Print the release plan: next versions, dependencies first. |
+| `verwalter branches [--base <ref>]` | Create the release branch locally. |
+| `verwalter pr [--remote origin]` | Push the branch and open or update the PR. |
 | `verwalter release [--asset <file>]... [--package <name>] [--publish]` | Tag and create GitHub releases for every untagged version. Uploads assets to drafts or a named package, `--publish` flips a draft. |
 | `verwalter release --abandon <tag>` | Delete a GitHub release and its tag. |
 | `verwalter check --pr <n>` | Changeset check for a contributor PR, with comment. |

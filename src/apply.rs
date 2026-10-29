@@ -24,7 +24,7 @@ fn is_lock_file(path: &str) -> bool {
 }
 
 /// Which packages depend on `package` (for the pins).
-pub(crate) fn dependents<'a>(packages: &'a [PackageState], package: &str) -> Vec<&'a str> {
+fn dependents<'a>(packages: &'a [PackageState], package: &str) -> Vec<&'a str> {
     packages
         .iter()
         .filter(|p| p.dependencies.iter().any(|d| d == package))

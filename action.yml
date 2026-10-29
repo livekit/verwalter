@@ -54,8 +54,6 @@ runs:
           gh release download "v$VERSION" --repo lukasIO/verwalter --pattern "verwalter-$TARGET.tar.gz" --output - | tar -xz -C "$DIR"
         fi
         echo "$DIR" >> "$GITHUB_PATH"
-        # Release PRs that form a chain are linked as a GitHub stack.
-        gh extension list | grep -q 'github/gh-stack' || gh extension install github/gh-stack
 
     - name: Run verwalter ${{ inputs.command }}
       id: run

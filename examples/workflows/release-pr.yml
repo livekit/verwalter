@@ -1,6 +1,5 @@
-# Keeps one release PR per package open while changesets are pending,
-# stacked by dependency. Runs on every push to main and regenerates every
-# release branch from main.
+# Keeps one release PR open while changesets are pending. Runs on every
+# push to main and regenerates the release branch from main.
 name: Release PRs
 
 on:

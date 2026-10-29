@@ -88,8 +88,8 @@ impl Drop for Repo_ {
 }
 
 #[test]
-fn stacked_branches_from_one_changeset() {
-    let r = fixture("stack");
+fn one_branch_from_one_changeset() {
+    let r = fixture("branch");
     let root = &r.0;
     write(
         root,
@@ -105,159 +105,68 @@ fn stacked_branches_from_one_changeset() {
         &repo.changesets,
         repo.config.dependent_bump_level,
     );
-    // Start from a remote-tracking ref, as CI does; PRs still target `main`.
+    // Start from a remote-tracking ref, as CI does; the PR still targets `main`.
     git(root, &["update-ref", "refs/remotes/origin/main", "main"]);
-    let branches = branches::create(&repo, &plan, "origin/main").unwrap();
-
-    let names: Vec<(&str, &str)> = branches
-        .iter()
-        .map(|b| (b.name.as_str(), b.target.as_str()))
-        .collect();
+    let branch = branches::create(&repo, &plan, "origin/main").unwrap();
+    assert_eq!(branch.as_deref(), Some("release/main"));
     assert_eq!(
-        names,
-        [
-            ("release/livekit-protocol", "main"),
-            ("release/livekit", "release/livekit-protocol"),
-            ("release/livekit-api", "release/livekit-protocol")
-        ]
+        git(root, &["log", "-1", "--format=%s", "release/main"]),
+        "release: livekit-protocol 0.4.0, livekit 0.8.0, livekit-api 0.4.4"
     );
 
-    // Stacking is real: protocol's branch is an ancestor of both children, main of all.
-    for child in ["release/livekit", "release/livekit-api"] {
-        git(
-            root,
-            &[
-                "merge-base",
-                "--is-ancestor",
-                "release/livekit-protocol",
-                child,
-            ],
-        );
-    }
     // The user's checkout is untouched and still on main.
     assert_eq!(git(root, &["rev-parse", "--abbrev-ref", "HEAD"]), "main");
     assert_eq!(git(root, &["status", "--porcelain"]), "");
 
-    // protocol's branch: own version, workspace pin, lock, changelog; the
-    // changeset stays because livekit is not released yet.
-    assert!(git(
-        root,
-        &[
-            "show",
-            "release/livekit-protocol:livekit-protocol/Cargo.toml"
-        ]
-    )
-    .contains("0.4.0"));
-    assert!(git(root, &["show", "release/livekit-protocol:Cargo.toml"])
+    // Every package in the one commit: own version, workspace pin, changelog.
+    assert!(git(root, &["show", "release/main:livekit-protocol/Cargo.toml"]).contains("0.4.0"));
+    assert!(git(root, &["show", "release/main:Cargo.toml"])
         .contains("livekit-protocol = { version = \"0.4.0\""));
     assert!(git(
         root,
-        &[
-            "show",
-            "release/livekit-protocol:livekit-protocol/CHANGELOG.md"
-        ]
+        &["show", "release/main:livekit-protocol/CHANGELOG.md"]
     )
     .contains("## 0.4.0"));
-    git(
-        root,
-        &["show", "release/livekit-protocol:.changeset/ndc.md"],
-    );
-
-    // livekit's branch inherits protocol's bump and adds its own; the file
-    // is consumed there because livekit is the last package it names.
-    let cargo = git(root, &["show", "release/livekit:livekit/Cargo.toml"]);
-    assert!(cargo.contains("version = \"0.8.0\""));
-    assert!(git(
-        root,
-        &["show", "release/livekit:livekit-protocol/Cargo.toml"]
-    )
-    .contains("0.4.0"));
-    // What is left is protocol's note for api, which merges separately.
-    assert_eq!(
-        git(
-            root,
-            &["ls-tree", "--name-only", "release/livekit", ".changeset/"]
-        ),
-        ".changeset/livekit-protocol-0.4.0-dependents.md"
-    );
-
+    assert!(git(root, &["show", "release/main:livekit/Cargo.toml"]).contains("version = \"0.8.0\""));
     // api only got a dependent patch.
+    assert!(
+        git(root, &["show", "release/main:livekit-api/Cargo.toml"]).contains("version = \"0.4.4\"")
+    );
+    assert!(
+        git(root, &["show", "release/main:livekit-api/CHANGELOG.md"])
+            .contains("Updated dependencies: livekit-protocol@0.4.0")
+    );
+    // The changeset is consumed.
     assert!(git(
         root,
-        &["show", "release/livekit-api:livekit-api/Cargo.toml"]
+        &["ls-tree", "--name-only", "release/main", ".changeset/"]
     )
-    .contains("version = \"0.4.4\""));
-    assert!(git(
-        root,
-        &["show", "release/livekit-api:livekit-api/CHANGELOG.md"]
-    )
-    .contains("Updated dependencies: livekit-protocol@0.4.0"));
+    .is_empty());
 
-    // Re-running regenerates the same branches without error.
-    let again = branches::create(&repo, &plan, "main").unwrap();
-    assert_eq!(again.len(), 3);
+    // Re-running regenerates the branch without error; nothing planned, no branch.
+    assert!(branches::create(&repo, &plan, "main").unwrap().is_some());
+    assert_eq!(branches::create(&repo, &[], "main").unwrap(), None);
 }
 
-// Spec: ReleaseRemovesPackageFromChangeset. After protocol's release PR
-// merges, the shared changeset only names livekit, so only livekit is
-// planned; tags play no part.
+// Spec: ConsumeChangeset. Merging the release PR consumes every changeset
+// of the released packages; a line naming a package that is not configured
+// stays behind. Tags play no part.
 #[test]
-fn merged_release_removes_its_line_from_shared_changesets() {
-    let r = fixture("shared");
+fn merged_release_consumes_the_changesets() {
+    let r = fixture("consume");
     let root = &r.0;
     write(
         root,
         ".changeset/ndc.md",
         "---\nlivekit-protocol: minor\nlivekit: minor\n---\nx\n",
     );
-    git(root, &["add", "-A"]);
-    git(root, &["commit", "-q", "-m", "add changeset"]);
-    let repo = Repo::load(root).unwrap();
-    let first = plan(
-        &repo.packages,
-        &repo.changesets,
-        repo.config.dependent_bump_level,
-    );
-    branches::create(&repo, &first, "main").unwrap();
-    git(
-        root,
-        &["merge", "-q", "--ff-only", "release/livekit-protocol"],
-    );
-
-    let repo = Repo::load(root).unwrap();
-    assert_eq!(
-        git(root, &["show", "HEAD:.changeset/ndc.md"]),
-        "---\nlivekit: minor\n---\nx"
-    );
-    assert_eq!(repo.changesets[0].unreleased_for("livekit-protocol"), None);
-    let plan = plan(
-        &repo.packages,
-        &repo.changesets,
-        repo.config.dependent_bump_level,
-    );
-    let names: Vec<&str> = plan.iter().map(|r| r.package.as_str()).collect();
-    assert_eq!(
-        names,
-        ["livekit", "livekit-api"],
-        "protocol is done; api is planned from the changeset protocol left for it"
-    );
-}
-
-// Spec: ReleaseLeavesChangesetForDependents. Protocol's branch moves the
-// pins in api and livekit. Merging it alone must not lose their bumps, so
-// it leaves a changeset naming them; the stacked branches consume their
-// own line from it like from any other changeset.
-#[test]
-fn bottom_of_stack_leaves_a_changeset_for_its_dependents() {
-    let r = fixture("dependents");
-    let root = &r.0;
     write(
         root,
-        ".changeset/proto.md",
-        "---\nlivekit-protocol: minor\n---\nx\n",
+        ".changeset/other.md",
+        "---\nlivekit-protocol: patch\nsomething-else: patch\n---\ny\n",
     );
     git(root, &["add", "-A"]);
-    git(root, &["commit", "-q", "-m", "add changeset"]);
+    git(root, &["commit", "-q", "-m", "add changesets"]);
     let repo = Repo::load(root).unwrap();
     let first = plan(
         &repo.packages,
@@ -265,73 +174,23 @@ fn bottom_of_stack_leaves_a_changeset_for_its_dependents() {
         repo.config.dependent_bump_level,
     );
     branches::create(&repo, &first, "main").unwrap();
+    git(root, &["merge", "-q", "--ff-only", "release/main"]);
 
-    let left = "livekit-protocol-0.4.0-dependents.md";
-    assert_eq!(
-        git(root, &["show", &format!("release/livekit-protocol:.changeset/{left}")]),
-        "---\n\"livekit\": patch\n\"livekit-api\": patch\n---\nUpdated dependencies: livekit-protocol@0.4.0"
-    );
-    // livekit's stacked branch takes its own line out and leaves api's.
-    assert_eq!(
-        git(
-            root,
-            &["show", &format!("release/livekit:.changeset/{left}")]
-        ),
-        "---\n\"livekit-api\": patch\n---\nUpdated dependencies: livekit-protocol@0.4.0"
-    );
-    // No dependents of its own: livekit leaves nothing behind.
-    assert_eq!(
-        git(
-            root,
-            &["ls-tree", "--name-only", "release/livekit", ".changeset/"]
-        ),
-        format!(".changeset/{left}")
-    );
-
-    // Only protocol merges: both dependents are still planned, now as base PRs.
-    git(
-        root,
-        &["merge", "-q", "--ff-only", "release/livekit-protocol"],
-    );
     let repo = Repo::load(root).unwrap();
-    let plan = plan(
+    assert_eq!(
+        git(root, &["ls-tree", "--name-only", "HEAD", ".changeset/"]),
+        ".changeset/other.md"
+    );
+    assert_eq!(
+        git(root, &["show", "HEAD:.changeset/other.md"]),
+        "---\nsomething-else: patch\n---\ny"
+    );
+    assert!(plan(
         &repo.packages,
         &repo.changesets,
-        repo.config.dependent_bump_level,
-    );
-    let stack: Vec<(&str, Option<&str>, &str)> = plan
-        .iter()
-        .map(|r| {
-            (
-                r.package.as_str(),
-                r.stacked_on.as_deref(),
-                r.to.to_string().leak() as &str,
-            )
-        })
-        .collect();
-    assert_eq!(
-        stack,
-        [("livekit", None, "0.7.1"), ("livekit-api", None, "0.4.4")]
-    );
-    branches::create(&repo, &plan, "main").unwrap();
-    assert!(git(
-        root,
-        &["show", "release/livekit-api:livekit-api/CHANGELOG.md"]
+        repo.config.dependent_bump_level
     )
-    .contains("- Updated dependencies: livekit-protocol@0.4.0"));
-    assert!(
-        git(
-            root,
-            &[
-                "ls-tree",
-                "--name-only",
-                "release/livekit-api",
-                ".changeset/"
-            ]
-        )
-        .contains(left),
-        "livekit's line is still pending"
-    );
+    .is_empty());
 }
 
 #[test]
@@ -357,113 +216,86 @@ fn pr_sync_pushes_and_creates_updates_closes() {
         &repo.changesets,
         repo.config.dependent_bump_level,
     );
-    let branches = branches::create(&repo, &plan, "main").unwrap();
+    let branch = branches::create(&repo, &plan, "main").unwrap();
 
-    let mut calls: Vec<String> = Vec::new();
+    let calls = std::cell::RefCell::new(Vec::<String>::new());
+    let has = |prefix: &str| calls.borrow().iter().any(|c| c.starts_with(prefix));
+    // #40 is the release PR; #41 and #99 are per-package PRs from before
+    // 0.9; #50 is an rc PR, which carries the same label.
+    let open = r#"[{"number":40,"headRefName":"release/main","baseRefName":"next"},{"number":41,"headRefName":"release/livekit-api","baseRefName":"main"},{"number":99,"headRefName":"release/old-package","baseRefName":"main"},{"number":50,"headRefName":"release/livekit-rc","baseRefName":"main"}]"#;
     let mut gh = |args: &[&str]| -> Result<String, verwalter::Error> {
-        calls.push(args.join(" "));
+        calls.borrow_mut().push(args.join(" "));
         Ok(match args {
-            ["pr", "list", ..] => r#"[{"number":40,"headRefName":"release/livekit-protocol","baseRefName":"main"},{"number":41,"headRefName":"release/livekit-api","baseRefName":"main"},{"number":99,"headRefName":"release/old-package","baseRefName":"main"}]"#.into(),
-            ["pr", "create", ..] => format!("https://github.com/livekit/x/pull/{}", 100 + calls.len()),
+            ["pr", "list", ..] => open.into(),
+            ["pr", "create", ..] => "https://github.com/livekit/x/pull/100".into(),
             _ => String::new(),
         })
     };
-    let prs = verwalter::github::sync(&repo, &plan, &branches, "origin", false, &mut gh).unwrap();
-
-    // All three branches were pushed to the remote.
-    let pushed = git(root, &["ls-remote", "--heads", "origin"]);
-    let _ = fs::remove_dir_all(&remote);
-    for b in [
-        "release/livekit-protocol",
-        "release/livekit",
-        "release/livekit-api",
-    ] {
-        assert!(pushed.contains(b), "{b} not pushed");
-    }
-
-    let heads: Vec<(u64, &str, &str)> = prs
-        .iter()
-        .map(|p| (p.number, p.head.as_str(), p.base.as_str()))
-        .collect();
-    assert_eq!(heads[0], (40, "release/livekit-protocol", "main"));
-    assert!(
-        !calls.iter().any(|c| c.starts_with("pr edit 40 --base")),
-        "base unchanged: not touched (a stacked PR would refuse it)"
-    );
-    assert_eq!(
-        heads[1],
-        (heads[1].0, "release/livekit", "release/livekit-protocol")
-    );
-    assert_eq!(
-        heads[2],
-        (41, "release/livekit-api", "release/livekit-protocol"),
-        "existing PR kept its number, re-based onto the stack"
-    );
-
-    assert!(calls[0].starts_with("label create release --force"));
-    assert!(calls.iter().filter(|c| c.starts_with("pr create")).count() == 1);
-    assert!(
-        calls
-            .iter()
-            .any(|c| c == "pr edit 41 --base release/livekit-protocol"),
-        "base changed in its own call"
-    );
-    let edit = calls
-        .iter()
-        .find(|c| c.starts_with("pr edit 41 --title"))
+    let pr = verwalter::github::sync(&repo, &plan, branch.as_deref(), "origin", false, &mut gh)
+        .unwrap()
         .unwrap();
-    assert!(edit.contains("Stacked on #"), "body carries the stack note");
-    assert!(calls.iter().any(|c| c.starts_with("pr close 99")));
+
     assert!(
-        !calls.iter().any(|c| c.starts_with("stack link")),
-        "a tree is not linked as a GitHub stack"
+        git(root, &["ls-remote", "--heads", "origin"]).contains("release/main"),
+        "branch pushed"
     );
-}
+    assert_eq!(
+        (pr.number, pr.head.as_str(), pr.base.as_str()),
+        (40, "release/main", "main")
+    );
+    assert!(calls.borrow()[0].starts_with("label create release --force"));
+    assert!(!has("pr create"), "existing PR updated in place");
+    {
+        let calls = calls.borrow();
+        let edit = calls
+            .iter()
+            .find(|c| c.starts_with("pr edit 40 --title"))
+            .unwrap();
+        assert!(
+            edit.contains(
+                "--title release: livekit-protocol 0.4.0, livekit 0.8.0, livekit-api 0.4.4"
+            ),
+            "{edit}"
+        );
+        assert!(
+            edit.contains("## livekit-api `0.4.3` → `0.4.4`"),
+            "one section per package"
+        );
+    }
+    assert!(has("pr edit 40 --base main"), "base corrected");
+    assert!(
+        has("pr close 41") && has("pr close 99"),
+        "stale per-package PRs closed"
+    );
+    assert!(!has("pr close 50"), "rc PR left alone");
 
-#[test]
-fn pr_sync_links_a_chain_as_a_github_stack() {
-    let r = fixture("stack-link");
-    let root = &r.0;
-    // api depends on protocol, livekit on api: one chain.
-    write(root, "livekit/Cargo.toml", "[package]\nname = \"livekit\"\nversion = \"0.7.0\"\n\n[dependencies]\nlivekit-api = { workspace = true }\n");
-    write(
-        root,
-        ".changeset/ndc.md",
-        "---\nlivekit-protocol: minor\n---\nx\n",
+    // Nothing planned: the release PR is closed too, the rc PR stays.
+    calls.borrow_mut().clear();
+    assert!(
+        verwalter::github::sync(&repo, &[], None, "origin", false, &mut gh)
+            .unwrap()
+            .is_none()
     );
-    git(root, &["add", "-A"]);
-    git(root, &["commit", "-q", "-m", "chain"]);
-    let remote = std::env::temp_dir().join(format!(
-        "verwalter-it-{}-stack-remote.git",
-        std::process::id()
-    ));
-    let _ = fs::remove_dir_all(&remote);
-    git(root, &["init", "-q", "--bare", remote.to_str().unwrap()]);
-    git(root, &["remote", "add", "origin", remote.to_str().unwrap()]);
+    assert!(has("pr close 40"));
+    assert!(!has("pr close 50"));
 
-    let repo = Repo::load(root).unwrap();
-    let plan = plan(
-        &repo.packages,
-        &repo.changesets,
-        repo.config.dependent_bump_level,
-    );
-    let branches = branches::create(&repo, &plan, "main").unwrap();
-    let mut calls: Vec<String> = Vec::new();
+    // A fresh repo gets a new PR.
+    calls.borrow_mut().clear();
     let mut gh = |args: &[&str]| -> Result<String, verwalter::Error> {
-        calls.push(args.join(" "));
+        calls.borrow_mut().push(args.join(" "));
         Ok(match args {
             ["pr", "list", ..] => "[]".into(),
-            ["pr", "create", ..] => format!("https://github.com/x/y/pull/{}", 200 + calls.len()),
+            ["pr", "create", ..] => "https://github.com/livekit/x/pull/100".into(),
             _ => String::new(),
         })
     };
-    verwalter::github::sync(&repo, &plan, &branches, "origin", false, &mut gh).unwrap();
-    let link = calls
-        .iter()
-        .find(|c| c.starts_with("stack link"))
-        .expect("chain linked");
-    let numbers: Vec<&str> = link.split_whitespace().skip(2).collect();
-    assert_eq!(numbers.len(), 3, "{link}");
+    let pr = verwalter::github::sync(&repo, &plan, branch.as_deref(), "origin", false, &mut gh)
+        .unwrap()
+        .unwrap();
+    assert_eq!(pr.number, 100);
+    assert!(has(
+        "pr create --head release/main --base main --title release:"
+    ));
     let _ = fs::remove_dir_all(&remote);
 }
 
@@ -829,7 +661,7 @@ fn dry_run_writes_nothing() {
         &repo.changesets,
         repo.config.dependent_bump_level,
     );
-    let branches = branches::create(&repo, &plan, "main").unwrap();
+    let branch = branches::create(&repo, &plan, "main").unwrap();
     let writes = std::cell::Cell::new(0);
     let inner = |args: &[&str]| -> Result<String, verwalter::Error> {
         if !matches!(args, ["pr", "list", ..] | ["release", "view", ..]) {
@@ -842,8 +674,9 @@ fn dry_run_writes_nothing() {
         })
     };
     let mut gh = verwalter::github::dry_run_gh(inner);
-    let prs = verwalter::github::sync(&repo, &plan, &branches, "origin", true, &mut gh).unwrap();
-    assert_eq!(prs.len(), 3);
+    let pr =
+        verwalter::github::sync(&repo, &plan, branch.as_deref(), "origin", true, &mut gh).unwrap();
+    assert!(pr.is_some());
     let released = verwalter::release::run(
         &repo,
         "origin",
@@ -979,9 +812,9 @@ fn status_reports_state_and_next_step() {
     let repo = Repo::load(root).unwrap();
     let mut gh = |args: &[&str]| -> Result<String, verwalter::Error> {
         match args {
-            ["pr", "list", ..] => Ok(
-                r#"[{"number":12,"headRefName":"release/livekit","baseRefName":"main"}]"#.into(),
-            ),
+            ["pr", "list", ..] => {
+                Ok(r#"[{"number":12,"headRefName":"release/main","baseRefName":"main"}]"#.into())
+            }
             ["release", "view", "livekit-protocol-v0.3.1", ..] => {
                 Ok(r#"{"isDraft":false,"assets":[{"name":"a"},{"name":"b"}]}"#.into())
             }

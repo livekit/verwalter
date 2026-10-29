@@ -1,7 +1,7 @@
-//! Spec: ReleasePullRequest on GitHub. Pushes the release branches and
-//! opens or updates one pull request per branch, in stack order, carrying
-//! the release label and a body with the changelog entry. Open release PRs
-//! whose package is no longer planned are closed.
+//! Spec: ReleasePullRequest on GitHub. Pushes the release branch and
+//! opens or updates the one pull request, carrying the release label and
+//! a body with every package's changelog entry. With nothing planned the
+//! open release PR is closed.
 //! ponytail: GitHub access goes through the `gh` CLI, which CI has and
 //! which carries the token; no HTTP client.
 
@@ -9,7 +9,9 @@ use std::{path::Path, process::Command};
 
 use serde::Deserialize;
 
-use crate::{apply::render_entry, branches::Branch, git, plan::PlannedRelease, repo::Repo, Error};
+use crate::{
+    apply::render_entry, branches, git, plan::PlannedRelease, prerelease, repo::Repo, Error,
+};
 
 /// Runs `gh` with the given arguments and returns stdout. Injected so
 /// tests can fake GitHub.
@@ -37,9 +39,7 @@ pub fn gh_cli<'a>(
         .and_then(|u| repo_slug(&u));
     move |args: &[&str]| {
         let mut cmd = Command::new("gh");
-        cmd.current_dir(root)
-            .args(args)
-            .env("GH_STACK_NO_UPDATE_NOTIFIER", "1");
+        cmd.current_dir(root).args(args);
         if let Some(slug) = &slug {
             cmd.env("GH_REPO", slug);
         }
@@ -79,7 +79,6 @@ pub fn dry_run_gh(
             ["pr", "create" | "edit" | "close" | "comment", ..]
                 | ["release", "create" | "delete" | "edit", ..]
                 | ["label", "create", ..]
-                | ["stack", ..]
                 | ["api", "-X", ..]
         );
         if !is_write {
@@ -163,14 +162,17 @@ pub fn attribute(repo: &mut Repo, gh: Gh) {
     }
 }
 
+/// Push the release branch and make GitHub match the plan: one open
+/// release PR while something is planned, none otherwise. Pre-release PRs
+/// carry the same label and are left alone.
 pub fn sync(
     repo: &Repo,
     plan: &[PlannedRelease],
-    branches: &[Branch],
+    branch: Option<&str>,
     remote: &str,
     dry_run: bool,
     gh: Gh,
-) -> Result<Vec<PullRequest>, Error> {
+) -> Result<Option<PullRequest>, Error> {
     let label = repo.config.release_label.as_str();
     gh(&[
         "label",
@@ -195,42 +197,39 @@ pub fn sync(
         "--json",
         "number,headRefName,baseRefName",
     ])?)?;
+    let is_rc = |pr: &PullRequest| {
+        repo.packages
+            .iter()
+            .any(|p| pr.head == prerelease::branch_name(repo, &p.name))
+    };
 
-    let mut result = Vec::new();
-    for (release, branch) in plan.iter().zip(branches) {
-        git::write(&repo.root, dry_run, &["push", "--force", "--quiet", remote, &format!("{}:{}", branch.name, branch.name)]).map_err(|e| {
+    let mut result = None;
+    if let Some(branch) = branch {
+        git::write(&repo.root, dry_run, &["push", "--force", "--quiet", remote, &format!("{branch}:{branch}")]).map_err(|e| {
             if e.to_string().contains("directory file conflict") {
                 let prefix = repo.config.release_branch_prefix.trim_end_matches('/');
-                format!("{e}\na branch named `{prefix}` exists on {remote}, so `{}` cannot be created; rename that branch or set release_branch_prefix in verwalter.toml", branch.name).into()
+                format!("{e}\na branch named `{prefix}` exists on {remote}, so `{branch}` cannot be created; rename that branch or set release_branch_prefix in verwalter.toml", ).into()
             } else {
                 e
             }
         })?;
-
-        let parent = release.stacked_on.as_deref().and_then(|p| {
-            result.iter().find(|pr: &&PullRequest| {
-                pr.head == format!("{}{p}", repo.config.release_branch_prefix)
-            })
-        });
-        let title = format!("release: {} {}", release.package, release.to);
-        let body = body(release, repo, plan, parent);
-
-        let existing = open.iter().find(|pr| pr.head == branch.name);
-        result.push(upsert_pr(
+        let existing = open.iter().find(|pr| pr.head == branch);
+        result = Some(upsert_pr(
             gh,
             existing,
-            &branch.name,
-            &branch.target,
-            &title,
-            &body,
+            branch,
+            &repo.config.base_branch,
+            &branches::title(plan),
+            &body(plan, repo),
             label,
         )?);
     }
 
-    // Spec: a package with nothing left to release has no open release PR.
+    // Spec: with nothing left to release there is no open release PR. This
+    // also closes the per-package PRs of verwalter before 0.9.
     for stale in open
         .iter()
-        .filter(|pr| !branches.iter().any(|b| b.name == pr.head))
+        .filter(|pr| Some(pr.head.as_str()) != branch && !is_rc(pr))
     {
         gh(&[
             "pr",
@@ -238,46 +237,10 @@ pub fn sync(
             &stale.number.to_string(),
             "--delete-branch",
             "--comment",
-            "Nothing left to release for this package.",
+            "Superseded: the release PR is regenerated on every push.",
         ])?;
     }
-
-    // Declare the stack to GitHub (`gh stack link`, bottom to top) so the
-    // PRs show as one stack and merging the top lands all of them. GitHub
-    // stacks are linear: only a chain is linked, a tree is left as is. A
-    // failure here is cosmetic and only printed.
-    if let Some(chain) = linear_chain(plan) {
-        let numbers: Vec<String> = chain
-            .iter()
-            .filter_map(|p| {
-                result
-                    .iter()
-                    .find(|pr| pr.head == format!("{}{p}", repo.config.release_branch_prefix))
-            })
-            .map(|pr| pr.number.to_string())
-            .collect();
-        if numbers.len() == chain.len() && numbers.len() > 1 {
-            let mut args = vec!["stack", "link"];
-            args.extend(numbers.iter().map(String::as_str));
-            if let Err(e) = gh(&args) {
-                println!("warning: could not link the PRs into a GitHub stack (is the gh-stack extension installed?): {e}");
-            }
-        }
-    }
     Ok(result)
-}
-
-/// The packages bottom to top when the plan is one chain: every release is
-/// stacked on the previous one.
-fn linear_chain(plan: &[PlannedRelease]) -> Option<Vec<&str>> {
-    let mut prev: Option<&str> = None;
-    for r in plan {
-        if r.stacked_on.as_deref() != prev {
-            return None;
-        }
-        prev = Some(&r.package);
-    }
-    Some(plan.iter().map(|r| r.package.as_str()).collect())
 }
 
 /// Open a PR for `head` against `base`, or bring `existing` (the open PR
@@ -305,14 +268,8 @@ pub fn upsert_pr(
                 "--add-label",
                 label,
             ])?;
-            // GitHub refuses a base change on a PR that is part of a
-            // stack; `gh stack link` in `sync` corrects the chain instead.
             if existing.base != base {
-                if let Err(e) = gh(&["pr", "edit", &n, "--base", base]) {
-                    if !e.to_string().contains("part of a stack") {
-                        return Err(e);
-                    }
-                }
+                gh(&["pr", "edit", &n, "--base", base])?;
             }
             existing.number
         }
@@ -336,35 +293,30 @@ fn number_from_url(url: &str) -> Result<u64, Error> {
         .ok_or_else(|| format!("unexpected `gh pr create` output: {url}").into())
 }
 
-fn body(
-    release: &PlannedRelease,
-    repo: &Repo,
-    plan: &[PlannedRelease],
-    parent: Option<&PullRequest>,
-) -> String {
-    let mut out = format!("{MARKER}\n");
-    if let Some(parent) = parent {
-        out.push_str(&format!("Stacked on #{} (`{}`). Merge that one first; merging this one into it releases both together.\n\n", parent.number, parent.head));
-    }
-    out.push_str(&format!(
-        "Merging this PR releases **{}** `{}` → `{}`.\n\n",
-        release.package, release.from, release.to
-    ));
-    out.push_str(
-        render_entry(release, &repo.changesets, plan)
-            .trim_start_matches(|c| c != '\n')
-            .trim_start(),
-    );
-    if !release.changesets.is_empty() {
+/// The PR body: one section per package with its changelog entry.
+fn body(plan: &[PlannedRelease], repo: &Repo) -> String {
+    let mut out = format!("{MARKER}\nMerging this PR releases:\n");
+    for release in plan {
         out.push_str(&format!(
-            "\nChangesets: {}\n",
-            release
-                .changesets
-                .iter()
-                .map(|c| format!("`{c}`"))
-                .collect::<Vec<_>>()
-                .join(", ")
+            "\n## {} `{}` → `{}`\n\n",
+            release.package, release.from, release.to
         ));
+        out.push_str(
+            render_entry(release, &repo.changesets, plan)
+                .trim_start_matches(|c| c != '\n')
+                .trim_start(),
+        );
+        if !release.changesets.is_empty() {
+            out.push_str(&format!(
+                "\nChangesets: {}\n",
+                release
+                    .changesets
+                    .iter()
+                    .map(|c| format!("`{c}`"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+        }
     }
     out
 }
@@ -409,28 +361,22 @@ mod tests {
             "- [#12](https://github.com/o/r/pull/12) ([@lukas](https://github.com/lukas))".into(),
         );
         let plan = crate::plan::plan(&r.packages, &r.changesets, crate::version::BumpLevel::Patch);
-        let a = body(&plan[0], &r, &plan, None);
+        let a = body(&plan, &r);
         assert!(a.contains("- Add thing - [#12](https://github.com/o/r/pull/12) ([@lukas](https://github.com/lukas))\n  more detail"), "{a}");
     }
 
     #[test]
-    fn body_has_stack_note_changelog_and_changesets() {
+    fn body_has_a_section_per_package() {
         let r = repo();
         let plan = crate::plan::plan(&r.packages, &r.changesets, crate::version::BumpLevel::Patch);
-        let parent = PullRequest {
-            number: 7,
-            head: "release/a".into(),
-            base: "main".into(),
-        };
-        let a = body(&plan[0], &r, &plan, None);
-        assert!(a.starts_with(MARKER));
-        assert!(a.contains("releases **a** `1.0.0` → `1.1.0`"));
-        assert!(a.contains("### Minor Changes\n\n- Add thing"));
-        assert!(a.contains("Changesets: `x.md`"));
-        let b = body(&plan[1], &r, &plan, Some(&parent));
-        assert!(b.contains("Stacked on #7 (`release/a`)"));
+        let b = body(&plan, &r);
+        assert!(b.starts_with(MARKER));
+        assert!(b.contains("## a `1.0.0` → `1.1.0`"));
+        assert!(b.contains("### Minor Changes\n\n- Add thing"));
+        assert!(b.contains("Changesets: `x.md`"));
+        assert!(b.contains("## b `2.0.0` → `2.0.1`"));
         assert!(b.contains("Updated dependencies: a@1.1.0"));
-        assert!(!b.contains("Changesets:"));
+        assert_eq!(b.matches("Changesets:").count(), 1);
     }
 
     #[test]
@@ -444,20 +390,6 @@ mod tests {
             Some("livekit/node-sdks")
         );
         assert_eq!(repo_slug("https://gitlab.com/x/y.git"), None);
-    }
-
-    #[test]
-    fn linear_chain_only_for_chains() {
-        let r = repo();
-        let plan = crate::plan::plan(&r.packages, &r.changesets, crate::version::BumpLevel::Patch);
-        assert_eq!(linear_chain(&plan), Some(vec!["a", "b"]));
-        let mut tree = plan.clone();
-        tree.push(PlannedRelease {
-            package: "c".into(),
-            stacked_on: Some("a".into()),
-            ..plan[1].clone()
-        });
-        assert_eq!(linear_chain(&tree), None);
     }
 
     #[test]
