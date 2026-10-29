@@ -29,7 +29,6 @@ changelog = "livekit-protocol/CHANGELOG.md"
 tag_template = "{package}-v{version}"      # default in a monorepo, v{version} with one package
 release = "tag_and_release"                # none | tag | tag_and_release
 draft = false
-max_bump = "minor"                         # optional ceiling on the bump level
 registry = "npm"                           # overrides [publish].registry
 publish = "pnpm publish --no-git-checks"   # overrides the command; else the built-in one for the registry
 exists_url = "https://r/{name}/{version}"  # for custom: 200 when the version exists, 404 when not

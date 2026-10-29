@@ -124,10 +124,6 @@ entity Package {
     -- When true the GitHub release stays a draft until the repo workflow
     -- has attached its assets and publishes it.
     release_as_draft: Boolean
-    -- Ceiling on the bump level: a major changeset on a package with
-    -- max_bump minor bumps minor. In a fixed group the lowest ceiling
-    -- applies to the group.
-    max_bump: BumpLevel?
     -- Where the package is published: crates | npm | pypi | pubdev |
     -- custom (an exists_url with {name} and {version}) | none. Defaults
     -- to config.publish.registry. The tool only asks whether a version is
@@ -211,6 +207,11 @@ entity ChangesetCheck {
     -- level. The comment lists them on a passing PR too, so the reviewer
     -- sees the release the merge will cause.
     bumps: Set<Bump>
+    -- Packages the plan over the PR's changesets alone includes without
+    -- a changeset of their own: dependents and fixed-group members. The
+    -- comment names them with the reason, without a level or a version,
+    -- because both can change before the merge.
+    also_released: Set<Package>
     -- release_pull_request: the head branch carries the release prefix.
     -- A release PR consumes changesets rather than adding one.
     status: passed | failed | exempt | release_pull_request
@@ -431,9 +432,9 @@ rule OpenOrUpdateReleasePullRequest {
     -- A release is never lower than the rc before it.
     -- 0.x follows the changesets rules: major gives 1.0.0, minor bumps
     -- the minor component. (knope and rust-sdks today bump one level
-    -- lower on 0.x; this is a deliberate change.) The level is capped by
-    -- max_bump; a fixed group moves whole, from its highest version.
-    let planned = pending.map(p => PlannedRelease(package: p, from_version: p.version, to_version: next_version(p.version, p.pending_changesets, config.dependent_bump_level, p.max_bump, config.fixed)))
+    -- lower on 0.x; this is a deliberate change.) A fixed group moves
+    -- whole, from its highest version.
+    let planned = pending.map(p => PlannedRelease(package: p, from_version: p.version, to_version: next_version(p.version, p.pending_changesets, config.dependent_bump_level, config.fixed)))
     let open = filter(ReleasePullRequests, r => r.repository = repository and r.status = open and r.kind = release)
     requires: not pending.empty
     ensures:
@@ -470,7 +471,7 @@ rule CloseReleasePullRequestWithNothingPending {
 -- The rc branch bumps the group's own files, their entries in
 -- config.pin_files and their changelogs only. The level is the
 -- maintainer's when given, else the highest the group's pending
--- changesets name, else patch, capped by max_bump.
+-- changesets name, else patch.
 rule MaintainerRequestsPreRelease {
     when: MaintainerRequestsPreRelease(maintainer, package, target_branch, level?)
     let group = fixed_group_of(package, config.fixed)
@@ -728,6 +729,7 @@ surface ContributorPullRequestCheck {
         check.affected_packages
         check.covered_packages
         check.bumps
+        check.also_released
         check.missing_packages when check.status = failed
         check.api_findings when check.status = failed
         create_changeset_link(check.pull_request, check.missing_packages) when check.status = failed

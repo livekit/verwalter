@@ -6,7 +6,7 @@ What the tool does, what it catches, and what to do when a step fails.
 
 | Feature | What it does | Where |
 |---|---|---|
-| Changeset check | Fails a PR that changes a package without a changeset. It posts one comment with a prefilled new-file link and updates it in place. On a passing PR the comment lists the bump each changeset claims, per package, so the reviewer sees the release the merge causes. It is deleted when the PR claims nothing. An invalid changeset is reported in the same comment. | `check`, `exempt_label` |
+| Changeset check | Fails a PR that changes a package without a changeset. It posts one comment with a prefilled new-file link and updates it in place. On a passing PR the comment lists the bump each changeset claims, per package, and the dependents and fixed-group members that are released with them, so the reviewer sees the release the merge causes. It is deleted when the PR claims nothing. An invalid changeset is reported in the same comment. | `check`, `exempt_label` |
 | API check | Runs a configured command (cargo-semver-checks, griffe, break-check) for every changed package that a changeset covers, and fails the PR when the changeset level is below what the command proves. 0.x versions are translated: a breaking change needs `minor`. | `[check].api`, `api` |
 | Changeset command | Writes a changeset for the packages the branch changes and no pending changeset covers, or for named packages. | `changeset --level --package --summary` |
 | One release PR | Every package with a pending bump goes in one PR. Each push regenerates the branch from `main` and updates the PR in place. With nothing pending, the PR is closed. | `pr`, `release_branch_prefix` |
@@ -16,7 +16,6 @@ What the tool does, what it catches, and what to do when a step fails.
 | Workspace publish | One recursive command for every package on the default registry, run once from the root, with per-package reporting from the registry afterwards. | `[publish].workspace` |
 | Registry check | One GET per registry answers whether a version exists. 200 skips, 404 publishes, anything else fails. `status` shows the answer. | `registry`, `exists_url` |
 | Fixed groups | Members release at one version: the highest in the group, bumped by the highest level any member needs. A member without a changeset gets a "Released with" line. | `fixed` |
-| Bump ceiling | Caps what a changeset can do to a package. A group takes the lowest cap. | `max_bump` |
 | 0.x rule | `major` on `0.x` gives `1.0.0`, as changesets does. | |
 | Pre-releases | An rc PR for one package, or its fixed group, from any branch. Numbering continues from the tags. The final release follows the pending level. It is never lower than the rc. | `pre-release`, `prerelease_label` |
 | Draft releases | The release is created as a draft. A later job uploads the assets and flips it with `--publish`. It is reported until published. | `draft`, `release --publish` |

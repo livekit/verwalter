@@ -72,10 +72,6 @@ pub fn plan(
                 .max()
         })
         .unwrap_or(BumpLevel::Patch);
-    let level = members
-        .iter()
-        .filter_map(|m| m.max_bump)
-        .fold(level, BumpLevel::min);
     // The group moves from its highest version and past every rc any
     // member has tagged.
     let base = members.iter().map(|m| &m.version).max().unwrap();

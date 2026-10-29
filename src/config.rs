@@ -53,10 +53,6 @@ pub struct Package {
     pub release: ReleaseMode,
     #[serde(default)]
     pub draft: bool,
-    /// Ceiling on the bump level: a `major` changeset on a package with
-    /// `max_bump = "minor"` bumps minor. In a fixed group the lowest
-    /// ceiling applies to the group.
-    pub max_bump: Option<BumpLevel>,
     /// Where the package is published. Default: `[publish].registry`.
     pub registry: Option<crate::registry::Registry>,
     /// For `registry = "custom"`: a URL with `{name}` and `{version}` that
@@ -404,8 +400,6 @@ release = "tag"
         ))
         .unwrap_err();
         assert!(e.to_string().contains("two fixed groups"));
-        let c = Config::parse(&format!("{MONO}\nmax_bump = \"minor\"\n")).unwrap();
-        assert_eq!(c.packages["livekit-ffi"].max_bump, Some(BumpLevel::Minor));
     }
 
     #[test]

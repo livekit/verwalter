@@ -30,6 +30,10 @@ pub struct Check {
     /// Spec: ChangesetCheck.bumps. What the PR's changesets claim, one
     /// line per package at the highest level, for the comment.
     pub bumps: Vec<crate::changeset::Bump>,
+    /// Spec: ChangesetCheck.also_released. Packages the merge releases
+    /// without a changeset of their own, with the reason: a dependent,
+    /// or a member of a fixed group. Filled by `also_released`.
+    pub also: Vec<(String, String)>,
 }
 
 /// Spec: value ApiFinding. A covered package whose changeset level is
@@ -100,7 +104,53 @@ pub fn evaluate(
         covered,
         api: Vec::new(),
         bumps,
+        also: Vec::new(),
     }
+}
+
+/// Spec: ChangesetCheck.also_released. The plan over the PR's changesets
+/// alone, minus the covered packages: what rides along, and why.
+pub fn also_released(check: &mut Check, planned: &[crate::plan::PlannedRelease]) {
+    check.also = planned
+        .iter()
+        .filter(|r| !check.covered.contains(&r.package))
+        .map(|r| {
+            let names = |v: &[String]| {
+                v.iter()
+                    .map(|n| format!("`{n}`"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            };
+            let why = if !r.bumped_dependencies.is_empty() {
+                format!("depends on {}", names(&r.bumped_dependencies))
+            } else {
+                let covered: Vec<String> = r
+                    .fixed_with
+                    .iter()
+                    .filter(|m| check.covered.contains(*m))
+                    .cloned()
+                    .collect();
+                format!("fixed with {}", names(&covered))
+            };
+            (r.package.clone(), why)
+        })
+        .collect();
+}
+
+/// `also_released` against the manifests in the checkout.
+pub fn plan_also(
+    root: &Path,
+    config: &Config,
+    check: &mut Check,
+    changesets: &[Changeset],
+) -> Result<(), Error> {
+    if check.bumps.is_empty() {
+        return Ok(());
+    }
+    let (packages, _) = crate::repo::Repo::load_packages(root, config)?;
+    let planned = crate::plan::plan(&packages, changesets, config.dependent_bump_level);
+    also_released(check, &planned);
+    Ok(())
 }
 
 /// Spec: required_level. The digit a change kind moves: `major` is the
@@ -315,6 +365,13 @@ pub fn comment(
             out.push_str(&format!("- `{}`: {}\n", b.package_name, b.level));
         }
         out.push('\n');
+        if !check.also.is_empty() {
+            out.push_str("**Also released**\n\n");
+            for (p, why) in &check.also {
+                out.push_str(&format!("- `{p}`: {why}\n"));
+            }
+            out.push('\n');
+        }
     }
     if !check.api.is_empty() {
         out.push_str("### Bump level too low\n\n");
@@ -441,6 +498,7 @@ pub fn run(root: &Path, config: &Config, pr: u64, gh: Gh) -> Result<Check, Error
         }
     };
     let mut check = evaluate(config, &pr.head, &labels, &changed, &changesets);
+    plan_also(root, config, &mut check, &changesets)?;
     api_check(root, config, &mut check, &changesets)?;
 
     // The comment stays while it has something to say: a failure, or
@@ -663,6 +721,42 @@ changelog = "livekit-api/CHANGELOG.md"
         assert_eq!(c.status, Status::Passed);
         let body = comment(&c, &config, "o/r", "feat", "t");
         assert_eq!(body, format!("{MARKER}\n**This PR bumps**\n\n- `livekit-api`: major\n- `livekit-protocol`: minor\n\n"));
+    }
+
+    // Spec: ChangesetCheck.also_released. A dependent and a fixed-group
+    // member ride along, named with the reason and without a level.
+    #[test]
+    fn also_released_names_dependents_and_group_members() {
+        use crate::plan::{plan, PackageState};
+        let v = |s: &str| -> Version { s.parse().unwrap() };
+        let mut packages = vec![
+            PackageState::new("core", v("1.0.0"), vec![]),
+            PackageState::new("ffi", v("1.0.0"), vec![]),
+            PackageState::new("client", v("2.0.0"), vec!["core".into()]),
+        ];
+        packages[0].fixed_with = vec!["ffi".into()];
+        packages[1].fixed_with = vec!["core".into()];
+        let config = Config::parse("[packages.core]\npath = \"core\"\nversioned_files = [\"core/Cargo.toml\"]\nchangelog = \"c\"\n[packages.ffi]\npath = \"ffi\"\nversioned_files = [\"ffi/Cargo.toml\"]\nchangelog = \"c\"\n[packages.client]\npath = \"client\"\nversioned_files = [\"client/Cargo.toml\"]\nchangelog = \"c\"\n").unwrap();
+        let cs = [Changeset::parse(".changeset/a.md", "---\ncore: minor\n---\na\n").unwrap()];
+        let mut c = evaluate(
+            &config,
+            "feat",
+            &[],
+            &s(&["core/x", ".changeset/a.md"]),
+            &cs,
+        );
+        also_released(&mut c, &plan(&packages, &cs, BumpLevel::Patch));
+        assert_eq!(
+            c.also,
+            [
+                ("ffi".to_string(), "fixed with `core`".to_string()),
+                ("client".to_string(), "depends on `core`".to_string())
+            ]
+        );
+        let body = comment(&c, &config, "o/r", "feat", "t");
+        assert!(body.contains(
+            "**Also released**\n\n- `ffi`: fixed with `core`\n- `client`: depends on `core`\n"
+        ));
     }
 
     #[test]

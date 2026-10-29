@@ -42,7 +42,7 @@ a regex: `{ path = "version.go", regex = 'Version = "(?<version>[^"]+)"' }`.
 
 | Workflow | When | What |
 |---|---|---|
-| `changeset-check.yml` | A PR is opened or updated | Fails a PR that changes a package without a changeset, with a comment and a prefilled link. On a passing PR the comment lists the bumps it claims. |
+| `changeset-check.yml` | A PR is opened or updated | Fails a PR that changes a package without a changeset, with a comment and a prefilled link. On a passing PR the comment lists the bumps it claims and the dependents released with them. |
 | `release-pr.yml` | A push to `main` | Opens or updates the one release PR. |
 | `release.yml` | The release PR merges | Builds, tags, creates the GitHub releases, then publishes. |
 

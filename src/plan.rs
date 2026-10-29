@@ -17,8 +17,6 @@ pub struct PackageState {
     pub version: Version,
     /// In-repo packages this one depends on (handler::internal_dependencies).
     pub dependencies: Vec<String>,
-    /// Config: ceiling on the bump level.
-    pub max_bump: Option<BumpLevel>,
     /// Config: the other members of this package's fixed group.
     pub fixed_with: Vec<String>,
 }
@@ -29,7 +27,6 @@ impl PackageState {
             name: name.to_string(),
             version,
             dependencies,
-            max_bump: None,
             fixed_with: Vec::new(),
         }
     }
@@ -143,9 +140,7 @@ pub fn plan(
     // Dependent bumps and fixed groups, to a fixpoint: a package whose
     // planned dependency is bumped gets at least `dependent_level`; a
     // fixed group with any planned member is planned whole, at the highest
-    // level in it. Every level is capped by the package's max_bump, and a
-    // group by the lowest max_bump among its members.
-    let cap = |name: &str, l: BumpLevel| by_name[name].max_bump.map_or(l, |m| l.min(m));
+    // level in it.
     loop {
         let before = level.clone();
         for p in packages {
@@ -162,13 +157,9 @@ pub fn plan(
             let Some(l) = members.clone().filter_map(|m| level.get(m).copied()).max() else {
                 continue;
             };
-            let l = members.clone().fold(l, |l, m| cap(m, l));
             for m in members {
                 level.insert(&by_name[m].name, l);
             }
-        }
-        for (name, l) in level.iter_mut() {
-            *l = cap(name, *l);
         }
         if level == before {
             break;
@@ -320,31 +311,6 @@ mod tests {
         assert_eq!(got, [("core", "0.4.0", "minor"), ("ffi", "0.4.0", "minor")]);
         assert_eq!(p[0].fixed_with, ["ffi"]);
         assert!(p[0].changesets.is_empty());
-    }
-
-    // Spec: Package.max_bump caps the level; in a fixed group the lowest
-    // cap applies to the group.
-    #[test]
-    fn max_bump_caps_the_level() {
-        let mut packages = vec![
-            pkg("a", "0.9.0", &[]),
-            pkg("b", "0.9.0", &[]),
-            pkg("c", "2.0.0", &[]),
-        ];
-        packages[0].max_bump = Some(BumpLevel::Minor);
-        packages[1].fixed_with = vec!["c".into()];
-        packages[2].fixed_with = vec!["b".into()];
-        packages[2].max_bump = Some(BumpLevel::Patch);
-        let changesets = [cs(
-            "x.md",
-            &[("a", BumpLevel::Major), ("b", BumpLevel::Major)],
-        )];
-        let p = plan(&packages, &changesets, BumpLevel::Patch);
-        let got: Vec<(&str, &str)> = p
-            .iter()
-            .map(|r| (r.package.as_str(), r.to.to_string().leak() as &str))
-            .collect();
-        assert_eq!(got, [("a", "0.10.0"), ("b", "2.0.1"), ("c", "2.0.1")]);
     }
 
     #[test]

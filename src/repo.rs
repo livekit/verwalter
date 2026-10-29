@@ -32,8 +32,26 @@ impl Repo {
             &fs::read_to_string(config_path)
                 .map_err(|e| format!("{}: {e}", config_path.display()))?,
         )?;
+        let (packages, warnings) = Self::load_packages(root, &config)?;
         let names: Vec<&str> = config.packages.keys().map(String::as_str).collect();
+        let changesets = read_changesets(&root.join(CHANGESET_DIR), &names)?;
+        Ok(Self {
+            root: root.to_path_buf(),
+            config,
+            packages,
+            changesets,
+            warnings,
+        })
+    }
 
+    /// The packages alone: versions and in-repo dependencies from the
+    /// manifests, with the file-drift warnings. `check` uses this without
+    /// the changesets, which it reads from the PR itself.
+    pub fn load_packages(
+        root: &Path,
+        config: &Config,
+    ) -> Result<(Vec<PackageState>, Vec<String>), Error> {
+        let names: Vec<&str> = config.packages.keys().map(String::as_str).collect();
         let mut packages = Vec::new();
         let mut warnings = Vec::new();
         for (name, package) in &config.packages {
@@ -64,19 +82,10 @@ impl Repo {
                 name: name.clone(),
                 version,
                 dependencies,
-                max_bump: package.max_bump,
                 fixed_with: config.fixed_with(name),
             });
         }
-
-        let changesets = read_changesets(&root.join(CHANGESET_DIR), &names)?;
-        Ok(Self {
-            root: root.to_path_buf(),
-            config,
-            packages,
-            changesets,
-            warnings,
-        })
+        Ok((packages, warnings))
     }
 }
 
