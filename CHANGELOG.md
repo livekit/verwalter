@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.13.0
+
+### Minor Changes
+
+- `verwalter changeset [--level <l>] [--summary <text>]` writes a changeset for the packages that the branch and working tree change against the base branch, minus those a pending changeset covers. `--package <name>`, repeatable, names the packages instead. The summary defaults to the last commit subject. The check comment names the command next to the prefilled link. - [`8b2c3a7`](https://github.com/lukasIO/verwalter/commit/8b2c3a7768af26655a66193923cc466cafed9389) ([@lukasIO](https://github.com/lukasIO))
+
+### Patch Changes
+
+- The README and the example workflows point at `v0.12.0`. A `workspace:*` range in package.json is left alone when a dependency bumps, with a test, and the README says why pnpm and yarn lock files need no edit. - [`90d49f8`](https://github.com/lukasIO/verwalter/commit/90d49f8dab16dcc110d15e473d8e3cafec23a9d0) ([@lukasIO](https://github.com/lukasIO))
+- A `{ path, regex }` entry is handled by the tool's own regex, whatever the file name, and every match moves. A `Cargo.lock` entry can now be addressed by regex, for a workspace whose crates inherit one version. A crate with `publish.workspace = true` takes its publish flag from `[workspace.package]`, so the workspace check no longer reports it as publishable. - [`4fcbccf`](https://github.com/lukasIO/verwalter/commit/4fcbccf96896b5a803f19af88443a543e94c8801) ([@lukasIO](https://github.com/lukasIO))
+
 ## 0.12.0
 
 ### Minor Changes
