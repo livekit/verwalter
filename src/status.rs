@@ -40,7 +40,12 @@ pub fn status(repo: &Repo, remote: &str, gh: Gh) -> Result<Vec<PackageStatus>, E
     status_with(repo, remote, gh, &crate::registry::curl)
 }
 
-pub fn status_with(repo: &Repo, remote: &str, gh: Gh, http: crate::registry::Http) -> Result<Vec<PackageStatus>, Error> {
+pub fn status_with(
+    repo: &Repo,
+    remote: &str,
+    gh: Gh,
+    http: crate::registry::Http,
+) -> Result<Vec<PackageStatus>, Error> {
     let root = repo.root.as_path();
     let remote_tags: BTreeSet<String> = git::run(root, &["ls-remote", "--tags", remote])
         .map(|out| {
@@ -149,8 +154,11 @@ pub fn status_with(repo: &Repo, remote: &str, gh: Gh, http: crate::registry::Htt
         let on_registry = if tag_state == "missing" {
             None
         } else {
-            crate::registry::exists(crate::registry::version_url(&repo.config, &p.name, &p.version), http)
-                .unwrap_or(None)
+            crate::registry::exists(
+                crate::registry::version_url(&repo.config, &p.name, &p.version),
+                http,
+            )
+            .unwrap_or(None)
         };
         out.push(PackageStatus {
             package: p.name.clone(),

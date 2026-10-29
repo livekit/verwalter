@@ -302,7 +302,10 @@ fn uv_lock_pin(content: &str, dep: &str, version: &Version) -> Result<String, Er
     let wanted = normalise_py(dep);
     let new = to_pep440(version);
     let mut doc: DocumentMut = content.parse()?;
-    let Some(packages) = doc.get_mut("package").and_then(|p| p.as_array_of_tables_mut()) else {
+    let Some(packages) = doc
+        .get_mut("package")
+        .and_then(|p| p.as_array_of_tables_mut())
+    else {
         return Ok(content.to_string());
     };
     let spec = regex::Regex::new(r"^(>=|==|~=)\s*([0-9][0-9A-Za-z.+!*-]*)").expect("static regex");
@@ -326,7 +329,11 @@ fn uv_lock_pin(content: &str, dep: &str, version: &Version) -> Result<String, Er
             if normalise_py(name) != wanted {
                 continue;
             }
-            let Some(old) = table.get("specifier").and_then(|s| s.as_str()).map(String::from) else {
+            let Some(old) = table
+                .get("specifier")
+                .and_then(|s| s.as_str())
+                .map(String::from)
+            else {
                 continue;
             };
             let moved = spec.replace(&old, |c: &regex::Captures| format!("{}{new}", &c[1]));
@@ -539,7 +546,14 @@ version = "1.0.228"
     #[test]
     fn package_json_workspace_range_is_left_alone() {
         let json = PACKAGE_JSON.replace("\"1.30.0\"", "\"workspace:*\"");
-        let written = write_version("package.json", None, &json, Some("@livekit/protocol"), &v("1.31.0")).unwrap();
+        let written = write_version(
+            "package.json",
+            None,
+            &json,
+            Some("@livekit/protocol"),
+            &v("1.31.0"),
+        )
+        .unwrap();
         assert_eq!(written, json);
     }
 
@@ -587,11 +601,24 @@ source = { editable = "livekit-protocol" }
     // Spec: write_dependency_version for uv.lock.
     #[test]
     fn uv_lock_own_entry_and_requires_dist() {
-        let own = write_version("uv.lock", None, UV_LOCK, Some("livekit-protocol"), &v("1.2.0-rc.1")).unwrap();
-        assert!(own.contains("name = \"livekit-protocol\"\nversion = \"1.2.0rc1\""), "{own}");
+        let own = write_version(
+            "uv.lock",
+            None,
+            UV_LOCK,
+            Some("livekit-protocol"),
+            &v("1.2.0-rc.1"),
+        )
+        .unwrap();
+        assert!(
+            own.contains("name = \"livekit-protocol\"\nversion = \"1.2.0rc1\""),
+            "{own}"
+        );
         assert!(own.contains("specifier = \">=1.2.0rc1,<2.0.0\""), "{own}");
         assert!(own.contains("version = \"1.1.1\""), "api untouched");
-        assert!(own.contains("{ name = \"aiohttp\", specifier = \">=3.9\" }"), "others untouched");
+        assert!(
+            own.contains("{ name = \"aiohttp\", specifier = \">=3.9\" }"),
+            "others untouched"
+        );
         let none = write_version("uv.lock", None, UV_LOCK, Some("nope"), &v("9.9.9")).unwrap();
         assert_eq!(none, UV_LOCK);
     }
@@ -730,10 +757,20 @@ dev = ["livekit-test-utils~=0.3"]
     fn regex_addresses_a_lock_entry() {
         let lock = "[[package]]\nname = \"a\"\nversion = \"0.2.2\"\n\n[[package]]\nname = \"a-uniffi\"\nversion = \"0.2.2\"\n";
         let re = "name = \"a\"\nversion = \"(?<version>[^\"]+)\"";
-        assert_eq!(read_version("Cargo.lock", Some(re), lock).unwrap(), v("0.2.2"));
+        assert_eq!(
+            read_version("Cargo.lock", Some(re), lock).unwrap(),
+            v("0.2.2")
+        );
         let out = write_version("Cargo.lock", Some(re), lock, None, &v("0.3.0")).unwrap();
         assert_eq!(out, "[[package]]\nname = \"a\"\nversion = \"0.3.0\"\n\n[[package]]\nname = \"a-uniffi\"\nversion = \"0.2.2\"\n");
-        assert!(write_version("Cargo.lock", Some("name = \"zzz\""), lock, None, &v("1.0.0")).is_err());
+        assert!(write_version(
+            "Cargo.lock",
+            Some("name = \"zzz\""),
+            lock,
+            None,
+            &v("1.0.0")
+        )
+        .is_err());
     }
 
     #[test]

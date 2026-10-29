@@ -134,6 +134,13 @@ entity Package {
     -- registry (cargo publish, npm publish, twine upload, dart pub
     -- publish), else none and `publish` refuses to start.
     publish_command: String?
+    -- The shell command that checks the public API of this package on a
+    -- contributor PR: the package's own, else config.check.api, else
+    -- none and the check only asks for a changeset. It runs in the
+    -- package's path with the claimed level and the baseline tag, and
+    -- prints the lowest change kind it can prove the diff needs (major,
+    -- minor or patch), or nothing when it cannot tell.
+    api_command: String?
 
     changesets: Changeset with repository = this.repository
     pending_changesets: changesets where status = pending
@@ -180,9 +187,24 @@ entity ChangesetCheck {
     pull_request: PullRequest
     affected_packages: Set<Package>
     covered_packages: Set<Package>
+    -- Covered packages whose changeset level is below what the API
+    -- check proved, or whose check did not run.
+    api_findings: Set<ApiFinding>
     status: passed | failed | exempt
 
     missing_packages: affected_packages where not (this in covered_packages)
+}
+
+-- A tool answers with a kind of change, a changeset names the digit that
+-- moves. The digit a kind moves depends on the version: major is the
+-- first non-zero digit, so a breaking change on 0.x needs minor and on
+-- 0.0.x patch. required_level(version, kind) is that translation.
+value ApiFinding {
+    package: Package
+    claimed_level: BumpLevel
+    -- none when the command failed or printed something else
+    required_level: BumpLevel?
+    output: String
 }
 
 -- One package's part of a release PR.
@@ -254,6 +276,8 @@ config {
     -- (per member: there or failed), and blocks dependents of a member
     -- that is not there.
     publish: { jobs: Integer = 4, registry: Registry = none, exists_url: String?, publish: String?, workspace: String? }
+    -- Default api_command for `verwalter check`, overridden per package.
+    check: { api: String? }
     -- Workspace members the consistency check skips, by name or path.
     ignore: Set<String> = {}
     -- Groups of packages that always release at one shared version: the
@@ -308,6 +332,28 @@ rule ChangesetCheckOnContributorPullRequest {
                 ChangesetCheck.created(pull_request: pr, affected_packages: affected, covered_packages: covered, status: passed)
             else:
                 ChangesetCheck.created(pull_request: pr, affected_packages: affected, covered_packages: covered, status: failed)
+}
+
+-- The changeset level is the contributor's claim. For every affected
+-- package that a changeset covers and that has an api_command, the
+-- command is the oracle: its answer, translated to a digit for the
+-- package's version, must not exceed the claimed level. A finding fails
+-- the check, and the comment names the level to use. An exempt PR runs
+-- no command.
+rule ApiCheckOnCoveredPackages {
+    when: check: ChangesetCheck.created
+    requires: check.status != exempt
+    let checked = check.affected_packages where this in check.covered_packages and this.api_command != null
+    ensures:
+        for p in checked:
+            let claimed = max(check.pull_request.changesets.bumps where package = p -> level)
+            let answer = p.api_command run with VERWALTER_LEVEL = claimed and VERWALTER_BASELINE_TAG = p.tag_for(p.version)
+            if answer failed:
+                check.api_findings += ApiFinding(package: p, claimed_level: claimed, required_level: none, output: answer.output)
+            else if answer.kind != none and claimed < required_level(p.version, answer.kind):
+                check.api_findings += ApiFinding(package: p, claimed_level: claimed, required_level: required_level(p.version, answer.kind), output: answer.output)
+        if check.api_findings != {}:
+            check.status becomes failed
 }
 
 -- Release PR lifecycle
@@ -606,6 +652,7 @@ surface ContributorPullRequestCheck {
         check.affected_packages
         check.covered_packages
         check.missing_packages when check.status = failed
+        check.api_findings when check.status = failed
         create_changeset_link(check.pull_request, check.missing_packages) when check.status = failed
 }
 

@@ -94,7 +94,20 @@ fn run() -> Result<(), Error> {
             c.status, c.affected, c.covered
         );
         if c.status == check::Status::Failed {
-            return Err(format!("changeset missing for: {}", c.missing().join(", ")).into());
+            let mut why = Vec::new();
+            if !c.missing().is_empty() {
+                why.push(format!("changeset missing for: {}", c.missing().join(", ")));
+            }
+            for f in &c.api {
+                why.push(match f.required {
+                    Some(r) => format!(
+                        "{}: changeset declares {}, the API check requires {r}",
+                        f.package, f.claimed
+                    ),
+                    None => format!("{}: the API check did not run: {}", f.package, f.output),
+                });
+            }
+            return Err(why.join("\n").into());
         }
         return Ok(());
     }
@@ -108,7 +121,11 @@ fn run() -> Result<(), Error> {
     for f in &workspace::check(&repo.root, &repo.config) {
         eprintln!("warning: {f}");
     }
-    for w in repo.warnings.iter().chain(&verwalter::plan::fixed_group_drift(&repo.packages)) {
+    for w in repo
+        .warnings
+        .iter()
+        .chain(&verwalter::plan::fixed_group_drift(&repo.packages))
+    {
         eprintln!("warning: {w}");
     }
     match command.as_str() {
@@ -121,8 +138,17 @@ fn run() -> Result<(), Error> {
                     repo.config.base_branch.clone()
                 }
             });
-            match check::write_changeset(&repo, &base, level.unwrap_or(BumpLevel::Patch), summary.as_deref(), &packages)? {
-                Some(path) => println!("{}", path.strip_prefix(&repo.root).unwrap_or(&path).display()),
+            match check::write_changeset(
+                &repo,
+                &base,
+                level.unwrap_or(BumpLevel::Patch),
+                summary.as_deref(),
+                &packages,
+            )? {
+                Some(path) => println!(
+                    "{}",
+                    path.strip_prefix(&repo.root).unwrap_or(&path).display()
+                ),
                 None => println!("every changed package has a pending changeset"),
             }
             Ok(())

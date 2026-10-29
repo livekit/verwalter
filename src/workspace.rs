@@ -79,11 +79,15 @@ fn cargo_members(root: &Path) -> Vec<Member> {
             };
             let private = match package.get("publish") {
                 // `publish.workspace = true` inherits [workspace.package].
-                Some(toml::Value::Table(t)) if t.get("workspace") == Some(&toml::Value::Boolean(true)) => unpublished(
-                    doc.get("workspace")
-                        .and_then(|w| w.get("package"))
-                        .and_then(|p| p.get("publish")),
-                ),
+                Some(toml::Value::Table(t))
+                    if t.get("workspace") == Some(&toml::Value::Boolean(true)) =>
+                {
+                    unpublished(
+                        doc.get("workspace")
+                            .and_then(|w| w.get("package"))
+                            .and_then(|p| p.get("publish")),
+                    )
+                }
                 other => unpublished(other),
             };
             Some(Member {

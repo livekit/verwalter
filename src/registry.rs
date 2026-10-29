@@ -31,11 +31,25 @@ pub type Http<'a> = &'a (dyn Fn(&str) -> Result<u16, Error> + Sync);
 /// `curl` on the machine: 200, 404, or an error for anything else.
 pub fn curl(url: &str) -> Result<u16, Error> {
     let out = Command::new("curl")
-        .args(["-sS", "-o", "/dev/null", "-w", "%{http_code}", "-L", "--max-time", "30", url])
+        .args([
+            "-sS",
+            "-o",
+            "/dev/null",
+            "-w",
+            "%{http_code}",
+            "-L",
+            "--max-time",
+            "30",
+            url,
+        ])
         .output()
         .map_err(|e| format!("curl: {e} (is curl installed?)"))?;
     if !out.status.success() {
-        return Err(format!("curl {url}: {}", String::from_utf8_lossy(&out.stderr).trim()).into());
+        return Err(format!(
+            "curl {url}: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        )
+        .into());
     }
     Ok(String::from_utf8_lossy(&out.stdout).trim().parse()?)
 }
@@ -114,7 +128,10 @@ mod tests {
         );
         assert_eq!(
             version_url(
-                &config("", "registry = \"custom\"\nexists_url = \"https://r/{name}/{version}/\""),
+                &config(
+                    "",
+                    "registry = \"custom\"\nexists_url = \"https://r/{name}/{version}/\""
+                ),
                 "x",
                 &v
             )
@@ -130,17 +147,38 @@ mod tests {
     // Spec: Package.publish_command resolution.
     #[test]
     fn publish_command_resolution() {
-        let c = config("[publish]\nregistry = \"crates\"\npublish = \"cargo publish --no-verify\"", "");
-        assert_eq!(c.publish_command("x").as_deref(), Some("cargo publish --no-verify"));
+        let c = config(
+            "[publish]\nregistry = \"crates\"\npublish = \"cargo publish --no-verify\"",
+            "",
+        );
+        assert_eq!(
+            c.publish_command("x").as_deref(),
+            Some("cargo publish --no-verify")
+        );
         // Another registry does not inherit the default command.
-        let c = config("[publish]\nregistry = \"crates\"\npublish = \"cargo publish --no-verify\"", "registry = \"npm\"");
-        assert_eq!(c.publish_command("x").as_deref(), Some("npm publish --provenance --access public"));
+        let c = config(
+            "[publish]\nregistry = \"crates\"\npublish = \"cargo publish --no-verify\"",
+            "registry = \"npm\"",
+        );
+        assert_eq!(
+            c.publish_command("x").as_deref(),
+            Some("npm publish --provenance --access public")
+        );
         // The package's own wins.
-        let c = config("[publish]\nregistry = \"npm\"", "publish = \"pnpm publish --no-git-checks\"");
-        assert_eq!(c.publish_command("x").as_deref(), Some("pnpm publish --no-git-checks"));
+        let c = config(
+            "[publish]\nregistry = \"npm\"",
+            "publish = \"pnpm publish --no-git-checks\"",
+        );
+        assert_eq!(
+            c.publish_command("x").as_deref(),
+            Some("pnpm publish --no-git-checks")
+        );
         // Nothing applies.
         assert_eq!(config("", "").publish_command("x"), None);
-        assert_eq!(config("", "registry = \"custom\"").publish_command("x"), None);
+        assert_eq!(
+            config("", "registry = \"custom\"").publish_command("x"),
+            None
+        );
     }
 
     #[test]

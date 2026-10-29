@@ -78,9 +78,21 @@ changelog = "livekit/CHANGELOG.md"
     write(&root, "livekit/Cargo.toml", "[package]\nname = \"livekit\"\nversion = \"0.7.0\"\n\n[dependencies]\nlivekit-protocol = { workspace = true }\n");
     // The release branch always writes the entry; a version without one
     // was edited by hand and is not released.
-    write(&root, "livekit-protocol/CHANGELOG.md", "# Changelog\n\n## 0.3.1\n\n### Patch Changes\n\n- old\n");
-    write(&root, "livekit-api/CHANGELOG.md", "# Changelog\n\n## 0.4.3\n\n### Patch Changes\n\n- old\n");
-    write(&root, "livekit/CHANGELOG.md", "# Changelog\n\n## 0.7.0\n\n### Patch Changes\n\n- old\n");
+    write(
+        &root,
+        "livekit-protocol/CHANGELOG.md",
+        "# Changelog\n\n## 0.3.1\n\n### Patch Changes\n\n- old\n",
+    );
+    write(
+        &root,
+        "livekit-api/CHANGELOG.md",
+        "# Changelog\n\n## 0.4.3\n\n### Patch Changes\n\n- old\n",
+    );
+    write(
+        &root,
+        "livekit/CHANGELOG.md",
+        "# Changelog\n\n## 0.7.0\n\n### Patch Changes\n\n- old\n",
+    );
     git(&root, &["add", "-A"]);
     git(&root, &["commit", "-q", "-m", "init"]);
     Repo_(root)
@@ -1097,9 +1109,21 @@ fn versioned_files_that_disagree_are_reported() {
     );
     write(root, "livekit/README.md", "livekit = \"0.6.9\"\n");
     let repo = Repo::load(root).unwrap();
-    assert_eq!(repo.packages.iter().find(|p| p.name == "livekit").unwrap().version.to_string(), "0.7.0");
+    assert_eq!(
+        repo.packages
+            .iter()
+            .find(|p| p.name == "livekit")
+            .unwrap()
+            .version
+            .to_string(),
+        "0.7.0"
+    );
     assert_eq!(repo.warnings.len(), 1);
-    assert!(repo.warnings[0].contains("livekit/README.md says 0.6.9"), "{}", repo.warnings[0]);
+    assert!(
+        repo.warnings[0].contains("livekit/README.md says 0.6.9"),
+        "{}",
+        repo.warnings[0]
+    );
 }
 
 // Spec: ContributorWritesChangeset.
@@ -1114,10 +1138,20 @@ fn changeset_command_covers_the_changed_packages() {
     git(root, &["commit", "-q", "-m", "Add thing: v2"]);
     write(root, "livekit/untracked.rs", "z");
     let repo = Repo::load(root).unwrap();
-    let path = verwalter::check::write_changeset(&repo, "main", verwalter::version::BumpLevel::Minor, None, &[])
-        .unwrap()
-        .unwrap();
-    assert!(path.ends_with(".changeset/add_thing_v2.md"), "{}", path.display());
+    let path = verwalter::check::write_changeset(
+        &repo,
+        "main",
+        verwalter::version::BumpLevel::Minor,
+        None,
+        &[],
+    )
+    .unwrap()
+    .unwrap();
+    assert!(
+        path.ends_with(".changeset/add_thing_v2.md"),
+        "{}",
+        path.display()
+    );
     let content = fs::read_to_string(&path).unwrap();
     assert_eq!(
         content,
@@ -1125,22 +1159,54 @@ fn changeset_command_covers_the_changed_packages() {
     );
     // Now covered: nothing to write. A second summary gets its own file.
     let repo = Repo::load(root).unwrap();
-    assert!(verwalter::check::write_changeset(&repo, "main", verwalter::version::BumpLevel::Patch, None, &[]).unwrap().is_none());
+    assert!(verwalter::check::write_changeset(
+        &repo,
+        "main",
+        verwalter::version::BumpLevel::Patch,
+        None,
+        &[]
+    )
+    .unwrap()
+    .is_none());
     // Named packages win over the detection and over coverage.
-    let named = verwalter::check::write_changeset(&repo, "main", verwalter::version::BumpLevel::Major, Some("Only api"), &["livekit-api".to_string()])
-        .unwrap()
-        .unwrap();
-    assert_eq!(fs::read_to_string(&named).unwrap(), "---\nlivekit-api: major\n---\n\nOnly api\n");
+    let named = verwalter::check::write_changeset(
+        &repo,
+        "main",
+        verwalter::version::BumpLevel::Major,
+        Some("Only api"),
+        &["livekit-api".to_string()],
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(
+        fs::read_to_string(&named).unwrap(),
+        "---\nlivekit-api: major\n---\n\nOnly api\n"
+    );
     fs::remove_file(&named).unwrap();
-    assert!(verwalter::check::write_changeset(&repo, "main", verwalter::version::BumpLevel::Patch, None, &["nope".to_string()]).is_err());
+    assert!(verwalter::check::write_changeset(
+        &repo,
+        "main",
+        verwalter::version::BumpLevel::Patch,
+        None,
+        &["nope".to_string()]
+    )
+    .is_err());
     write(root, "livekit/more.rs", "w");
     fs::remove_file(&path).unwrap();
     let repo = Repo::load(root).unwrap();
-    let again = verwalter::check::write_changeset(&repo, "main", verwalter::version::BumpLevel::Patch, Some("Fix: it"), &[])
-        .unwrap()
-        .unwrap();
+    let again = verwalter::check::write_changeset(
+        &repo,
+        "main",
+        verwalter::version::BumpLevel::Patch,
+        Some("Fix: it"),
+        &[],
+    )
+    .unwrap()
+    .unwrap();
     assert!(again.ends_with("fix_it.md"));
-    assert!(fs::read_to_string(&again).unwrap().starts_with("---\nlivekit: patch\nlivekit-api: patch\nlivekit-protocol: patch\n---"));
+    assert!(fs::read_to_string(&again)
+        .unwrap()
+        .starts_with("---\nlivekit: patch\nlivekit-api: patch\nlivekit-protocol: patch\n---"));
 }
 
 // Spec: WorkflowPublishesInDependencyOrder. protocol first; api and
@@ -1157,45 +1223,81 @@ fn publish_runs_dependencies_first_and_blocks_dependents_of_a_failure() {
     // The command runs in the package's path, so the order file is shared
     // through VERWALTER_ROOT. `[publish].publish` is the default for all.
     let with_command = |command: &str| {
-        write(root, "verwalter.toml", &format!("{base}\n[publish]\npublish = '{command}'\n"));
+        write(
+            root,
+            "verwalter.toml",
+            &format!("{base}\n[publish]\npublish = '{command}'\n"),
+        );
         Repo::load(root).unwrap()
     };
-    let no_registry = |_: &str| -> Result<u16, verwalter::Error> { Err("no registry configured".into()) };
-    let opts = verwalter::publish::Options { jobs: Some(4), dry_run: false };
+    let no_registry =
+        |_: &str| -> Result<u16, verwalter::Error> { Err("no registry configured".into()) };
+    let opts = verwalter::publish::Options {
+        jobs: Some(4),
+        dry_run: false,
+    };
 
     // No command at all: an error before anything runs.
-    let err = verwalter::publish::run(&Repo::load(root).unwrap(), &opts, &no_registry).err().expect("no command");
+    let err = verwalter::publish::run(&Repo::load(root).unwrap(), &opts, &no_registry)
+        .err()
+        .expect("no command");
     assert!(err.to_string().contains("no publish command"), "{err}");
 
     // Everything succeeds: the order file shows protocol before the others.
     let repo = with_command("echo $VERWALTER_PACKAGE $VERWALTER_VERSION $VERWALTER_TAG $VERWALTER_REGISTRY first=$VERWALTER_FIRST_RELEASE $(pwd | xargs basename) >> $VERWALTER_ROOT/order");
     let outcomes = verwalter::publish::run(&repo, &opts, &no_registry).unwrap();
-    assert!(outcomes.iter().all(|o| o.status == "published"), "{outcomes:?}");
+    assert!(
+        outcomes.iter().all(|o| o.status == "published"),
+        "{outcomes:?}"
+    );
     let order = fs::read_to_string(root.join("order")).unwrap();
     let lines: Vec<&str> = order.lines().collect();
     assert_eq!(lines.len(), 3);
-    assert_eq!(lines[0], "livekit-protocol 0.3.1 livekit-protocol-v0.3.1 none first=true livekit-protocol", "{order}");
+    assert_eq!(
+        lines[0], "livekit-protocol 0.3.1 livekit-protocol-v0.3.1 none first=true livekit-protocol",
+        "{order}"
+    );
     fs::remove_file(root.join("order")).unwrap();
 
     // protocol fails: both dependents are blocked, nothing else ran.
-    let repo = with_command("echo {package} >> $VERWALTER_ROOT/order; [ {package} != livekit-protocol ]");
+    let repo =
+        with_command("echo {package} >> $VERWALTER_ROOT/order; [ {package} != livekit-protocol ]");
     let outcomes = verwalter::publish::run(&repo, &opts, &no_registry).unwrap();
     let by: std::collections::BTreeMap<&str, (&str, &str)> = outcomes
         .iter()
         .map(|o| (o.package.as_str(), (o.status, o.reason.as_str())))
         .collect();
     assert_eq!(by["livekit-protocol"].0, "failed");
-    assert_eq!(by["livekit-api"], ("blocked", "livekit-protocol did not publish"));
-    assert_eq!(by["livekit"], ("blocked", "livekit-protocol did not publish"));
-    assert_eq!(fs::read_to_string(root.join("order")).unwrap().trim(), "livekit-protocol");
+    assert_eq!(
+        by["livekit-api"],
+        ("blocked", "livekit-protocol did not publish")
+    );
+    assert_eq!(
+        by["livekit"],
+        ("blocked", "livekit-protocol did not publish")
+    );
+    assert_eq!(
+        fs::read_to_string(root.join("order")).unwrap().trim(),
+        "livekit-protocol"
+    );
     assert!(verwalter::publish::failed(&outcomes));
     fs::remove_file(root.join("order")).unwrap();
 
     // api fails: livekit does not depend on it and still publishes.
     let repo = with_command("[ {package} != livekit-api ]");
-    let outcomes = verwalter::publish::run(&repo, &verwalter::publish::Options { jobs: Some(1), dry_run: false }, &no_registry).unwrap();
-    let by: std::collections::BTreeMap<&str, &str> =
-        outcomes.iter().map(|o| (o.package.as_str(), o.status)).collect();
+    let outcomes = verwalter::publish::run(
+        &repo,
+        &verwalter::publish::Options {
+            jobs: Some(1),
+            dry_run: false,
+        },
+        &no_registry,
+    )
+    .unwrap();
+    let by: std::collections::BTreeMap<&str, &str> = outcomes
+        .iter()
+        .map(|o| (o.package.as_str(), o.status))
+        .collect();
     assert_eq!(by["livekit-protocol"], "published");
     assert_eq!(by["livekit-api"], "failed");
     assert_eq!(by["livekit"], "published");
@@ -1212,16 +1314,27 @@ fn publish_runs_dependencies_first_and_blocks_dependents_of_a_failure() {
         )),
     );
     let repo = Repo::load(root).unwrap();
-    assert_eq!(repo.config.publish_command("livekit-protocol").as_deref(), Some("exit 7"));
+    assert_eq!(
+        repo.config.publish_command("livekit-protocol").as_deref(),
+        Some("exit 7")
+    );
     let has_protocol = |url: &str| -> Result<u16, verwalter::Error> {
-        Ok(if url.contains("livekit-protocol") { 200 } else { 404 })
+        Ok(if url.contains("livekit-protocol") {
+            200
+        } else {
+            404
+        })
     };
     let outcomes = verwalter::publish::run(&repo, &opts, &has_protocol).unwrap();
-    let by: std::collections::BTreeMap<&str, &str> =
-        outcomes.iter().map(|o| (o.package.as_str(), o.status)).collect();
+    let by: std::collections::BTreeMap<&str, &str> = outcomes
+        .iter()
+        .map(|o| (o.package.as_str(), o.status))
+        .collect();
     assert_eq!(by["livekit-protocol"], "exists");
     assert_eq!(by["livekit-api"], "published");
-    assert!(!fs::read_to_string(root.join("order")).unwrap().contains("protocol"));
+    assert!(!fs::read_to_string(root.join("order"))
+        .unwrap()
+        .contains("protocol"));
     let down = |_: &str| -> Result<u16, verwalter::Error> { Ok(503) };
     assert!(verwalter::publish::run(&repo, &opts, &down).is_err());
 }
@@ -1254,15 +1367,24 @@ fn workspace_publish_command_runs_once_and_reports_per_member() {
     assert!(repo.config.in_workspace_publish("livekit-protocol"));
     assert!(!repo.config.in_workspace_publish("livekit"));
     let no_registry = |_: &str| -> Result<u16, verwalter::Error> { Err("no registry".into()) };
-    let opts = verwalter::publish::Options { jobs: Some(4), dry_run: false };
+    let opts = verwalter::publish::Options {
+        jobs: Some(4),
+        dry_run: false,
+    };
     let outcomes = verwalter::publish::run(&repo, &opts, &no_registry).unwrap();
-    let by: std::collections::BTreeMap<&str, &str> =
-        outcomes.iter().map(|o| (o.package.as_str(), o.status)).collect();
+    let by: std::collections::BTreeMap<&str, &str> = outcomes
+        .iter()
+        .map(|o| (o.package.as_str(), o.status))
+        .collect();
     assert_eq!(by.len(), 3, "{outcomes:?}");
     assert!(by.values().all(|s| *s == "published"), "{outcomes:?}");
     let order = fs::read_to_string(root.join("order")).unwrap();
     let dir = root.file_name().unwrap().to_str().unwrap();
-    assert_eq!(order, format!("ws [workspace] {dir}\nown livekit\n"), "workspace once, from the root, before livekit");
+    assert_eq!(
+        order,
+        format!("ws [workspace] {dir}\nown livekit\n"),
+        "workspace once, from the root, before livekit"
+    );
 
     // With a registry, the members are checked after the command: one
     // missing is a failure of that member only.
@@ -1279,11 +1401,17 @@ fn workspace_publish_command_runs_once_and_reports_per_member() {
     );
     let repo = Repo::load(root).unwrap();
     let only_api = |url: &str| -> Result<u16, verwalter::Error> {
-        Ok(if url.contains("livekit-api") { 200 } else { 404 })
+        Ok(if url.contains("livekit-api") {
+            200
+        } else {
+            404
+        })
     };
     let outcomes = verwalter::publish::run(&repo, &opts, &only_api).unwrap();
-    let by: std::collections::BTreeMap<&str, &str> =
-        outcomes.iter().map(|o| (o.package.as_str(), o.status)).collect();
+    let by: std::collections::BTreeMap<&str, &str> = outcomes
+        .iter()
+        .map(|o| (o.package.as_str(), o.status))
+        .collect();
     assert_eq!(by["livekit-api"], "published");
     assert_eq!(by["livekit-protocol"], "failed");
     assert_eq!(by["livekit"], "blocked", "depends on protocol");
@@ -1380,4 +1508,74 @@ fn changesets_are_attributed_to_their_pr_or_commit() {
             &push_sha[..7]
         )
     );
+}
+
+// Spec: ApiCheckOnCoveredPackages. The command's answer is a change kind;
+// the claimed level is a digit. livekit-api is 0.4.3, so a breaking change
+// needs minor and a patch changeset is too low. livekit at 0.7.0 claims
+// minor, which covers `major`. A failing command is its own finding.
+#[test]
+fn api_check_compares_the_claimed_level_with_the_commands_answer() {
+    let repo = fixture("api-check");
+    let root = &repo.0;
+    let mut config = fs::read_to_string(root.join("verwalter.toml")).unwrap();
+    config.push_str("\n[check]\napi = \"echo \\\"$VERWALTER_PACKAGE $VERWALTER_LEVEL $VERWALTER_BASELINE_TAG\\\" >> $VERWALTER_ROOT/calls; echo major\"\n");
+    config = config.replace(
+        "changelog = \"livekit-protocol/CHANGELOG.md\"",
+        "changelog = \"livekit-protocol/CHANGELOG.md\"\napi = \"exit 3\"",
+    );
+    let config = verwalter::config::Config::parse(&config).unwrap();
+    write(
+        root,
+        ".changeset/x.md",
+        "---\nlivekit-api: patch\nlivekit: minor\nlivekit-protocol: major\n---\nx\n",
+    );
+    let changesets = [verwalter::changeset::Changeset::parse(
+        ".changeset/x.md",
+        &fs::read_to_string(root.join(".changeset/x.md")).unwrap(),
+    )
+    .unwrap()];
+    let changed: Vec<String> = [
+        "livekit-api/src/lib.rs",
+        "livekit/src/lib.rs",
+        "livekit-protocol/x.proto",
+        ".changeset/x.md",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect();
+    let mut check = verwalter::check::evaluate(&config, "feat", &[], &changed, &changesets);
+    assert_eq!(check.status, verwalter::check::Status::Passed);
+    verwalter::check::api_check(root, &config, &mut check, &changesets).unwrap();
+    assert_eq!(check.status, verwalter::check::Status::Failed);
+    let findings: Vec<(&str, Option<verwalter::version::BumpLevel>)> = check
+        .api
+        .iter()
+        .map(|f| (f.package.as_str(), f.required))
+        .collect();
+    assert_eq!(
+        findings,
+        [
+            ("livekit-api", Some(verwalter::version::BumpLevel::Minor)),
+            ("livekit-protocol", None)
+        ]
+    );
+    assert!(check.api[1].output.contains("the command failed"));
+    let calls = fs::read_to_string(root.join("calls")).unwrap();
+    assert_eq!(
+        calls,
+        "livekit minor livekit-v0.7.0\nlivekit-api patch livekit-api-v0.4.3\n"
+    );
+
+    // An exempt PR runs no command.
+    fs::remove_file(root.join("calls")).unwrap();
+    let mut check = verwalter::check::evaluate(
+        &config,
+        "feat",
+        &["internal".to_string()],
+        &changed,
+        &changesets,
+    );
+    verwalter::check::api_check(root, &config, &mut check, &changesets).unwrap();
+    assert!(!root.join("calls").exists());
 }

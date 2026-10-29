@@ -146,6 +146,9 @@ registry = "crates"              # none | crates | npm | pypi | pubdev | custom
 publish = "cargo publish --no-verify"   # command for packages on that registry, run in their path
 workspace = "cargo publish --workspace" # or: one command from the root for all of them (pnpm -r publish)
 
+[check]                          # for `verwalter check`
+api = "cargo semver-checks --baseline-rev $VERWALTER_BASELINE_TAG 2>&1 | sed -n 's/.*requires new \\([a-z]*\\) version.*/\\1/p'"
+
 [packages.livekit-protocol]
 path = "livekit-protocol"
 versioned_files = ["livekit-protocol/Cargo.toml"]
@@ -157,7 +160,30 @@ max_bump = "minor"                         # optional ceiling on the bump level
 registry = "npm"                           # overrides [publish].registry
 publish = "pnpm publish --no-git-checks"   # overrides the command; else the built-in one for the registry
 exists_url = "https://r/{name}/{version}"  # for custom: 200 when the version exists, 404 when not
+api = "griffe check pkg -a $VERWALTER_BASELINE_TAG >/dev/null || echo major"   # overrides [check].api
 ```
+
+The API check treats the changeset level as a claim and the `api`
+command as the oracle. For every package that the PR changes and a
+changeset covers, `check` runs the command in the package's path. The
+environment carries `VERWALTER_PACKAGE`, `VERWALTER_VERSION`,
+`VERWALTER_BASELINE_TAG`, `VERWALTER_LEVEL` and `VERWALTER_ROOT`. The
+command prints the lowest
+kind of change it can prove the diff needs, `major`, `minor` or `patch`,
+or nothing when it cannot tell. A tool that only knows "breaking or not"
+prints `major` or nothing. verwalter translates the kind into the digit it
+moves for the package's version. A breaking change on a 0.x package
+needs `minor`. If the changeset claims less, the check fails and the
+comment names the level to use. Commands that work today:
+
+| Tool | Command | Answers |
+|---|---|---|
+| cargo-semver-checks | `cargo semver-checks --baseline-rev $VERWALTER_BASELINE_TAG 2>&1 \| sed -n 's/.*requires new \([a-z]*\) version.*/\1/p'` | `major`, `minor` |
+| griffe | `griffe check <module> -a $VERWALTER_BASELINE_TAG >/dev/null \|\| echo major` | `major` |
+| break-check | `break-check detect --baseline <dir> --format json \| jq -r .recommendedBump` | `major`, `minor`, `patch` |
+
+The tool must be on the runner before the action runs, and the checkout
+needs the baseline tag (`fetch-depth: 0`).
 
 The publish command for a package is its own `publish`, else
 `[publish].publish` when the package is on the default registry, else the
@@ -206,6 +232,7 @@ The first file of a package is its version.
 | Feature | What it does | Where |
 |---|---|---|
 | Changeset check | Fails a PR that changes a package without a changeset. It posts one comment with a prefilled new-file link, updates it in place, and deletes it when the check passes. An invalid changeset is reported in the same comment. | `check`, `exempt_label` |
+| API check | Runs a configured command (cargo-semver-checks, griffe, break-check) for every changed package that a changeset covers, and fails the PR when the changeset level is below what the command proves. 0.x versions are translated: a breaking change needs `minor`. | `[check].api`, `api` |
 | Changeset command | Writes a changeset for the packages the branch changes and no pending changeset covers, or for named packages. | `changeset --level --package --summary` |
 | One release PR | Every package with a pending bump goes in one PR. Each push regenerates the branch from `main` and updates the PR in place. With nothing pending, the PR is closed. | `pr`, `release_branch_prefix` |
 | Dependent bumps | A package whose in-repo dependency is released gets a bump too, transitively. Its dependency floor moves in its manifest and the lock files. | `dependent_bump_level`, `pin_files` |
@@ -237,6 +264,7 @@ The first file of a package is its version.
 | Files of one package disagree on the version | Every command warns and names the files. The first file wins. The next release aligns them. |
 | A fixed group drifts | Every command warns. The next release aligns the group. |
 | A PR changes a package without a changeset | The check fails with the comment and link. The `internal` label exempts the PR. |
+| A changeset claims `patch` for a breaking change | With an `api` command configured, the check fails and the comment names the level to use and the fix command. |
 | Someone merges a branch named `release/*` by hand | The example release workflow runs only for a PR that the bot authored, with the verwalter marker in its body. |
 | Two pushes to `main` in quick succession | The concurrency group cancels the first run. One PR results. |
 | The release PR is closed without merging, or its branch deleted | The next push regenerates the branch and opens a new PR. |
@@ -288,7 +316,7 @@ and `origin/<base>` are current.
 | `verwalter status` | Per package: version, tag, GitHub release, pending changesets, open PRs, next step. |
 | `verwalter plan` | Print the release plan: next versions, dependencies first. |
 | `verwalter changeset [--level <l>] [--package <name>]... [--summary <text>]` | Write a changeset for the packages the branch changes and no pending changeset covers. With `--package`, exactly the named packages. The summary defaults to the last commit subject. |
-| `verwalter check --pr <n>` | Changeset check for a contributor PR, with comment. |
+| `verwalter check --pr <n>` | Changeset and API check for a contributor PR, with comment. |
 | `verwalter branches [--base <ref>]` | Create the release branch locally. |
 | `verwalter pr [--remote origin]` | Push the branch and open or update the PR. |
 | `verwalter release [--asset <file>]... [--package <name>] [--publish]` | Tag and create GitHub releases for every untagged version that has a changelog entry. Uploads assets to drafts or a named package. `--publish` flips a draft. |

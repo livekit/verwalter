@@ -66,6 +66,8 @@ pub struct Package {
     /// `[publish].publish` when on the default registry, else the built-in
     /// command for the registry.
     pub publish: Option<String>,
+    /// Spec: Package.api_command. Overrides `[check].api` for this package.
+    pub api: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -102,6 +104,9 @@ pub struct Config {
     /// Defaults for `verwalter publish`, overridden per package.
     #[serde(default)]
     pub publish: Publish,
+    /// Spec: config.check.
+    #[serde(default)]
+    pub check: Check,
     pub packages: BTreeMap<String, Package>,
 }
 
@@ -126,6 +131,18 @@ pub struct Publish {
     /// `cargo publish --workspace`). Order and skipping are its job; the
     /// tool checks the registry before and after and reports per package.
     pub workspace: Option<String>,
+}
+
+/// Spec: config.check. The API check that `verwalter check` runs for
+/// every affected package that a changeset covers.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct Check {
+    /// Shell command, run in the package's path with the claimed level
+    /// and the baseline tag in the environment. It prints the lowest
+    /// change kind it can prove the diff needs, `major`, `minor` or
+    /// `patch`, or nothing when it cannot tell.
+    pub api: Option<String>,
 }
 
 fn default_jobs() -> usize {
@@ -168,9 +185,19 @@ impl Config {
         Ok(config)
     }
 
+    /// Spec: Package.api_command. The package's own, else `[check].api`.
+    pub fn api_command(&self, package: &str) -> Option<&str> {
+        self.packages[package]
+            .api
+            .as_deref()
+            .or(self.check.api.as_deref())
+    }
+
     /// Spec: Package.registry. The package's own, else the default.
     pub fn registry_of(&self, package: &str) -> crate::registry::Registry {
-        self.packages[package].registry.unwrap_or(self.publish.registry)
+        self.packages[package]
+            .registry
+            .unwrap_or(self.publish.registry)
     }
 
     /// Spec: Package.exists_url, with the same fallback.

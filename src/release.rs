@@ -244,14 +244,21 @@ fn release_one(
 /// Spec: Package.first_release. The registry has no version of the
 /// package when one is configured, else no tag other than `version`.
 pub fn first_release(repo: &Repo, name: &str, version: &crate::Version) -> Result<bool, Error> {
-    match crate::registry::exists(crate::registry::package_url(&repo.config, name), &crate::registry::curl)? {
+    match crate::registry::exists(
+        crate::registry::package_url(&repo.config, name),
+        &crate::registry::curl,
+    )? {
         Some(has_any) => Ok(!has_any),
         None => first_release_by_tags(repo, name, version),
     }
 }
 
 /// No tag of the package other than `version` itself.
-pub fn first_release_by_tags(repo: &Repo, name: &str, version: &crate::Version) -> Result<bool, Error> {
+pub fn first_release_by_tags(
+    repo: &Repo,
+    name: &str,
+    version: &crate::Version,
+) -> Result<bool, Error> {
     Ok(crate::prerelease::released_versions(repo, name)?
         .iter()
         .all(|v| v == version))

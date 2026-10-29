@@ -6,7 +6,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::{Version, changeset::Changeset, config::Config, handler, plan::PackageState, Error};
+use crate::{changeset::Changeset, config::Config, handler, plan::PackageState, Error, Version};
 
 pub const CONFIG_FILE: &str = "verwalter.toml";
 pub const CHANGESET_DIR: &str = ".changeset";
