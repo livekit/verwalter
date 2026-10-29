@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.10.0
+
+### Minor Changes
+
+- The release PR sync only looks at the PR on the release branch. The cleanup of per-package PRs from versions before 0.9 is gone. - [`ad2da31`](https://github.com/lukasIO/verwalter/commit/ad2da316eb8df294089e51dda9aa2ba0eda3cd4f) ([@lukasIO](https://github.com/lukasIO))
+- Fixed groups (`fixed = [["a", "b"]]`) release at one shared version, and a pre-release of a member takes the whole group. `max_bump` on a package caps the bump level. - [`4d8d0b6`](https://github.com/lukasIO/verwalter/commit/4d8d0b63b3c99b79746cb64aade4ce478579cfda) ([@lukasIO](https://github.com/lukasIO))
+- A changeset that names a package missing from `verwalter.toml` is an error, reported by every command and by `verwalter check`. The release branch deletes changesets outright instead of editing their front matter. - [`01809d9`](https://github.com/lukasIO/verwalter/commit/01809d96e2ca9b81e58a2f8473d56948e8f1ff4e) ([@lukasIO](https://github.com/lukasIO))
+- The final release after an rc follows the pending changesets. A major changeset added after `1.6.0-rc.2` releases `2.0.0`, not `1.6.0`. A release is never lower than its rc. - [`a9f5269`](https://github.com/lukasIO/verwalter/commit/a9f526903b61fd8ebe76f7efcdd991423e3bb646) ([@lukasIO](https://github.com/lukasIO))
+
+### Patch Changes
+
+- Point examples and README at v0.9.0 - [`d8da541`](https://github.com/lukasIO/verwalter/commit/d8da5414a9d82ea47843cc16d7316b0edb750902) ([@lukasIO](https://github.com/lukasIO))
+
 ## 0.9.0
 
 ### Minor Changes
