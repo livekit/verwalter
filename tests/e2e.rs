@@ -1117,7 +1117,7 @@ fn changeset_command_covers_the_changed_packages() {
     git(root, &["commit", "-q", "-m", "Add thing: v2"]);
     write(root, "livekit/untracked.rs", "z");
     let repo = Repo::load(root).unwrap();
-    let path = verwalter::check::write_changeset(&repo, "main", verwalter::version::BumpLevel::Minor, None)
+    let path = verwalter::check::write_changeset(&repo, "main", verwalter::version::BumpLevel::Minor, None, &[])
         .unwrap()
         .unwrap();
     assert!(path.ends_with(".changeset/add_thing_v2.md"), "{}", path.display());
@@ -1128,11 +1128,18 @@ fn changeset_command_covers_the_changed_packages() {
     );
     // Now covered: nothing to write. A second summary gets its own file.
     let repo = Repo::load(root).unwrap();
-    assert!(verwalter::check::write_changeset(&repo, "main", verwalter::version::BumpLevel::Patch, None).unwrap().is_none());
+    assert!(verwalter::check::write_changeset(&repo, "main", verwalter::version::BumpLevel::Patch, None, &[]).unwrap().is_none());
+    // Named packages win over the detection and over coverage.
+    let named = verwalter::check::write_changeset(&repo, "main", verwalter::version::BumpLevel::Major, Some("Only api"), &["livekit-api".to_string()])
+        .unwrap()
+        .unwrap();
+    assert_eq!(fs::read_to_string(&named).unwrap(), "---\nlivekit-api: major\n---\n\nOnly api\n");
+    fs::remove_file(&named).unwrap();
+    assert!(verwalter::check::write_changeset(&repo, "main", verwalter::version::BumpLevel::Patch, None, &["nope".to_string()]).is_err());
     write(root, "livekit/more.rs", "w");
     fs::remove_file(&path).unwrap();
     let repo = Repo::load(root).unwrap();
-    let again = verwalter::check::write_changeset(&repo, "main", verwalter::version::BumpLevel::Patch, Some("Fix: it"))
+    let again = verwalter::check::write_changeset(&repo, "main", verwalter::version::BumpLevel::Patch, Some("Fix: it"), &[])
         .unwrap()
         .unwrap();
     assert!(again.ends_with("fix_it.md"));

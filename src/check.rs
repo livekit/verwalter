@@ -80,27 +80,40 @@ pub const MARKER: &str = "<!-- verwalter changeset-check -->";
 /// Spec: ContributorWritesChangeset. The local counterpart of the check:
 /// the packages that the branch and working tree change against `base`
 /// and that no pending changeset covers get one file with `level` each.
-/// `summary` defaults to the last commit's subject. Returns the file, or
-/// None when nothing is missing.
+/// `summary` defaults to the last commit's subject. `packages`, when given,
+/// replaces the detection: exactly those names, whether or not the branch
+/// touches them or a changeset covers them. Returns the file, or None when
+/// nothing is missing.
 pub fn write_changeset(
     repo: &crate::repo::Repo,
     base: &str,
     level: crate::version::BumpLevel,
     summary: Option<&str>,
+    packages: &[String],
 ) -> Result<Option<std::path::PathBuf>, Error> {
     let root = &repo.root;
-    let merge_base = crate::git::run(root, &["merge-base", base, "HEAD"])?;
-    let mut changed: Vec<String> = crate::git::run(root, &["diff", "--name-only", merge_base.trim()])?
-        .lines()
-        .map(String::from)
-        .collect();
-    changed.extend(
-        crate::git::run(root, &["ls-files", "--others", "--exclude-standard"])?
-            .lines()
-            .map(String::from),
-    );
-    let check = evaluate(&repo.config, "", &[], &changed, &repo.changesets);
-    let missing = check.missing();
+    let missing: Vec<String> = if packages.is_empty() {
+        let merge_base = crate::git::run(root, &["merge-base", base, "HEAD"])?;
+        let mut changed: Vec<String> =
+            crate::git::run(root, &["diff", "--name-only", merge_base.trim()])?
+                .lines()
+                .map(String::from)
+                .collect();
+        changed.extend(
+            crate::git::run(root, &["ls-files", "--others", "--exclude-standard"])?
+                .lines()
+                .map(String::from),
+        );
+        let check = evaluate(&repo.config, "", &[], &changed, &repo.changesets);
+        check.missing().into_iter().map(String::from).collect()
+    } else {
+        for p in packages {
+            if !repo.config.packages.contains_key(p) {
+                return Err(format!("unknown package {p}").into());
+            }
+        }
+        packages.to_vec()
+    };
     if missing.is_empty() {
         return Ok(None);
     }

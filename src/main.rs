@@ -8,7 +8,7 @@ use verwalter::{
     version::BumpLevel, workspace, Error,
 };
 
-const USAGE: &str = "usage: verwalter <status|plan|branches|pr> [--config <file>] [--base <ref>] [--remote <name>] [--dry-run] [<checkout>]\n       verwalter changeset [--level major|minor|patch] [--base <ref>] [--summary <text>] [<checkout>]\n       verwalter release [--asset <file>]... [--package <name>] [--publish] [--abandon <tag>] [--remote <name>] [--dry-run] [<checkout>]\n       verwalter check --pr <number> [--config <file>] [--dry-run] [<checkout>]\n       verwalter pre-release <package> [--target <branch>] [--level major|minor|patch] [--remote <name>] [--dry-run] [<checkout>]";
+const USAGE: &str = "usage: verwalter <status|plan|branches|pr> [--config <file>] [--base <ref>] [--remote <name>] [--dry-run] [<checkout>]\n       verwalter changeset [--level major|minor|patch] [--package <name>]... [--base <ref>] [--summary <text>] [<checkout>]\n       verwalter release [--asset <file>]... [--package <name>] [--publish] [--abandon <tag>] [--remote <name>] [--dry-run] [<checkout>]\n       verwalter check --pr <number> [--config <file>] [--dry-run] [<checkout>]\n       verwalter pre-release <package> [--target <branch>] [--level major|minor|patch] [--remote <name>] [--dry-run] [<checkout>]";
 
 fn main() -> ExitCode {
     match run() {
@@ -37,6 +37,7 @@ fn run() -> Result<(), Error> {
     let mut abandon: Option<String> = None;
     let mut target: Option<String> = None;
     let mut summary: Option<String> = None;
+    let mut packages: Vec<String> = Vec::new();
     let mut level: Option<BumpLevel> = None;
     let mut dry_run = false;
     let mut only: Option<String> = None;
@@ -53,7 +54,11 @@ fn run() -> Result<(), Error> {
             "--target" => target = Some(args.next().ok_or(USAGE)?),
             "--summary" => summary = Some(args.next().ok_or(USAGE)?),
             "--dry-run" => dry_run = true,
-            "--package" => only = Some(args.next().ok_or(USAGE)?),
+            "--package" => {
+                let p = args.next().ok_or(USAGE)?;
+                only = Some(p.clone());
+                packages.push(p);
+            }
             "--publish" => publish = true,
             "--level" => {
                 level = Some(match args.next().ok_or(USAGE)?.as_str() {
@@ -114,7 +119,7 @@ fn run() -> Result<(), Error> {
                     repo.config.base_branch.clone()
                 }
             });
-            match check::write_changeset(&repo, &base, level.unwrap_or(BumpLevel::Patch), summary.as_deref())? {
+            match check::write_changeset(&repo, &base, level.unwrap_or(BumpLevel::Patch), summary.as_deref(), &packages)? {
                 Some(path) => println!("{}", path.strip_prefix(&repo.root).unwrap_or(&path).display()),
                 None => println!("every changed package has a pending changeset"),
             }
