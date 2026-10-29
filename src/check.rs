@@ -570,13 +570,13 @@ mod tests {
     const CONFIG: &str = r#"
 [packages.livekit-protocol]
 path = "livekit-protocol"
-versioned_files = ["livekit-protocol/Cargo.toml"]
-changelog = "livekit-protocol/CHANGELOG.md"
+versioned_files = ["Cargo.toml"]
+changelog = "CHANGELOG.md"
 
 [packages.livekit-api]
 path = "livekit-api"
-versioned_files = ["livekit-api/Cargo.toml"]
-changelog = "livekit-api/CHANGELOG.md"
+versioned_files = ["Cargo.toml"]
+changelog = "CHANGELOG.md"
 "#;
 
     fn s(v: &[&str]) -> Vec<String> {
@@ -594,7 +594,7 @@ changelog = "livekit-api/CHANGELOG.md"
             &config,
             "feat",
             &[],
-            &s(&["livekit-api/src/lib.rs", ".changeset/x.md"]),
+            &s(&["src/lib.rs", ".changeset/x.md"]),
             &cs,
         );
         assert_eq!(c.status, Status::Passed);
@@ -603,11 +603,7 @@ changelog = "livekit-api/CHANGELOG.md"
             &config,
             "feat",
             &[],
-            &s(&[
-                "livekit-api/src/lib.rs",
-                "livekit-protocol/x.proto",
-                ".changeset/x.md",
-            ]),
+            &s(&["src/lib.rs", "livekit-protocol/x.proto", ".changeset/x.md"]),
             &cs,
         );
         assert_eq!(c.status, Status::Failed);
@@ -639,7 +635,7 @@ changelog = "livekit-api/CHANGELOG.md"
             &config,
             "release/livekit-api",
             &[],
-            &s(&["livekit-api/Cargo.toml"]),
+            &s(&["Cargo.toml"]),
             &[],
         );
         assert_eq!(c.status, Status::ReleasePullRequest);
@@ -682,7 +678,7 @@ changelog = "livekit-api/CHANGELOG.md"
             &config,
             "feat/x",
             &[],
-            &s(&["livekit-api/b", ".changeset/x.md"]),
+            &s(&["b", ".changeset/x.md"]),
             &[Changeset::parse(".changeset/x.md", "---\nlivekit-api: patch\n---\nx\n").unwrap()],
         );
         c.api.push(ApiFinding {
@@ -715,7 +711,7 @@ changelog = "livekit-api/CHANGELOG.md"
             &config,
             "feat",
             &[],
-            &s(&["livekit-api/x", ".changeset/a.md", ".changeset/b.md"]),
+            &s(&["x", ".changeset/a.md", ".changeset/b.md"]),
             &cs,
         );
         assert_eq!(c.status, Status::Passed);
@@ -736,7 +732,7 @@ changelog = "livekit-api/CHANGELOG.md"
         ];
         packages[0].fixed_with = vec!["ffi".into()];
         packages[1].fixed_with = vec!["core".into()];
-        let config = Config::parse("[packages.core]\npath = \"core\"\nversioned_files = [\"core/Cargo.toml\"]\nchangelog = \"c\"\n[packages.ffi]\npath = \"ffi\"\nversioned_files = [\"ffi/Cargo.toml\"]\nchangelog = \"c\"\n[packages.client]\npath = \"client\"\nversioned_files = [\"client/Cargo.toml\"]\nchangelog = \"c\"\n").unwrap();
+        let config = Config::parse("[packages.core]\npath = \"core\"\nversioned_files = [\"Cargo.toml\"]\nchangelog = \"c\"\n[packages.ffi]\npath = \"ffi\"\nversioned_files = [\"Cargo.toml\"]\nchangelog = \"c\"\n[packages.client]\npath = \"client\"\nversioned_files = [\"Cargo.toml\"]\nchangelog = \"c\"\n").unwrap();
         let cs = [Changeset::parse(".changeset/a.md", "---\ncore: minor\n---\na\n").unwrap()];
         let mut c = evaluate(
             &config,

@@ -356,7 +356,7 @@ mod tests {
     use std::path::PathBuf;
 
     fn repo() -> Repo {
-        let config = Config::parse("[packages.a]\npath = \"a\"\nversioned_files = [\"a/Cargo.toml\"]\nchangelog = \"a/CHANGELOG.md\"\n[packages.b]\npath = \"b\"\nversioned_files = [\"b/Cargo.toml\"]\nchangelog = \"b/CHANGELOG.md\"\n").unwrap();
+        let config = Config::parse("[packages.a]\npath = \"a\"\nversioned_files = [\"Cargo.toml\"]\nchangelog = \"CHANGELOG.md\"\n[packages.b]\npath = \"b\"\nversioned_files = [\"Cargo.toml\"]\nchangelog = \"CHANGELOG.md\"\n").unwrap();
         Repo {
             root: PathBuf::from("."),
             config,

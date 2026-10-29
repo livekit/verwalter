@@ -53,18 +53,18 @@ pin_files = ["Cargo.toml", "Cargo.lock"]
 
 [packages.livekit-protocol]
 path = "livekit-protocol"
-versioned_files = ["livekit-protocol/Cargo.toml"]
-changelog = "livekit-protocol/CHANGELOG.md"
+versioned_files = ["Cargo.toml"]
+changelog = "CHANGELOG.md"
 
 [packages.livekit-api]
 path = "livekit-api"
-versioned_files = ["livekit-api/Cargo.toml"]
-changelog = "livekit-api/CHANGELOG.md"
+versioned_files = ["Cargo.toml"]
+changelog = "CHANGELOG.md"
 
 [packages.livekit]
 path = "livekit"
-versioned_files = ["livekit/Cargo.toml"]
-changelog = "livekit/CHANGELOG.md"
+versioned_files = ["Cargo.toml"]
+changelog = "CHANGELOG.md"
 "#,
     );
     write(&root, "Cargo.toml", "[workspace]\nmembers = [\"livekit-protocol\", \"livekit-api\", \"livekit\"]\n\n[workspace.dependencies]\nlivekit-protocol = { version = \"0.3.1\", path = \"livekit-protocol\" }\nlivekit-api = { version = \"0.4.3\", path = \"livekit-api\" }\n");
@@ -336,8 +336,8 @@ fn release_tags_and_creates_github_releases_resumably() {
     let cfg = fs::read_to_string(root.join("verwalter.toml"))
         .unwrap()
         .replace(
-            "changelog = \"livekit/CHANGELOG.md\"",
-            "changelog = \"livekit/CHANGELOG.md\"\ndraft = true",
+            "path = \"livekit\"\nversioned_files = [\"Cargo.toml\"]\nchangelog = \"CHANGELOG.md\"",
+            "path = \"livekit\"\nversioned_files = [\"Cargo.toml\"]\nchangelog = \"CHANGELOG.md\"\ndraft = true",
         );
     write(root, "verwalter.toml", &cfg);
     git(root, &["commit", "-qam", "release: livekit 0.8.0"]);
@@ -1007,8 +1007,8 @@ fn versioned_files_that_disagree_are_reported() {
         root,
         "verwalter.toml",
         &cfg.replace(
-            "versioned_files = [\"livekit/Cargo.toml\"]",
-            "versioned_files = [\"livekit/Cargo.toml\", { path = \"livekit/README.md\", regex = 'livekit = \"(?<version>[^\"]+)\"' }]",
+            "path = \"livekit\"\nversioned_files = [\"Cargo.toml\"]",
+            "path = \"livekit\"\nversioned_files = [\"Cargo.toml\", { path = \"README.md\", regex = 'livekit = \"(?<version>[^\"]+)\"' }]",
         ),
     );
     write(root, "livekit/README.md", "livekit = \"0.6.9\"\n");
@@ -1173,8 +1173,8 @@ fn publish_runs_dependencies_first_and_blocks_dependents_of_a_failure() {
         root,
         "verwalter.toml",
         &base.replace(
-            "changelog = \"livekit/CHANGELOG.md\"",
-            "changelog = \"livekit/CHANGELOG.md\"\nregistry = \"none\"",
+            "path = \"livekit\"\nversioned_files = [\"Cargo.toml\"]\nchangelog = \"CHANGELOG.md\"",
+            "path = \"livekit\"\nversioned_files = [\"Cargo.toml\"]\nchangelog = \"CHANGELOG.md\"\nregistry = \"none\"",
         ),
     );
     let github_only = verwalter::publish::Options {
@@ -1286,8 +1286,8 @@ fn publish_runs_dependencies_first_and_blocks_dependents_of_a_failure() {
         root,
         "verwalter.toml",
         &format!("{}\n[publish]\npublish = 'echo {{package}} >> $VERWALTER_ROOT/order'\n", base.replace(
-            "changelog = \"livekit-protocol/CHANGELOG.md\"",
-            "changelog = \"livekit-protocol/CHANGELOG.md\"\nregistry = \"crates\"\npublish = \"exit 7\"",
+            "path = \"livekit-protocol\"\nversioned_files = [\"Cargo.toml\"]\nchangelog = \"CHANGELOG.md\"",
+            "path = \"livekit-protocol\"\nversioned_files = [\"Cargo.toml\"]\nchangelog = \"CHANGELOG.md\"\nregistry = \"crates\"\npublish = \"exit 7\"",
         )),
     );
     let repo = Repo::load(root).unwrap();
@@ -1337,8 +1337,8 @@ fn workspace_publish_command_runs_once_and_reports_per_member() {
         &format!(
             "{}\n[publish]\nworkspace = 'echo ws $VERWALTER_PACKAGE $(pwd | xargs basename) >> $VERWALTER_ROOT/order'\n",
             base.replace(
-                "changelog = \"livekit/CHANGELOG.md\"",
-                "changelog = \"livekit/CHANGELOG.md\"\npublish = \"echo own {package} >> $VERWALTER_ROOT/order\""
+                "path = \"livekit\"\nversioned_files = [\"Cargo.toml\"]\nchangelog = \"CHANGELOG.md\"",
+                "path = \"livekit\"\nversioned_files = [\"Cargo.toml\"]\nchangelog = \"CHANGELOG.md\"\npublish = \"echo own {package} >> $VERWALTER_ROOT/order\""
             )
         ),
     );
@@ -1374,8 +1374,8 @@ fn workspace_publish_command_runs_once_and_reports_per_member() {
         &format!(
             "{}\n[publish]\nregistry = \"crates\"\nworkspace = 'true'\n",
             base.replace(
-                "changelog = \"livekit/CHANGELOG.md\"",
-                "changelog = \"livekit/CHANGELOG.md\"\npublish = \"true\""
+                "path = \"livekit\"\nversioned_files = [\"Cargo.toml\"]\nchangelog = \"CHANGELOG.md\"",
+                "path = \"livekit\"\nversioned_files = [\"Cargo.toml\"]\nchangelog = \"CHANGELOG.md\"\npublish = \"true\""
             )
         ),
     );
@@ -1496,8 +1496,8 @@ fn api_check_compares_the_claimed_level_with_the_commands_answer() {
     // VERWALTER_ROOT must be absolute: the command runs in the package.
     let root = &root.canonicalize().unwrap();
     config = config.replace(
-        "changelog = \"livekit-protocol/CHANGELOG.md\"",
-        "changelog = \"livekit-protocol/CHANGELOG.md\"\napi = \"exit 3\"",
+        "path = \"livekit-protocol\"\nversioned_files = [\"Cargo.toml\"]\nchangelog = \"CHANGELOG.md\"",
+        "path = \"livekit-protocol\"\nversioned_files = [\"Cargo.toml\"]\nchangelog = \"CHANGELOG.md\"\napi = \"exit 3\"",
     );
     let config = verwalter::config::Config::parse(&config).unwrap();
     write(

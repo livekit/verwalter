@@ -113,7 +113,7 @@ mod tests {
 
     fn config(top: &str, extra: &str) -> Config {
         Config::parse(&format!(
-            "{top}\n[packages.x]\npath = \"x\"\nversioned_files = [\"x/Cargo.toml\"]\nchangelog = \"x/CHANGELOG.md\"\n{extra}\n"
+            "{top}\n[packages.x]\npath = \"x\"\nversioned_files = [\"Cargo.toml\"]\nchangelog = \"CHANGELOG.md\"\n{extra}\n"
         ))
         .unwrap()
     }

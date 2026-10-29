@@ -164,13 +164,16 @@
           "type": "string"
         },
         "versioned_files": {
+          "description": "Relative to `path`. `Config::parse` makes them repo-relative.",
           "type": "array",
           "items": {
             "$ref": "#/$defs/VersionedFile"
           }
         },
         "changelog": {
-          "type": "string"
+          "description": "Relative to `path`. Default: `CHANGELOG.md` in the package.",
+          "type": "string",
+          "default": "CHANGELOG.md"
         },
         "tag_template": {
           "description": "Default: \"v{version}\" with one package, \"{package}-v{version}\" otherwise.",
@@ -222,8 +225,7 @@
       "additionalProperties": false,
       "required": [
         "path",
-        "versioned_files",
-        "changelog"
+        "versioned_files"
       ]
     },
     "VersionedFile": {

@@ -189,13 +189,13 @@ pin_files = ["Cargo.toml", "Cargo.lock"]
 
 [packages.livekit-protocol]
 path = "livekit-protocol"
-versioned_files = ["livekit-protocol/Cargo.toml"]
-changelog = "livekit-protocol/CHANGELOG.md"
+versioned_files = ["Cargo.toml"]
+changelog = "CHANGELOG.md"
 
 [packages.livekit-api]
 path = "livekit-api"
-versioned_files = ["livekit-api/Cargo.toml"]
-changelog = "livekit-api/CHANGELOG.md"
+versioned_files = ["Cargo.toml"]
+changelog = "CHANGELOG.md"
 "#;
 
     struct Repo(PathBuf);

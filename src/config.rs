@@ -48,7 +48,10 @@ impl VersionedFile {
 #[serde(deny_unknown_fields)]
 pub struct Package {
     pub path: String,
+    /// Relative to `path`. `Config::parse` makes them repo-relative.
     pub versioned_files: Vec<VersionedFile>,
+    /// Relative to `path`. Default: `CHANGELOG.md` in the package.
+    #[serde(default = "default_changelog")]
     pub changelog: String,
     /// Default: "v{version}" with one package, "{package}-v{version}" otherwise.
     pub tag_template: Option<String>,
@@ -147,6 +150,26 @@ pub struct Check {
     pub api: Option<String>,
 }
 
+fn default_changelog() -> String {
+    "CHANGELOG.md".into()
+}
+
+/// `file` relative to a package `path`, as a repo-relative path. `..`
+/// is resolved, so a sibling directory's file is `../sibling/file`.
+fn under(path: &str, file: &str) -> String {
+    let mut parts: Vec<&str> = Vec::new();
+    for c in path.split('/').chain(file.split('/')) {
+        match c {
+            "" | "." => {}
+            ".." => {
+                parts.pop();
+            }
+            c => parts.push(c),
+        }
+    }
+    parts.join("/")
+}
+
 fn default_jobs() -> usize {
     4
 }
@@ -172,7 +195,19 @@ fn default_prerelease_label() -> String {
 
 impl Config {
     pub fn parse(text: &str) -> Result<Self, crate::Error> {
-        let config: Self = toml::from_str(text)?;
+        let mut config: Self = toml::from_str(text)?;
+        // Spec: Package.versioned_files and changelog_file are relative to
+        // the package's path. Everything after this sees repo-relative paths.
+        for p in config.packages.values_mut() {
+            for f in &mut p.versioned_files {
+                match f {
+                    VersionedFile::Path(path) | VersionedFile::Regex { path, .. } => {
+                        *path = under(&p.path, path)
+                    }
+                }
+            }
+            p.changelog = under(&p.path, &p.changelog);
+        }
         let mut seen = std::collections::BTreeSet::new();
         for group in &config.fixed {
             for name in group {
@@ -302,13 +337,13 @@ pin_files = ["Cargo.toml", "Cargo.lock"]
 
 [packages.livekit-protocol]
 path = "livekit-protocol"
-versioned_files = ["livekit-protocol/Cargo.toml", "Cargo.lock"]
-changelog = "livekit-protocol/CHANGELOG.md"
+versioned_files = ["Cargo.toml", "Cargo.lock"]
+changelog = "CHANGELOG.md"
 
 [packages.livekit-ffi]
 path = "livekit-ffi"
-versioned_files = ["livekit-ffi/Cargo.toml", "livekit-ffi-node-bindings/package.json"]
-changelog = "livekit-ffi/CHANGELOG.md"
+versioned_files = ["Cargo.toml", "livekit-ffi-node-bindings/package.json"]
+changelog = "CHANGELOG.md"
 tag_template = "ffi/v{version}"
 release = "tag_and_release"
 draft = true
@@ -431,6 +466,19 @@ release = "tag"
 
     /// The editor schema. An additive change updates v1.json in place. A
     /// breaking change freezes v1.json and starts v2.json.
+    // Spec: Package.versioned_files and changelog_file are relative to path.
+    #[test]
+    fn files_are_relative_to_the_package_path() {
+        let c = Config::parse("[packages.a]\npath = \"crates/a\"\nversioned_files = [\"Cargo.toml\", { path = \"../bindings/package.json\", regex = \"v(?<version>.+)\" }]\n[packages.b]\npath = \".\"\nversioned_files = [\"package.json\"]\nchangelog = \"docs/CHANGES.md\"\n").unwrap();
+        let a = &c.packages["a"];
+        assert_eq!(a.versioned_files[0].path(), "crates/a/Cargo.toml");
+        assert_eq!(a.versioned_files[1].path(), "crates/bindings/package.json");
+        assert_eq!(a.changelog, "crates/a/CHANGELOG.md");
+        let b = &c.packages["b"];
+        assert_eq!(b.versioned_files[0].path(), "package.json");
+        assert_eq!(b.changelog, "docs/CHANGES.md");
+    }
+
     #[test]
     fn schema_is_current() {
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/schemas/v1.json");

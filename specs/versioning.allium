@@ -113,7 +113,9 @@ entity Package {
     -- (Cargo.lock, uv.lock) are versioned files too, edited directly by a
     -- handler; the tool never runs a package manager. The first file is
     -- the version; files that disagree are a warning (VersionedFilesAgree).
+    -- Paths are relative to the package's path; `..` reaches a sibling.
     versioned_files: Set<VersionedFile>
+    -- Relative to the package's path. Default: CHANGELOG.md.
     changelog_file: String
     version: Version
     dependencies: Set<Package>

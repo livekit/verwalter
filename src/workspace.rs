@@ -437,7 +437,7 @@ mod tests {
             "[package]\nname = \"e\"\nversion = \"0.1.0\"\n",
         );
         let config = Config::parse(
-            "ignore = [\"examples/*\", \"b\"]\n[packages.a]\npath = \"crates/a\"\nversioned_files = [\"crates/a/Cargo.toml\"]\nchangelog = \"crates/a/CHANGELOG.md\"\n[packages.c]\npath = \"crates/c\"\nversioned_files = [\"crates/c/Cargo.toml\"]\nchangelog = \"x\"\n[packages.gone]\npath = \"crates/gone\"\nversioned_files = [\"crates/gone/Cargo.toml\"]\nchangelog = \"x\"\n",
+            "ignore = [\"examples/*\", \"b\"]\n[packages.a]\npath = \"crates/a\"\nversioned_files = [\"Cargo.toml\"]\nchangelog = \"CHANGELOG.md\"\n[packages.c]\npath = \"crates/c\"\nversioned_files = [\"Cargo.toml\"]\nchangelog = \"x\"\n[packages.gone]\npath = \"crates/gone\"\nversioned_files = [\"Cargo.toml\"]\nchangelog = \"x\"\n",
         )
         .unwrap();
         let f = check(&t.0, &config);
@@ -449,7 +449,7 @@ mod tests {
             }],
             "b and examples/* are ignored; a and the private c are fine"
         );
-        let open = Config::parse("[packages.a]\npath = \"crates/a\"\nversioned_files = [\"crates/a/Cargo.toml\"]\nchangelog = \"x\"\n").unwrap();
+        let open = Config::parse("[packages.a]\npath = \"crates/a\"\nversioned_files = [\"Cargo.toml\"]\nchangelog = \"x\"\n").unwrap();
         let unmanaged: Vec<String> = check(&t.0, &open)
             .iter()
             .filter_map(|f| {
