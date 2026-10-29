@@ -93,7 +93,8 @@ a `workspace:*` range with the dependency's version (`1.5.0`) and
 `workspace:^` with `^1.5.0`, from the linked `node_modules`, so run
 `pnpm install` in the workflow first. `npm publish` ships the literal
 `workspace:*`, which no installer accepts. The built-in command is
-therefore `pnpm publish` when `pnpm-workspace.yaml` exists. `cargo
+therefore `pnpm publish` when a `pnpm-workspace.yaml` is in the package's
+directory or above it, up to the repo root. `cargo
 publish` does the same for a path or `workspace = true` dependency: the
 published manifest keeps only the `version`, and cargo refuses to package
 a crate whose dependency's version is not on the index yet, which is why

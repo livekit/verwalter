@@ -58,6 +58,20 @@ struct Candidate {
 /// Name of the synthetic candidate for `[publish].workspace`.
 const WORKSPACE: &str = "[workspace]";
 
+/// pnpm finds its workspace by walking up from the package directory to
+/// the nearest `pnpm-workspace.yaml`, which need not be at the repo root.
+fn in_pnpm_workspace(root: &std::path::Path, path: &str) -> bool {
+    let mut dir = root.join(path);
+    loop {
+        if dir.join("pnpm-workspace.yaml").exists() {
+            return true;
+        }
+        if dir == root || !dir.pop() || !dir.starts_with(root) {
+            return false;
+        }
+    }
+}
+
 /// Every package whose current version is tagged, or only those in
 /// `only`, with its in-repo dependencies among those packages. A
 /// candidate without a publish command is an error before anything runs.
@@ -90,8 +104,7 @@ fn candidates(
             ws.members.push((p.name.clone(), p.version.clone(), tag));
             continue;
         }
-        let pnpm = repo.root.join("pnpm-workspace.yaml").exists();
-        let command = repo.config.publish_command(&p.name, pnpm).ok_or_else(|| {
+        let command = repo.config.publish_command(&p.name, in_pnpm_workspace(&repo.root, &cfg.path)).ok_or_else(|| {
             format!("{}: no publish command: set `registry` or `publish` on the package, or `[publish]` defaults", p.name)
         })?;
         out.insert(
@@ -316,7 +329,9 @@ pub fn run(repo: &Repo, options: &Options, http: Http) -> Result<Vec<Outcome>, E
                     };
                     for (m, v, t) in units {
                         done.insert(m.clone(), "dry-run");
-                        outcomes.push(outcome(m, v, t, "dry-run", ""));
+                        // The reason carries the command, so a dry run
+                        // shows what each package would run.
+                        outcomes.push(outcome(m, v, t, "dry-run", &c.command));
                     }
                     resolved = true;
                     continue;

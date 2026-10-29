@@ -1167,6 +1167,29 @@ fn publish_runs_dependencies_first_and_blocks_dependents_of_a_failure() {
         only: None,
     };
 
+    // A pnpm workspace above the package, not at the root, makes the npm
+    // default `pnpm publish`: a dry run names the command it would run.
+    write(
+        root,
+        "verwalter.toml",
+        &format!("{base}\n[publish]\nregistry = \"npm\"\n"),
+    );
+    write(root, "livekit-api/pnpm-workspace.yaml", "packages: []\n");
+    let dry = verwalter::publish::Options {
+        jobs: Some(1),
+        dry_run: true,
+        only: Some(["livekit-api".to_string()].into_iter().collect()),
+    };
+    let out = verwalter::publish::run(&Repo::load(root).unwrap(), &dry, &no_registry).unwrap();
+    assert!(out[0].reason.contains("pnpm publish"), "{out:?}");
+    let dry = verwalter::publish::Options {
+        only: Some(["livekit".to_string()].into_iter().collect()),
+        ..dry
+    };
+    let out = verwalter::publish::run(&Repo::load(root).unwrap(), &dry, &no_registry).unwrap();
+    assert!(out[0].reason.contains("npm publish"), "{out:?}");
+    fs::remove_file(root.join("livekit-api/pnpm-workspace.yaml")).unwrap();
+
     // No command at all: an error before anything runs.
     let err = verwalter::publish::run(&Repo::load(root).unwrap(), &opts, &no_registry)
         .err()
@@ -1270,7 +1293,9 @@ fn publish_runs_dependencies_first_and_blocks_dependents_of_a_failure() {
     );
     let repo = Repo::load(root).unwrap();
     assert_eq!(
-        repo.config.publish_command("livekit-protocol", false).as_deref(),
+        repo.config
+            .publish_command("livekit-protocol", false)
+            .as_deref(),
         Some("exit 7")
     );
     let has_protocol = |url: &str| -> Result<u16, verwalter::Error> {
