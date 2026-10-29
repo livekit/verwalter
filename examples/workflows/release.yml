@@ -30,12 +30,12 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || (github.event.pull_request.merged == true && startsWith(github.event.pull_request.head.ref, 'release/') && github.event.pull_request.user.login == 'github-actions[bot]' && contains(github.event.pull_request.body, '<!-- verwalter release -->'))
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: main
       # Build whatever the release needs: wheels, binaries, packages.
       - run: mkdir -p dist && echo "built" > dist/artifact.txt
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: dist
           path: dist
@@ -47,13 +47,13 @@ jobs:
       released: ${{ steps.verwalter.outputs.released }}
       releases: ${{ steps.verwalter.outputs.releases }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # The merge commit itself: a push to main right after the merge
           # must not move the tags.
           ref: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
           fetch-depth: 0
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: dist
           path: dist
@@ -78,11 +78,11 @@ jobs:
       contents: write   # drafts: gh release upload and edit
       id-token: write   # trusted publishing
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
           fetch-depth: 0  # tags decide what is published
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: dist
           path: dist
