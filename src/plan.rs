@@ -352,12 +352,16 @@ mod tests {
         assert!(w[0].contains("core 0.3.1, ffi 0.2.0"), "{}", w[0]);
     }
 
-    // Spec: next_version of a pre-release is the promote step.
+    // Spec: next_version of a pre-release is the promote step, unless a
+    // higher level landed after the rc.
     #[test]
     fn prerelease_promotes_to_final() {
         let packages = vec![pkg("livekit", "1.6.0-rc.2", &[])];
         let changesets = [cs("x.md", &[("livekit", BumpLevel::Minor)])];
         let p = plan(&packages, &changesets, BumpLevel::Patch);
         assert_eq!(p[0].to.to_string(), "1.6.0");
+        let changesets = [cs("x.md", &[("livekit", BumpLevel::Major)])];
+        let p = plan(&packages, &changesets, BumpLevel::Patch);
+        assert_eq!(p[0].to.to_string(), "2.0.0");
     }
 }

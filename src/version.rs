@@ -46,10 +46,27 @@ fn bump(v: &Version, level: BumpLevel) -> Version {
 
 /// Spec: next_version. The highest pending level wins; no pending bump
 /// returns the version unchanged. From a pre-release, the result is the
-/// stable version it was leading to (the promote step), whatever the level.
+/// stable version it was leading to (the promote step) when that version
+/// already covers the pending level, else that version bumped by the
+/// level: `1.6.0-rc.2` + major gives `2.0.0`, + minor or patch `1.6.0`.
+/// A release is never lower than the rc that preceded it.
 pub fn next_version(current: &Version, pending: impl IntoIterator<Item = BumpLevel>) -> Version {
-    match pending.into_iter().max() {
-        _ if current.is_prerelease() => Version::Stable(current.stable_component()),
+    let level = pending.into_iter().max();
+    if current.is_prerelease() {
+        let target = Version::Stable(current.stable_component());
+        let (_, minor, patch) = components(&target);
+        let covered = match level {
+            None | Some(BumpLevel::Patch) => true,
+            Some(BumpLevel::Minor) => patch == 0,
+            Some(BumpLevel::Major) => minor == 0 && patch == 0,
+        };
+        return if covered {
+            target
+        } else {
+            bump(&target, level.unwrap())
+        };
+    }
+    match level {
         Some(level) => bump(current, level),
         None => current.clone(),
     }
@@ -176,5 +193,29 @@ mod tests {
 
         // The final release from the rc: the pending minor resolves to 1.6.0.
         assert_eq!(next_version(&h, [BumpLevel::Minor]), v("1.6.0"));
+    }
+
+    // Spec: the pending level wins over the rc's target. A release is
+    // never lower than its rc.
+    #[test]
+    fn promote_from_rc_follows_the_pending_level() {
+        let rc = v("1.6.0-rc.2");
+        assert_eq!(next_version(&rc, [BumpLevel::Patch]), v("1.6.0"));
+        assert_eq!(next_version(&rc, [BumpLevel::Minor]), v("1.6.0"));
+        assert_eq!(next_version(&rc, [BumpLevel::Major]), v("2.0.0"));
+        assert_eq!(next_version(&rc, []), v("1.6.0"));
+        // A patch rc with a minor changeset added after it.
+        assert_eq!(
+            next_version(&v("1.5.2-rc.1"), [BumpLevel::Minor]),
+            v("1.6.0")
+        );
+        assert_eq!(
+            next_version(&v("2.0.0-rc.1"), [BumpLevel::Major]),
+            v("2.0.0")
+        );
+        assert_eq!(
+            next_version(&v("0.4.0-rc.1"), [BumpLevel::Major]),
+            v("1.0.0")
+        );
     }
 }

@@ -296,7 +296,9 @@ rule OpenOrUpdateReleasePullRequest {
     when: ReleasePlanRecomputed(repository)
     let pending = filter(Packages, p => p.repository = repository and p.has_pending_bump)
     -- next_version of a pre-release is its final version (the promote
-    -- step): the rc already encodes the bump of the pending changesets.
+    -- step) when that version covers the pending level, else that version
+    -- bumped by the level: 1.6.0-rc.2 with a major pending gives 2.0.0.
+    -- A release is never lower than the rc before it.
     -- 0.x follows the changesets rules: major gives 1.0.0, minor bumps
     -- the minor component. (knope and rust-sdks today bump one level
     -- lower on 0.x; this is a deliberate change.) The level is capped by
