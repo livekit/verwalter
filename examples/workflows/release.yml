@@ -54,7 +54,7 @@ jobs:
           name: dist
           path: dist
       - id: verwalter
-        uses: lukasIO/verwalter@v0.9.0
+        uses: lukasIO/verwalter@v0.10.0
         with:
           command: release
           # Attached to the GitHub release when it is created. Leave out
