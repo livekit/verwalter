@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.16.0
+
+### Minor Changes
+
+- The check comment lists the bump each changeset claims, per package, on a passing PR too, and the dependents and fixed-group members that ride along. It is deleted only when the PR claims nothing. The `max_bump` config field is removed: a changeset says what a change is. - [`b5a57a7`](https://github.com/lukasIO/verwalter/commit/b5a57a7f8705f9259572560339dcd397448c7c26) ([@lukasIO](https://github.com/lukasIO))
+
+### Patch Changes
+
+- README, docs and example workflows pin v0.15.0. - [`dc18056`](https://github.com/lukasIO/verwalter/commit/dc18056034e189bc56f2fb66d4d4ce7ee4e3f7d4) ([@lukasIO](https://github.com/lukasIO))
+
 ## 0.15.0
 
 ### Minor Changes
