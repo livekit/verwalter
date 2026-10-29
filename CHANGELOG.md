@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.11.0
+
+### Minor Changes
+
+- A package left at a pre-release version is in the next release PR even with no pending changeset. The changelog entry says that it promotes the rc with no further changes. - [`5f9a869`](https://github.com/lukasIO/verwalter/commit/5f9a86967195f53ad039e2f3bec5ce4e9503171b) ([@lukasIO](https://github.com/lukasIO))
+
+### Patch Changes
+
+- `check` reads only the config, so a changeset that the tool cannot read or that names an unknown package no longer fails the run before the check starts. The error goes into the PR comment and the check fails. - [`31a3b68`](https://github.com/lukasIO/verwalter/commit/31a3b686923a20436109bda4dba04114cd3669cc) ([@lukasIO](https://github.com/lukasIO))
+- The README and the example workflows point at `v0.10.0`. - [`90f8b4c`](https://github.com/lukasIO/verwalter/commit/90f8b4cc9272d7590f97ebefba3253f45422ae4a) ([@lukasIO](https://github.com/lukasIO))
+- A pre-release of a fixed group uses one branch, `release/<first member>-rc`, whichever member was named. Two members no longer open two rc PRs. - [`5f9a869`](https://github.com/lukasIO/verwalter/commit/5f9a86967195f53ad039e2f3bec5ce4e9503171b) ([@lukasIO](https://github.com/lukasIO))
+- The example release workflow checks out the merge commit of the release PR, not the head of `main`. A push that lands right after the merge no longer moves the tags. - [`f730f24`](https://github.com/lukasIO/verwalter/commit/f730f24505b882e2ed35bab5429c274e3973bac4) ([@lukasIO](https://github.com/lukasIO))
+
 ## 0.10.0
 
 ### Minor Changes
