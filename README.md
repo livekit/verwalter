@@ -147,7 +147,7 @@ publish = "cargo publish --no-verify"   # command for packages on that registry,
 workspace = "cargo publish --workspace" # or: one command from the root for all of them (pnpm -r publish)
 
 [check]                          # for `verwalter check`
-api = "cargo semver-checks --baseline-rev $VERWALTER_BASELINE_TAG 2>&1 | sed -n 's/.*requires new \\([a-z]*\\) version.*/\\1/p'"
+api = "cargo semver-checks --baseline-rev $VERWALTER_BASELINE_TAG 2>&1 | tee /dev/stderr | sed -n 's/.*requires new \\([a-z]*\\) version.*/\\1/p'"
 
 [packages.livekit-protocol]
 path = "livekit-protocol"
@@ -178,7 +178,7 @@ comment names the level to use. Commands that work today:
 
 | Tool | Command | Answers |
 |---|---|---|
-| cargo-semver-checks | `cargo semver-checks --baseline-rev $VERWALTER_BASELINE_TAG 2>&1 \| sed -n 's/.*requires new \([a-z]*\) version.*/\1/p'` | `major`, `minor` |
+| cargo-semver-checks | `cargo semver-checks --baseline-rev $VERWALTER_BASELINE_TAG 2>&1 \| tee /dev/stderr \| sed -n 's/.*requires new \([a-z]*\) version.*/\1/p'` | `major`, `minor` |
 | griffe | `griffe check <module> -a $VERWALTER_BASELINE_TAG >/dev/null \|\| echo major` | `major` |
 | break-check | `break-check detect --baseline <dir> --format json \| jq -r .recommendedBump` | `major`, `minor`, `patch` |
 

@@ -73,6 +73,11 @@ fn run() -> Result<(), Error> {
             _ => root = PathBuf::from(arg),
         }
     }
+    // Commands run in package paths see VERWALTER_ROOT: it must be
+    // absolute, or `$VERWALTER_ROOT/dist` resolves inside the package.
+    let root = root
+        .canonicalize()
+        .map_err(|e| format!("{}: {e}", root.display()))?;
     let config_path = config.unwrap_or_else(|| root.join(verwalter::repo::CONFIG_FILE));
     // Spec: ChangesetCheckOnContributorPullRequest. `check` reads the
     // config only: a broken changeset on the PR is its finding, not a

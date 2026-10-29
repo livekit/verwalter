@@ -1520,6 +1520,8 @@ fn api_check_compares_the_claimed_level_with_the_commands_answer() {
     let root = &repo.0;
     let mut config = fs::read_to_string(root.join("verwalter.toml")).unwrap();
     config.push_str("\n[check]\napi = \"echo \\\"$VERWALTER_PACKAGE $VERWALTER_LEVEL $VERWALTER_BASELINE_TAG\\\" >> $VERWALTER_ROOT/calls; echo major\"\n");
+    // VERWALTER_ROOT must be absolute: the command runs in the package.
+    let root = &root.canonicalize().unwrap();
     config = config.replace(
         "changelog = \"livekit-protocol/CHANGELOG.md\"",
         "changelog = \"livekit-protocol/CHANGELOG.md\"\napi = \"exit 3\"",
