@@ -85,6 +85,13 @@ fn candidates(
         if cfg.release == ReleaseMode::None || only.is_some_and(|o| !o.contains(&p.name)) {
             continue;
         }
+        // Spec: Package.publish_command. `registry = "none"` set on the
+        // package itself, with no command, says there is nothing to
+        // publish: a GitHub-release-only package. The default `none`
+        // with nothing configured anywhere is still an error below.
+        if cfg.registry == Some(crate::registry::Registry::None) && cfg.publish.is_none() {
+            continue;
+        }
         let tag = repo.config.tag_for(&p.name, &p.version);
         if !git::ref_exists(&repo.root, &tag) {
             continue;

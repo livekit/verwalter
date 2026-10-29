@@ -141,7 +141,9 @@ entity Package {
     -- workspace the npm default is pnpm publish: npm ships a
     -- `workspace:` range as is, pnpm resolves it to the version. For a
     -- pre-release the npm default adds `--tag next`, so `latest` stays
-    -- on the last final version.
+    -- on the last final version. A package that sets registry none
+    -- itself, with no command, has nothing to publish and is left out
+    -- of `publish`: it is released on GitHub only.
     publish_command: String?
     -- True when config.publish.workspace is set and the package has no
     -- publish command of its own and no registry other than the default:

@@ -1167,6 +1167,28 @@ fn publish_runs_dependencies_first_and_blocks_dependents_of_a_failure() {
     fs::remove_file(root.join("livekit-api/pnpm-workspace.yaml")).unwrap();
     write(root, "verwalter.toml", &base);
 
+    // `registry = "none"` on the package, no command: nothing to publish,
+    // left out without an error. The default none still errors below.
+    write(
+        root,
+        "verwalter.toml",
+        &base.replace(
+            "changelog = \"livekit/CHANGELOG.md\"",
+            "changelog = \"livekit/CHANGELOG.md\"\nregistry = \"none\"",
+        ),
+    );
+    let github_only = verwalter::publish::Options {
+        jobs: Some(1),
+        dry_run: true,
+        only: Some(["livekit".to_string()].into_iter().collect()),
+    };
+    assert!(
+        verwalter::publish::run(&Repo::load(root).unwrap(), &github_only, &no_registry)
+            .unwrap()
+            .is_empty()
+    );
+    write(root, "verwalter.toml", &base);
+
     // No command at all: an error before anything runs.
     let err = verwalter::publish::run(&Repo::load(root).unwrap(), &opts, &no_registry)
         .err()
