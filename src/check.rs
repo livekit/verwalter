@@ -152,20 +152,15 @@ pub fn api_check(
                 format!("the command failed ({})\n{stdout}{stderr}", out.status),
             ))
         } else {
-            match kind {
-                "" => None,
-                "major" | "minor" | "patch" => {
-                    let kind = match kind {
-                        "major" => BumpLevel::Major,
-                        "minor" => BumpLevel::Minor,
-                        _ => BumpLevel::Patch,
-                    };
+            match kind.parse::<BumpLevel>() {
+                _ if kind.is_empty() => None,
+                Ok(kind) => {
                     let required = required_level(&version, kind);
                     (claimed < required).then_some((Some(required), stderr))
                 }
-                other => Some((
+                Err(()) => Some((
                     None,
-                    format!("the command printed `{other}`, not major, minor or patch\n{stderr}"),
+                    format!("the command printed `{kind}`, not major, minor or patch\n{stderr}"),
                 )),
             }
         };
@@ -462,12 +457,7 @@ fn read_changesets(
         let Ok(content) = fs::read_to_string(root.join(f)) else {
             continue;
         };
-        let changeset = Changeset::parse(f, &content).map_err(|e| format!("`{f}`: {e}"))?;
-        let unknown = changeset.unknown_packages(&known);
-        if !unknown.is_empty() {
-            return Err(format!("`{f}`: names unknown package {}", unknown.join(", ")).into());
-        }
-        out.push(changeset);
+        out.push(Changeset::parse_known(f, &content, &known).map_err(|e| format!("`{f}`: {e}"))?);
     }
     Ok(out)
 }

@@ -8,7 +8,7 @@
 
 use crate::{
     apply, branches, git,
-    github::{upsert_pr, Gh, PullRequest, MARKER},
+    github::{open_pr, section, upsert_pr, Gh, PullRequest, MARKER},
     plan::PlannedRelease,
     repo::Repo,
     version::{next_prerelease_version, BumpLevel},
@@ -149,29 +149,12 @@ pub fn open(
          Changesets stay pending; the next final release includes them.\n"
     );
     for release in &releases {
-        body.push_str(&format!(
-            "\n## {} `{}` → `{to}`\n\n",
-            release.package, release.from
-        ));
-        body.push_str(
-            apply::render_entry(release, &repo.changesets, &releases)
-                .trim_start_matches(|c| c != '\n')
-                .trim_start(),
-        );
+        body.push_str(&section(release, repo, &releases, ""));
     }
-    let open: Vec<PullRequest> = serde_json::from_str(&gh(&[
-        "pr",
-        "list",
-        "--state",
-        "open",
-        "--head",
-        &branch,
-        "--json",
-        "number,headRefName,baseRefName",
-    ])?)?;
+    let existing = open_pr(gh, &branch)?;
     let pr = upsert_pr(
         gh,
-        open.first(),
+        existing.as_ref(),
         &branch,
         target,
         &title,

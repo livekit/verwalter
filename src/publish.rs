@@ -121,6 +121,22 @@ fn candidates(repo: &Repo) -> Result<BTreeMap<String, Candidate>, Error> {
     Ok(out)
 }
 
+fn outcome(
+    package: &str,
+    version: &crate::Version,
+    tag: &str,
+    status: &'static str,
+    reason: impl Into<String>,
+) -> Outcome {
+    Outcome {
+        package: package.to_string(),
+        version: version.to_string(),
+        tag: tag.to_string(),
+        status,
+        reason: reason.into(),
+    }
+}
+
 /// Per-member outcomes after the workspace command: the registry says
 /// what is there; without a registry the command's exit status does.
 fn workspace_outcomes(
@@ -138,17 +154,12 @@ fn workspace_outcomes(
                 None if ok => "published",
                 None => "failed",
             };
-        out.push(Outcome {
-            package: name.clone(),
-            version: version.to_string(),
-            tag: tag.clone(),
-            status,
-            reason: if status == "failed" {
-                "not on the registry after the workspace command".into()
-            } else {
-                String::new()
-            },
-        });
+        let reason = if status == "failed" {
+            "not on the registry after the workspace command"
+        } else {
+            ""
+        };
+        out.push(outcome(name, version, tag, status, reason));
     }
     Ok(out)
 }
@@ -219,13 +230,13 @@ pub fn run(repo: &Repo, options: &Options, http: Http) -> Result<Vec<Outcome>, E
                         .find(|d| matches!(done.get(*d).copied(), Some("failed" | "blocked")))
                     {
                         done.insert(name.clone(), "blocked");
-                        outcomes.push(Outcome {
-                            package: name.clone(),
-                            version: c.version.to_string(),
-                            tag: c.tag.clone(),
-                            status: "blocked",
-                            reason: format!("{dep} did not publish"),
-                        });
+                        outcomes.push(outcome(
+                            name,
+                            &c.version,
+                            &c.tag,
+                            "blocked",
+                            format!("{dep} did not publish"),
+                        ));
                         progressed = true;
                     }
                 }
@@ -261,13 +272,7 @@ pub fn run(repo: &Repo, options: &Options, http: Http) -> Result<Vec<Outcome>, E
                         done.insert(name.clone(), "exists");
                         for (m, v, t) in &c.members {
                             done.insert(m.clone(), "exists");
-                            outcomes.push(Outcome {
-                                package: m.clone(),
-                                version: v.to_string(),
-                                tag: t.clone(),
-                                status: "exists",
-                                reason: "already on the registry".into(),
-                            });
+                            outcomes.push(outcome(m, v, t, "exists", "already on the registry"));
                         }
                         resolved = true;
                         continue;
@@ -279,45 +284,31 @@ pub fn run(repo: &Repo, options: &Options, http: Http) -> Result<Vec<Outcome>, E
                     )?;
                     if on_registry == Some(true) {
                         done.insert(name.clone(), "exists");
-                        outcomes.push(Outcome {
-                            package: name.clone(),
-                            version: c.version.to_string(),
-                            tag: c.tag.clone(),
-                            status: "exists",
-                            reason: "already on the registry".into(),
-                        });
+                        outcomes.push(outcome(
+                            name,
+                            &c.version,
+                            &c.tag,
+                            "exists",
+                            "already on the registry",
+                        ));
                         resolved = true;
                         continue;
                     }
                 }
-                let first = if name == WORKSPACE {
-                    false
-                } else {
-                    match registry::exists(registry::package_url(&repo.config, name), http)? {
-                        Some(has_any) => !has_any,
-                        None => crate::release::first_release_by_tags(repo, name, &c.version)?,
-                    }
-                };
+                let first = name != WORKSPACE
+                    && crate::release::first_release(repo, name, &c.version, http)?;
                 if options.dry_run {
                     println!("would run in {}: {}", c.path, c.command);
                     done.insert(name.clone(), "dry-run");
-                    let units: Vec<(String, String, String)> = if c.members.is_empty() {
-                        vec![(name.clone(), c.version.to_string(), c.tag.clone())]
+                    let own = [(name.clone(), c.version.clone(), c.tag.clone())];
+                    let units = if c.members.is_empty() {
+                        &own[..]
                     } else {
-                        c.members
-                            .iter()
-                            .map(|(m, v, t)| (m.clone(), v.to_string(), t.clone()))
-                            .collect()
+                        &c.members
                     };
                     for (m, v, t) in units {
                         done.insert(m.clone(), "dry-run");
-                        outcomes.push(Outcome {
-                            package: m,
-                            version: v,
-                            tag: t,
-                            status: "dry-run",
-                            reason: String::new(),
-                        });
+                        outcomes.push(outcome(m, v, t, "dry-run", ""));
                     }
                     resolved = true;
                     continue;
@@ -338,13 +329,13 @@ pub fn run(repo: &Repo, options: &Options, http: Http) -> Result<Vec<Outcome>, E
                 for (name, c) in &candidates {
                     if !done.contains_key(name) {
                         done.insert(name.clone(), "blocked");
-                        outcomes.push(Outcome {
-                            package: name.clone(),
-                            version: c.version.to_string(),
-                            tag: c.tag.clone(),
-                            status: "blocked",
-                            reason: "dependency cycle".into(),
-                        });
+                        outcomes.push(outcome(
+                            name,
+                            &c.version,
+                            &c.tag,
+                            "blocked",
+                            "dependency cycle",
+                        ));
                     }
                 }
                 return Ok(());
@@ -367,13 +358,14 @@ pub fn run(repo: &Repo, options: &Options, http: Http) -> Result<Vec<Outcome>, E
                 }
                 continue;
             }
-            outcomes.push(Outcome {
-                package: name.clone(),
-                version: c.version.to_string(),
-                tag: c.tag.clone(),
-                status: if ok { "published" } else { "failed" },
-                reason: if ok { String::new() } else { status },
-            });
+            let reason = if ok { String::new() } else { status };
+            outcomes.push(outcome(
+                &name,
+                &c.version,
+                &c.tag,
+                if ok { "published" } else { "failed" },
+                reason,
+            ));
         }
     })?;
     Ok(outcomes)
@@ -382,28 +374,22 @@ pub fn run(repo: &Repo, options: &Options, http: Http) -> Result<Vec<Outcome>, E
 /// Spec: WorkflowPublishHandoff. Appends to `$GITHUB_OUTPUT` when set.
 /// Returns the summary for stdout.
 pub fn write_outputs(outcomes: &[Outcome]) -> Result<String, Error> {
-    let names = |status: &str| -> Vec<&str> {
-        outcomes
-            .iter()
-            .filter(|o| o.status == status)
-            .map(|o| o.package.as_str())
-            .collect()
+    let names = |status: &str| {
+        serde_json::to_string(
+            &outcomes
+                .iter()
+                .filter(|o| o.status == status)
+                .map(|o| o.package.as_str())
+                .collect::<Vec<_>>(),
+        )
     };
-    if let Ok(path) = std::env::var("GITHUB_OUTPUT") {
-        use std::io::Write;
-        let mut f = std::fs::OpenOptions::new()
-            .append(true)
-            .create(true)
-            .open(path)?;
-        writeln!(
-            f,
-            "published={}",
-            serde_json::to_string(&names("published"))?
-        )?;
-        writeln!(f, "failed={}", serde_json::to_string(&names("failed"))?)?;
-        writeln!(f, "blocked={}", serde_json::to_string(&names("blocked"))?)?;
-        writeln!(f, "outcomes={}", serde_json::to_string(outcomes)?)?;
-    }
+    crate::github::append_output(&format!(
+        "published={}\nfailed={}\nblocked={}\noutcomes={}\n",
+        names("published")?,
+        names("failed")?,
+        names("blocked")?,
+        serde_json::to_string(outcomes)?
+    ))?;
     let w = outcomes.iter().map(|o| o.package.len()).max().unwrap_or(0);
     Ok(outcomes
         .iter()

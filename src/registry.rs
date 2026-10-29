@@ -6,11 +6,11 @@
 
 use std::process::Command;
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 use crate::{config::Config, handler::to_pep440, Error, Version};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Registry {
     /// No check. The publish command handles it, or the package is private.

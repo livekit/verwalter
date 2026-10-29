@@ -3,9 +3,9 @@
 //! `PackageVersions`, built from the current file version plus git tags.
 
 use knope_versioning::semver::{Label, PreVersion, Prerelease, Version};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum BumpLevel {
     Patch,
@@ -21,6 +21,19 @@ impl std::fmt::Display for BumpLevel {
             Self::Minor => "minor",
             Self::Major => "major",
         })
+    }
+}
+
+impl std::str::FromStr for BumpLevel {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, ()> {
+        match s {
+            "major" => Ok(Self::Major),
+            "minor" => Ok(Self::Minor),
+            "patch" => Ok(Self::Patch),
+            _ => Err(()),
+        }
     }
 }
 

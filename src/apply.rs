@@ -23,15 +23,6 @@ fn is_lock_file(path: &str) -> bool {
     LOCK_FILES.contains(&path.rsplit('/').next().unwrap_or(path))
 }
 
-/// Which packages depend on `package` (for the pins).
-fn dependents<'a>(packages: &'a [PackageState], package: &str) -> Vec<&'a str> {
-    packages
-        .iter()
-        .filter(|p| p.dependencies.iter().any(|d| d == package))
-        .map(|p| p.name.as_str())
-        .collect()
-}
-
 /// Write one release into the working tree under `root`. `packages` is
 /// every package in the repo, for the pins in dependents. `pins = false`
 /// leaves dependents alone: a pre-release of one package is not something
@@ -79,8 +70,11 @@ pub fn apply(
     for file in &config.pin_files {
         rewrite(file, None, Some(name))?;
     }
-    for dependent in dependents(packages, name).into_iter().filter(|_| pins) {
-        if let Some(d) = config.packages.get(dependent) {
+    let dependents = packages
+        .iter()
+        .filter(|p| pins && p.dependencies.iter().any(|d| d == name));
+    for dependent in dependents {
+        if let Some(d) = config.packages.get(&dependent.name) {
             for file in d.versioned_files.iter().filter(|f| !is_lock_file(f.path())) {
                 rewrite(file.path(), file.regex(), Some(name))?;
             }

@@ -229,7 +229,7 @@ fn release_one(
     if !fresh && status != "drafted" && options.package.is_none() {
         return Ok(None);
     }
-    let first_release = first_release(repo, name, version)?;
+    let first_release = first_release(repo, name, version, &crate::registry::curl)?;
     Ok(Some(Released {
         package: name.to_string(),
         previous_version: previous_version(&changelog, &version.to_string()),
@@ -243,25 +243,18 @@ fn release_one(
 
 /// Spec: Package.first_release. The registry has no version of the
 /// package when one is configured, else no tag other than `version`.
-pub fn first_release(repo: &Repo, name: &str, version: &crate::Version) -> Result<bool, Error> {
-    match crate::registry::exists(
-        crate::registry::package_url(&repo.config, name),
-        &crate::registry::curl,
-    )? {
-        Some(has_any) => Ok(!has_any),
-        None => first_release_by_tags(repo, name, version),
-    }
-}
-
-/// No tag of the package other than `version` itself.
-pub fn first_release_by_tags(
+pub fn first_release(
     repo: &Repo,
     name: &str,
     version: &crate::Version,
+    http: crate::registry::Http,
 ) -> Result<bool, Error> {
-    Ok(crate::prerelease::released_versions(repo, name)?
-        .iter()
-        .all(|v| v == version))
+    match crate::registry::exists(crate::registry::package_url(&repo.config, name), http)? {
+        Some(has_any) => Ok(!has_any),
+        None => Ok(crate::prerelease::released_versions(repo, name)?
+            .iter()
+            .all(|v| v == version)),
+    }
 }
 
 /// Spec: MaintainerAbandonsRelease. Removes the GitHub release and the
@@ -276,7 +269,7 @@ pub fn abandon(
 ) -> Result<Vec<String>, Error> {
     let root = repo.root.as_path();
     let mut removed = Vec::new();
-    if gh(&["release", "view", tag, "--json", "tagName"]).is_ok() {
+    if view(gh, tag).is_some() {
         gh(&["release", "delete", tag, "--yes"])?;
         removed.push(format!("release {tag}"));
     }
@@ -343,15 +336,10 @@ fn previous_version(changelog: &str, version: &str) -> Option<String> {
 /// Spec: WorkflowReleaseHandoff. Appends to `$GITHUB_OUTPUT` when set.
 pub fn write_outputs(released: &[Released]) -> Result<String, Error> {
     let json = serde_json::to_string(released)?;
-    if let Ok(path) = std::env::var("GITHUB_OUTPUT") {
-        use std::io::Write;
-        let mut f = fs::OpenOptions::new()
-            .append(true)
-            .create(true)
-            .open(path)?;
-        writeln!(f, "released={}", !released.is_empty())?;
-        writeln!(f, "releases={json}")?;
-    }
+    crate::github::append_output(&format!(
+        "released={}\nreleases={json}\n",
+        !released.is_empty()
+    ))?;
     Ok(json)
 }
 
