@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.17.0
+
+### Minor Changes
+
+- `publish` takes `--releases`, the `releases` output of `release`, and runs only those packages. The action passes its new `releases` input through. Without it, every tagged package runs, as before. - [`45e850d`](https://github.com/lukasIO/verwalter/commit/45e850d23b6a4c3edcfe6916eb04d46b36f206d1) ([@lukasIO](https://github.com/lukasIO))
+- An rc carries the in-repo dependencies of the requested package that have a pending changeset, transitively, each at its own rc version, and pins the carried packages to each other. Dependents outside the rc are untouched. The rc's releases are ordered dependencies first. - [`45e850d`](https://github.com/lukasIO/verwalter/commit/45e850d23b6a4c3edcfe6916eb04d46b36f206d1) ([@lukasIO](https://github.com/lukasIO))
+
+### Patch Changes
+
+- The example workflows use actions/checkout v7, upload-artifact v7, download-artifact v8 and taiki-e/install-action v2 with a `tool` input. - [`6439bac`](https://github.com/lukasIO/verwalter/commit/6439bacf88003d780e7c9653737e4ec2c8989385) ([@lukasIO](https://github.com/lukasIO))
+- A JSON Schema for `verwalter.toml` at `schemas/v1.json` gives completion and hover docs in editors with Taplo or Tombi. Add `#:schema https://raw.githubusercontent.com/lukasIO/verwalter/main/schemas/v1.json` as the first line. - [#24](https://github.com/lukasIO/verwalter/pull/24) ([@lukasIO](https://github.com/lukasIO))
+- examples/workflows has the rc workflow, `pre-release.yml`. - [`ac999dd`](https://github.com/lukasIO/verwalter/commit/ac999ddd1cd2d036ed273a3a19b03f71213166d1) ([@lukasIO](https://github.com/lukasIO))
+- README, docs and example workflows pin v0.16.0. - [`7177f40`](https://github.com/lukasIO/verwalter/commit/7177f407ff978af25ece3e1da13e9919a5d0be8d) ([@lukasIO](https://github.com/lukasIO))
+- The README shows the release cycle as a diagram. - [`ac62e05`](https://github.com/lukasIO/verwalter/commit/ac62e0519b13e646d8eade895fef7eb5f7c6b96e) ([@lukasIO](https://github.com/lukasIO))
+
 ## 0.16.0
 
 ### Minor Changes
