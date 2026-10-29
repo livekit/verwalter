@@ -74,7 +74,7 @@ needs its own.
     VER: ${{ matrix.release.version }}
   run: |
     set -euo pipefail
-    if curl -fsS "https://crates.io/api/v1/crates/$PKG/$VER" -o /dev/null; then
+    if curl -fsS -A "release-workflow" "https://crates.io/api/v1/crates/$PKG/$VER" -o /dev/null; then
       echo "$PKG $VER is on crates.io, skipping"
       exit 0
     fi
@@ -82,8 +82,9 @@ needs its own.
 ```
 
 `cargo publish` has no skip flag. The crates.io API answers 404 for a
-version that does not exist and 200 for one that does. curl sends the
-`User-Agent` that the API requires.
+version that does not exist and 200 for one that does. It answers 403 to
+curl's default `User-Agent`, so pass one: `curl -A "my-release-script"`.
+verwalter sends `verwalter/<version>`.
 
 ## npm
 

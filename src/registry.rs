@@ -30,7 +30,13 @@ pub enum Registry {
 pub type Http<'a> = &'a (dyn Fn(&str) -> Result<u16, Error> + Sync);
 
 /// `curl` on the machine: 200, 404, or an error for anything else.
+/// crates.io answers 403 to curl's default User-Agent, so the tool
+/// names itself.
 pub fn curl(url: &str) -> Result<u16, Error> {
+    let agent = format!(
+        "verwalter/{} (https://github.com/lukasIO/verwalter)",
+        env!("CARGO_PKG_VERSION")
+    );
     let out = Command::new("curl")
         .args([
             "-sS",
@@ -41,6 +47,8 @@ pub fn curl(url: &str) -> Result<u16, Error> {
             "-L",
             "--max-time",
             "30",
+            "-A",
+            &agent,
             url,
         ])
         .output()
