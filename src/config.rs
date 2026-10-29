@@ -120,6 +120,12 @@ pub struct Publish {
     /// Shell command, run in the package's path. Applies to packages on
     /// the default registry; others take the built-in default for theirs.
     pub publish: Option<String>,
+    /// One command, run once from the root, that publishes every package
+    /// on the default registry without a `publish` of its own: the
+    /// ecosystem's recursive publish (`pnpm -r publish`,
+    /// `cargo publish --workspace`). Order and skipping are its job; the
+    /// tool checks the registry before and after and reports per package.
+    pub workspace: Option<String>,
 }
 
 fn default_jobs() -> usize {
@@ -173,6 +179,14 @@ impl Config {
             .exists_url
             .as_deref()
             .or(self.publish.exists_url.as_deref())
+    }
+
+    /// Spec: Package.in_workspace_publish. Covered by `[publish].workspace`.
+    pub fn in_workspace_publish(&self, package: &str) -> bool {
+        let p = &self.packages[package];
+        self.publish.workspace.is_some()
+            && p.publish.is_none()
+            && p.registry.is_none_or(|r| r == self.publish.registry)
     }
 
     /// Spec: Package.publish_command. The package's own, else the default

@@ -1226,6 +1226,69 @@ fn publish_runs_dependencies_first_and_blocks_dependents_of_a_failure() {
     assert!(verwalter::publish::run(&repo, &opts, &down).is_err());
 }
 
+// Spec: config.publish.workspace. One command for the crates, run once
+// from the root; a package with its own command stays apart and waits
+// for the members it depends on.
+#[test]
+fn workspace_publish_command_runs_once_and_reports_per_member() {
+    let r = fixture("publish-ws");
+    let root = &r.0;
+    git(root, &["tag", "livekit-protocol-v0.3.1"]);
+    git(root, &["tag", "livekit-api-v0.4.3"]);
+    git(root, &["tag", "livekit-v0.7.0"]);
+    let base = fs::read_to_string(root.join("verwalter.toml")).unwrap();
+    // livekit gets its own command; protocol and api go through the
+    // workspace command.
+    write(
+        root,
+        "verwalter.toml",
+        &format!(
+            "{}\n[publish]\nworkspace = 'echo ws $VERWALTER_PACKAGE $(pwd | xargs basename) >> $VERWALTER_ROOT/order'\n",
+            base.replace(
+                "changelog = \"livekit/CHANGELOG.md\"",
+                "changelog = \"livekit/CHANGELOG.md\"\npublish = \"echo own {package} >> $VERWALTER_ROOT/order\""
+            )
+        ),
+    );
+    let repo = Repo::load(root).unwrap();
+    assert!(repo.config.in_workspace_publish("livekit-protocol"));
+    assert!(!repo.config.in_workspace_publish("livekit"));
+    let no_registry = |_: &str| -> Result<u16, verwalter::Error> { Err("no registry".into()) };
+    let opts = verwalter::publish::Options { jobs: Some(4), dry_run: false };
+    let outcomes = verwalter::publish::run(&repo, &opts, &no_registry).unwrap();
+    let by: std::collections::BTreeMap<&str, &str> =
+        outcomes.iter().map(|o| (o.package.as_str(), o.status)).collect();
+    assert_eq!(by.len(), 3, "{outcomes:?}");
+    assert!(by.values().all(|s| *s == "published"), "{outcomes:?}");
+    let order = fs::read_to_string(root.join("order")).unwrap();
+    let dir = root.file_name().unwrap().to_str().unwrap();
+    assert_eq!(order, format!("ws [workspace] {dir}\nown livekit\n"), "workspace once, from the root, before livekit");
+
+    // With a registry, the members are checked after the command: one
+    // missing is a failure of that member only.
+    write(
+        root,
+        "verwalter.toml",
+        &format!(
+            "{}\n[publish]\nregistry = \"crates\"\nworkspace = 'true'\n",
+            base.replace(
+                "changelog = \"livekit/CHANGELOG.md\"",
+                "changelog = \"livekit/CHANGELOG.md\"\npublish = \"true\""
+            )
+        ),
+    );
+    let repo = Repo::load(root).unwrap();
+    let only_api = |url: &str| -> Result<u16, verwalter::Error> {
+        Ok(if url.contains("livekit-api") { 200 } else { 404 })
+    };
+    let outcomes = verwalter::publish::run(&repo, &opts, &only_api).unwrap();
+    let by: std::collections::BTreeMap<&str, &str> =
+        outcomes.iter().map(|o| (o.package.as_str(), o.status)).collect();
+    assert_eq!(by["livekit-api"], "published");
+    assert_eq!(by["livekit-protocol"], "failed");
+    assert_eq!(by["livekit"], "blocked", "depends on protocol");
+}
+
 #[test]
 fn named_package_is_reported_even_when_complete() {
     let r = fixture("named");

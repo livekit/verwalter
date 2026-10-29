@@ -41,6 +41,26 @@ stops early with a clear message:
 publish = "[ \"$VERWALTER_FIRST_RELEASE\" != true ] || { echo 'first release: publish by hand' >&2; exit 1; }; cargo publish"
 ```
 
+## Workspaces
+
+If the ecosystem's tool walks the workspace itself, let it. `pnpm -r publish`
+rewrites `workspace:*` ranges and skips published versions.
+`cargo publish --workspace` (cargo 1.90 and later) orders the crates and
+waits for the index between them. One line replaces every per-package
+command on the default registry:
+
+```toml
+[publish]
+registry = "npm"
+workspace = "pnpm -r publish --access public --no-git-checks"
+```
+
+The command runs once from the root. verwalter asks the registry before
+it runs, and skips it if every package is there. Afterwards it asks per
+package and reports each one as published or failed. A package with its
+own `publish`, or on another registry, is published by the tool as
+before and waits for the workspace packages it depends on.
+
 Without a `registry`, the existence check is the command's job. The
 checks below are what the tool does for each registry, for a command that
 needs its own.

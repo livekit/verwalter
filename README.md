@@ -144,6 +144,7 @@ fixed = [["livekit-ffi", "livekit-ffi-node"]]  # groups that release at one shar
 jobs = 4                         # independent packages published at once
 registry = "crates"              # none | crates | npm | pypi | pubdev | custom
 publish = "cargo publish --no-verify"   # command for packages on that registry, run in their path
+workspace = "cargo publish --workspace" # or: one command from the root for all of them (pnpm -r publish)
 
 [packages.livekit-protocol]
 path = "livekit-protocol"
@@ -168,6 +169,15 @@ anything runs. The command runs in the package's `path` with
 `VERWALTER_REGISTRY`, `VERWALTER_PRERELEASE`, `VERWALTER_FIRST_RELEASE` and
 `VERWALTER_ROOT` set. `{package}`, `{version}` and `{tag}` in the command
 are replaced.
+
+`[publish].workspace` hands the packages on the default registry to the
+ecosystem's recursive publish instead: `pnpm -r publish`,
+`cargo publish --workspace`. It runs once, from the root, and owns the
+order and the skipping among those packages. The tool still asks the
+registry before (all there: the command is skipped) and after (per
+package: there, or failed), and a package with its own `publish` or
+another registry keeps the per-package path and waits for the members it
+depends on.
 
 Dependencies between packages are read from the manifests, not configured.
 
@@ -201,6 +211,7 @@ The first file of a package is its version.
 | Dependent bumps | A package whose in-repo dependency is released gets a bump too, transitively. Its dependency floor moves in its manifest and the lock files. | `dependent_bump_level`, `pin_files` |
 | Dependency order | Releases, tags and the handoff list go dependencies first. A failure stops before any dependent. | `release` |
 | Publish scheduler | Runs each package's publish command once per tagged package, dependencies first, independent packages in parallel. A failure blocks its transitive dependents and nothing else. A version the registry has is skipped before the command runs. Nothing is remembered: a re-run repeats the command. | `publish`, `[publish]`, `registry`, `publish` per package |
+| Workspace publish | One recursive command for every package on the default registry, run once from the root, with per-package reporting from the registry afterwards. | `[publish].workspace` |
 | Registry check | One GET per registry answers whether a version exists. 200 skips, 404 publishes, anything else fails. `status` shows the answer. | `registry`, `exists_url` |
 | Fixed groups | Members release at one version: the highest in the group, bumped by the highest level any member needs. A member without a changeset gets a "Released with" line. | `fixed` |
 | Bump ceiling | Caps what a changeset can do to a package. A group takes the lowest cap. | `max_bump` |

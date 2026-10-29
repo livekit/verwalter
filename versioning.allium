@@ -247,7 +247,13 @@ config {
     -- Defaults for `verwalter publish`: how many independent packages run
     -- at once, the registry and the command every package takes unless
     -- it sets its own.
-    publish: { jobs: Integer = 4, registry: Registry = none, exists_url: String?, publish: String? }
+    -- `workspace` is one command, run once from the root, for every
+    -- package on the default registry without a `publish` of its own:
+    -- the ecosystem's recursive publish. Order and skipping are its job;
+    -- the tool checks the registry before (all there: skip) and after
+    -- (per member: there or failed), and blocks dependents of a member
+    -- that is not there.
+    publish: { jobs: Integer = 4, registry: Registry = none, exists_url: String?, publish: String?, workspace: String? }
     -- Workspace members the consistency check skips, by name or path.
     ignore: Set<String> = {}
     -- Groups of packages that always release at one shared version: the
