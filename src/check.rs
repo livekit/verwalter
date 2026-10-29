@@ -175,24 +175,6 @@ pub fn run(root: &Path, config: &Config, pr: u64, gh: Gh) -> Result<Check, Error
     let labels: Vec<String> = pr.labels.into_iter().map(|l| l.name).collect();
     let changed: Vec<String> = pr.files.into_iter().map(|f| f.path).collect();
 
-    let mut changesets = Vec::new();
-    for f in changed.iter().filter(|f| {
-        f.starts_with(&format!("{CHANGESET_DIR}/"))
-            && f.ends_with(".md")
-            && !f.ends_with("README.md")
-    }) {
-        if let Ok(content) = fs::read_to_string(root.join(f)) {
-            let changeset = Changeset::parse(f, &content)?;
-            let known: Vec<&str> = config.packages.keys().map(String::as_str).collect();
-            let unknown = changeset.unknown_packages(&known);
-            if !unknown.is_empty() {
-                return Err(format!("{f}: names unknown package {}", unknown.join(", ")).into());
-            }
-            changesets.push(changeset);
-        }
-    }
-    let check = evaluate(config, &pr.head, &labels, &changed, &changesets);
-
     let existing = gh(&[
         "api",
         &format!("repos/{{owner}}/{{repo}}/issues/{n}/comments"),
@@ -201,6 +183,19 @@ pub fn run(root: &Path, config: &Config, pr: u64, gh: Gh) -> Result<Check, Error
         &format!(".[] | select(.body | contains(\"{MARKER}\")) | .id"),
     ])?;
     let existing = existing.lines().next().map(str::to_string);
+
+    // A changeset the tool cannot use is the contributor's finding too:
+    // it goes into the comment, not only into the workflow log.
+    let changesets = match read_changesets(root, config, &changed) {
+        Ok(c) => c,
+        Err(e) => {
+            let body = format!("{MARKER}\n### Changeset invalid\n\n{e}\n");
+            upsert_comment(gh, &n, existing.as_deref(), &body)?;
+            return Err(e);
+        }
+    };
+    let check = evaluate(config, &pr.head, &labels, &changed, &changesets);
+
     if check.status == Status::Failed {
         let slug = gh(&[
             "repo",
@@ -211,17 +206,7 @@ pub fn run(root: &Path, config: &Config, pr: u64, gh: Gh) -> Result<Check, Error
             ".nameWithOwner",
         ])?;
         let body = comment(&check, config, &slug, &pr.head, &pr.title);
-        match existing {
-            Some(id) => gh(&[
-                "api",
-                "-X",
-                "PATCH",
-                &format!("repos/{{owner}}/{{repo}}/issues/comments/{id}"),
-                "-f",
-                &format!("body={body}"),
-            ])?,
-            None => gh(&["pr", "comment", &n, "--body", &body])?,
-        };
+        upsert_comment(gh, &n, existing.as_deref(), &body)?;
     } else if let Some(id) = existing {
         gh(&[
             "api",
@@ -231,6 +216,44 @@ pub fn run(root: &Path, config: &Config, pr: u64, gh: Gh) -> Result<Check, Error
         ])?;
     }
     Ok(check)
+}
+
+/// The PR's `.changeset/*.md` files, parsed and checked against the
+/// config. The error names the file.
+fn read_changesets(root: &Path, config: &Config, changed: &[String]) -> Result<Vec<Changeset>, Error> {
+    let known: Vec<&str> = config.packages.keys().map(String::as_str).collect();
+    let mut out = Vec::new();
+    for f in changed.iter().filter(|f| {
+        f.starts_with(&format!("{CHANGESET_DIR}/"))
+            && f.ends_with(".md")
+            && !f.ends_with("README.md")
+    }) {
+        let Ok(content) = fs::read_to_string(root.join(f)) else {
+            continue;
+        };
+        let changeset = Changeset::parse(f, &content).map_err(|e| format!("`{f}`: {e}"))?;
+        let unknown = changeset.unknown_packages(&known);
+        if !unknown.is_empty() {
+            return Err(format!("`{f}`: names unknown package {}", unknown.join(", ")).into());
+        }
+        out.push(changeset);
+    }
+    Ok(out)
+}
+
+fn upsert_comment(gh: Gh, pr: &str, existing: Option<&str>, body: &str) -> Result<(), Error> {
+    match existing {
+        Some(id) => gh(&[
+            "api",
+            "-X",
+            "PATCH",
+            &format!("repos/{{owner}}/{{repo}}/issues/comments/{id}"),
+            "-f",
+            &format!("body={body}"),
+        ])?,
+        None => gh(&["pr", "comment", pr, "--body", body])?,
+    };
+    Ok(())
 }
 
 #[cfg(test)]

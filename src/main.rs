@@ -64,29 +64,39 @@ fn run() -> Result<(), Error> {
             _ => root = PathBuf::from(arg),
         }
     }
-    let mut repo = match config {
-        Some(c) => Repo::load_with_config(&root, &c)?,
-        None => Repo::load(&root)?,
-    };
+    let config_path = config.unwrap_or_else(|| root.join(verwalter::repo::CONFIG_FILE));
+    // Spec: ChangesetCheckOnContributorPullRequest. `check` reads the
+    // config only: a broken changeset on the PR is its finding, not a
+    // reason to fail before it runs.
+    if command == "check" {
+        let config = verwalter::config::Config::parse(
+            &std::fs::read_to_string(&config_path)
+                .map_err(|e| format!("{}: {e}", config_path.display()))?,
+        )?;
+        let findings = workspace::check(&root, &config);
+        if !findings.is_empty() {
+            return Err(workspace_error(&findings));
+        }
+        let pr = pr.ok_or(USAGE)?;
+        let mut gh = gh(&root, &remote, dry_run);
+        let c = check::run(&root, &config, pr, &mut gh)?;
+        println!(
+            "{:?}: affected {:?}, covered {:?}",
+            c.status, c.affected, c.covered
+        );
+        if c.status == check::Status::Failed {
+            return Err(format!("changeset missing for: {}", c.missing().join(", ")).into());
+        }
+        return Ok(());
+    }
+    let mut repo = Repo::load_with_config(&root, &config_path)?;
     let releases = plan(
         &repo.packages,
         &repo.changesets,
         repo.config.dependent_bump_level,
     );
     // Spec: WorkspaceConsistency. `check` fails on it, the others warn.
-    let findings = workspace::check(&repo.root, &repo.config);
-    if command == "check" && !findings.is_empty() {
-        return Err(format!(
-            "verwalter.toml does not match the workspace:\n  {}",
-            findings
-                .iter()
-                .map(ToString::to_string)
-                .collect::<Vec<_>>()
-                .join("\n  ")
-        )
-        .into());
-    }
-    for f in &findings {
+    for f in &workspace::check(&repo.root, &repo.config) {
         eprintln!("warning: {f}");
     }
     for w in verwalter::plan::fixed_group_drift(&repo.packages) {
@@ -168,19 +178,6 @@ fn run() -> Result<(), Error> {
             }
             Ok(())
         }
-        "check" => {
-            let pr = pr.ok_or(USAGE)?;
-            let mut gh = gh(&repo.root, &remote, dry_run);
-            let c = check::run(&repo.root, &repo.config, pr, &mut gh)?;
-            println!(
-                "{:?}: affected {:?}, covered {:?}",
-                c.status, c.affected, c.covered
-            );
-            if c.status == check::Status::Failed {
-                return Err(format!("changeset missing for: {}", c.missing().join(", ")).into());
-            }
-            Ok(())
-        }
         "release" => {
             let mut gh = gh(&repo.root, &remote, dry_run);
             if let Some(tag) = abandon {
@@ -204,6 +201,18 @@ fn run() -> Result<(), Error> {
         }
         _ => Err(USAGE.into()),
     }
+}
+
+fn workspace_error(findings: &[workspace::Finding]) -> Error {
+    format!(
+        "verwalter.toml does not match the workspace:\n  {}",
+        findings
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n  ")
+    )
+    .into()
 }
 
 type GhRunner<'a> = Box<dyn FnMut(&[&str]) -> Result<String, Error> + 'a>;

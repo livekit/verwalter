@@ -259,6 +259,9 @@ rule WorkspaceConsistencyCheck {
 
 -- Changeset check on contributor PRs
 
+-- A changeset in the PR that the tool cannot read, or that names a
+-- package not in the config, is the check's own finding: the comment
+-- carries the error, and the check fails.
 rule ChangesetCheckOnContributorPullRequest {
     when: ContributorPullRequestUpdated(pr)
     let affected = affected_packages(pr.changed_files)
