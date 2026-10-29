@@ -11,7 +11,7 @@ first.
   <img alt="The release cycle: a PR with a changeset merges to main, verwalter pr keeps one release PR open, merging it runs the release workflow: build, release, publish. An rc PR can be opened from any branch." src="docs/release-cycle-light.svg">
 </picture>
 
-The behaviour is specified in [versioning.allium](versioning.allium).
+The behaviour is specified in [specs/versioning.allium](specs/versioning.allium).
 
 ## Quick start
 

@@ -1,4 +1,4 @@
-//! Core types of verwalter. See versioning.allium for the specification;
+//! Core types of verwalter. See specs/versioning.allium for the specification;
 //! each module names the spec constructs it implements.
 //!
 //! Versioned files and semver come from `knope-versioning`; this crate adds
