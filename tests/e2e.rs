@@ -988,10 +988,7 @@ fn release_runs_in_dependency_order_and_stops_at_the_first_failure() {
     let released = verwalter::release::run(&repo, "origin", &Default::default(), &mut gh).unwrap();
     let order: Vec<&str> = released.iter().map(|r| r.package.as_str()).collect();
     assert_eq!(order, ["livekit-protocol", "livekit", "livekit-api"]);
-    assert!(released[0].depends_on.is_empty());
     assert!(released.iter().all(|r| r.first_release), "no earlier tags");
-    assert_eq!(released[1].depends_on, ["livekit-protocol"]);
-    assert_eq!(released[2].depends_on, ["livekit-protocol"]);
 
     // Fail at the dependency: nothing happens to the dependents.
     let r2 = fixture("order-fail");
@@ -1144,6 +1141,115 @@ fn changeset_command_covers_the_changed_packages() {
         .unwrap();
     assert!(again.ends_with("fix_it.md"));
     assert!(fs::read_to_string(&again).unwrap().starts_with("---\nlivekit: patch\nlivekit-api: patch\nlivekit-protocol: patch\n---"));
+}
+
+// Spec: WorkflowPublishesInDependencyOrder. protocol first; api and
+// livekit depend on it and run after, in parallel; a failure blocks only
+// the dependents; a version the registry has is skipped.
+#[test]
+fn publish_runs_dependencies_first_and_blocks_dependents_of_a_failure() {
+    let r = fixture("publish");
+    let root = &r.0;
+    git(root, &["tag", "livekit-protocol-v0.3.1"]);
+    git(root, &["tag", "livekit-api-v0.4.3"]);
+    git(root, &["tag", "livekit-v0.7.0"]);
+    let repo = Repo::load(root).unwrap();
+    let no_registry = |_: &str| -> Result<u16, verwalter::Error> { Err("no registry configured".into()) };
+
+    // Everything succeeds: the order file shows protocol before the others.
+    let outcomes = verwalter::publish::run(
+        &repo,
+        &verwalter::publish::Options {
+            command: "echo $VERWALTER_PACKAGE $VERWALTER_VERSION $VERWALTER_TAG first=$VERWALTER_FIRST_RELEASE >> order".into(),
+            jobs: 4,
+            dry_run: false,
+        },
+        &no_registry,
+    )
+    .unwrap();
+    assert!(outcomes.iter().all(|o| o.status == "published"), "{outcomes:?}");
+    let order = fs::read_to_string(root.join("order")).unwrap();
+    let lines: Vec<&str> = order.lines().collect();
+    assert_eq!(lines.len(), 3);
+    assert!(lines[0].starts_with("livekit-protocol 0.3.1 livekit-protocol-v0.3.1 first=true"), "{order}");
+    fs::remove_file(root.join("order")).unwrap();
+
+    // protocol fails: both dependents are blocked, nothing else ran.
+    let outcomes = verwalter::publish::run(
+        &repo,
+        &verwalter::publish::Options {
+            command: "echo {package} >> order; [ {package} != livekit-protocol ]".into(),
+            jobs: 4,
+            dry_run: false,
+        },
+        &no_registry,
+    )
+    .unwrap();
+    let by: std::collections::BTreeMap<&str, (&str, &str)> = outcomes
+        .iter()
+        .map(|o| (o.package.as_str(), (o.status, o.reason.as_str())))
+        .collect();
+    assert_eq!(by["livekit-protocol"].0, "failed");
+    assert_eq!(by["livekit-api"], ("blocked", "livekit-protocol did not publish"));
+    assert_eq!(by["livekit"], ("blocked", "livekit-protocol did not publish"));
+    assert_eq!(fs::read_to_string(root.join("order")).unwrap().trim(), "livekit-protocol");
+    assert!(verwalter::publish::failed(&outcomes));
+    fs::remove_file(root.join("order")).unwrap();
+
+    // api fails: livekit does not depend on it and still publishes.
+    let outcomes = verwalter::publish::run(
+        &repo,
+        &verwalter::publish::Options {
+            command: "[ {package} != livekit-api ]".into(),
+            jobs: 1,
+            dry_run: false,
+        },
+        &no_registry,
+    )
+    .unwrap();
+    let by: std::collections::BTreeMap<&str, &str> =
+        outcomes.iter().map(|o| (o.package.as_str(), o.status)).collect();
+    assert_eq!(by["livekit-protocol"], "published");
+    assert_eq!(by["livekit-api"], "failed");
+    assert_eq!(by["livekit"], "published");
+
+    // With a registry that has protocol already, protocol is skipped and
+    // the dependents still run. A 503 is an error, not "missing".
+    let cfg = fs::read_to_string(root.join("verwalter.toml")).unwrap();
+    write(
+        root,
+        "verwalter.toml",
+        &cfg.replace(
+            "changelog = \"livekit-protocol/CHANGELOG.md\"",
+            "changelog = \"livekit-protocol/CHANGELOG.md\"\nregistry = \"crates\"",
+        ),
+    );
+    let repo = Repo::load(root).unwrap();
+    let has_protocol = |url: &str| -> Result<u16, verwalter::Error> {
+        Ok(if url.contains("livekit-protocol") { 200 } else { 404 })
+    };
+    let outcomes = verwalter::publish::run(
+        &repo,
+        &verwalter::publish::Options {
+            command: "echo {package} >> order".into(),
+            jobs: 4,
+            dry_run: false,
+        },
+        &has_protocol,
+    )
+    .unwrap();
+    let by: std::collections::BTreeMap<&str, &str> =
+        outcomes.iter().map(|o| (o.package.as_str(), o.status)).collect();
+    assert_eq!(by["livekit-protocol"], "exists");
+    assert_eq!(by["livekit-api"], "published");
+    assert!(!fs::read_to_string(root.join("order")).unwrap().contains("protocol"));
+    let down = |_: &str| -> Result<u16, verwalter::Error> { Ok(503) };
+    assert!(verwalter::publish::run(
+        &repo,
+        &verwalter::publish::Options { command: "true".into(), jobs: 1, dry_run: false },
+        &down
+    )
+    .is_err());
 }
 
 #[test]

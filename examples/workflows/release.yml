@@ -65,45 +65,42 @@ jobs:
           # for packages with `draft = true`, whose assets are built later.
           args: --asset dist/artifact.txt ${{ inputs.package && format('--package {0}', inputs.package) || '' }}
 
-  # `releases` lists dependencies before dependents, each with
-  # `depends_on`. Publish in that order, one at a time, and stop at the
-  # first failure: a dependent must not reach the registry before its
-  # dependency, and not at all if the dependency failed.
+  # `publish --each` runs your publish command once per tagged package,
+  # dependencies first, independent packages in parallel. A failure blocks
+  # the transitive dependents and nothing else. With `registry` set in
+  # verwalter.toml, a version the registry already has is skipped, so a
+  # re-run of this job is safe. The command gets {package}, {version} and
+  # {tag}, plus VERWALTER_PACKAGE, VERWALTER_VERSION, VERWALTER_TAG,
+  # VERWALTER_PRERELEASE and VERWALTER_FIRST_RELEASE in the environment.
   publish:
     needs: release
-    if: needs.release.outputs.released == 'true'
+    if: needs.release.outputs.released == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    strategy:
-      max-parallel: 1
-      fail-fast: true
-      matrix:
-        release: ${{ fromJSON(needs.release.outputs.releases) }}
+    permissions:
+      contents: write   # drafts: gh release upload and edit
+      id-token: write   # trusted publishing
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ matrix.release.tag }}
+          ref: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
+          fetch-depth: 0  # tags decide what is published
       - uses: actions/download-artifact@v4
         with:
           name: dist
           path: dist
-
-      # Replace with the registry publish for the language: cargo publish,
-      # npm publish, pypa/gh-action-pypi-publish, ...
+      # scripts/publish.sh does the registry publish for one package:
+      # cargo publish, npm publish, pypa/gh-action-pypi-publish's twine,
+      # ... See examples/publish for commands per registry. For packages
+      # with `draft = true` it also uploads the assets built here and
+      # publishes the GitHub release:
+      #   gh release upload "$VERWALTER_TAG" dist/* --clobber
+      #   gh release edit "$VERWALTER_TAG" --draft=false
       # cargo, pip and pub keep pre-releases away from default resolution
-      # by the version alone. npm does not: an rc published without a
-      # dist-tag becomes `latest`, so pass one.
-      # Registries index with a delay; a publish that resolves a dependency
-      # released seconds ago may need a retry (cargo publish does this).
-      - name: Publish ${{ matrix.release.package }} ${{ matrix.release.version }}
-        run: |
-          echo "publish ${{ matrix.release.package }} ${{ matrix.release.version }}"
-          # npm publish --tag ${{ matrix.release.prerelease && 'next' || 'latest' }}
-
-      # Only for packages with `draft = true`: attach assets built here,
-      # then publish the GitHub release.
-      - if: matrix.release.status == 'drafted'
+      # by the version alone. npm does not: publish an rc with a dist-tag
+      # (`--tag next` when VERWALTER_PRERELEASE is true).
+      - uses: lukasIO/verwalter@v0.13.0
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          # gh release upload "${{ matrix.release.tag }}" dist/*
-          gh release edit "${{ matrix.release.tag }}" --draft=false
+        with:
+          command: publish
+          args: --each 'scripts/publish.sh' --jobs 4

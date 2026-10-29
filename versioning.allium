@@ -120,6 +120,14 @@ entity Package {
     -- max_bump minor bumps minor. In a fixed group the lowest ceiling
     -- applies to the group.
     max_bump: BumpLevel?
+    -- Where the package is published: crates | npm | pypi | pubdev |
+    -- custom (an exists_url with {name} and {version}) | none. The tool
+    -- only asks whether a version is there; publishing stays the
+    -- workflow's. The answer is 200, 404, or an error: a registry outage
+    -- never reads as "not there yet".
+    registry: Registry = none
+    exists_url: String?
+    on_registry(version: Version): Boolean? when registry != none
 
     changesets: Changeset with repository = this.repository
     pending_changesets: changesets where status = pending
@@ -132,7 +140,7 @@ entity Package {
     has_pending_bump: pending_changesets.any(c => c.unreleased_for(this.name)) or version.is_prerelease
     -- No tag at all: a registry with trusted publishing needs the first
     -- upload done by hand, so the release PR and the handoff say so.
-    first_release: not GitTags.any(t => t.package = this)
+    first_release: if registry != none then not registry.has_any_version(this) else not GitTags.any(t => t.package = this)
 }
 
 -- Exactly the changesets file format: `.changeset/<name>.md`, YAML front
@@ -611,9 +619,45 @@ surface PreReleaseRequest {
 }
 
 -- After a merge the workflow receives every release the merge produced,
--- dependencies before dependents, and decides what to build and publish
--- in that order. If the publish of a dependency fails, its dependents are
--- not published. The tool runs no publish step.
+-- dependencies before dependents. Publishing to the registry is the
+-- workflow's command; the tool runs that command once per tagged package
+-- and owns the order and the stop.
+rule WorkflowPublishesInDependencyOrder {
+    when: WorkflowRunsPublish(workflow, repository, command)
+    let candidates = filter(Packages, p => p.repository = repository and p.release_mode != none and GitTags.any(t => t.package = p and t.version = p.version))
+    ensures:
+        for p in candidates:
+            -- A version the registry has is skipped before the command runs.
+            if p.on_registry(p.version) = true:
+                PublishOutcome.created(package: p, status: exists)
+            else:
+                -- Started only after every in-repo dependency among the
+                -- candidates ended as published or exists. Independent
+                -- packages run at the same time, up to the job limit.
+                if p.dependencies.any(d => d in candidates and PublishOutcome with package = d and status in {failed, blocked}):
+                    PublishOutcome.created(package: p, status: blocked)
+                else:
+                    PublishOutcome.created(package: p, status: command succeeded ? published : failed)
+}
+
+entity PublishOutcome {
+    package: Package
+    status: published | exists | failed | blocked
+}
+
+invariant DependentsNeverPublishBeforeDependencies {
+    PublishOutcome.all(o => o.status != published or o.package.dependencies.all(d => not (PublishOutcome with package = d) or (PublishOutcome with package = d).status in {published, exists}))
+}
+
+surface WorkflowPublishHandoff {
+    facing workflow: Workflow
+    context outcome: PublishOutcome
+
+    exposes:
+        outcome.package.name
+        outcome.status
+}
+
 surface ToolRun {
     facing workflow: Workflow
     context repository: Repository

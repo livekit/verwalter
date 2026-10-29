@@ -26,6 +26,8 @@ pub struct PackageStatus {
     /// none | draft | published | not wanted
     pub release: String,
     pub assets: usize,
+    /// Some(true|false) when the package has a registry configured.
+    pub on_registry: Option<bool>,
     pub pending_changesets: Vec<String>,
     pub next_version: Option<String>,
     pub release_pr: Option<u64>,
@@ -35,6 +37,10 @@ pub struct PackageStatus {
 }
 
 pub fn status(repo: &Repo, remote: &str, gh: Gh) -> Result<Vec<PackageStatus>, Error> {
+    status_with(repo, remote, gh, &crate::registry::curl)
+}
+
+pub fn status_with(repo: &Repo, remote: &str, gh: Gh, http: crate::registry::Http) -> Result<Vec<PackageStatus>, Error> {
     let root = repo.root.as_path();
     let remote_tags: BTreeSet<String> = git::run(root, &["ls-remote", "--tags", remote])
         .map(|out| {
@@ -140,6 +146,12 @@ pub fn status(repo: &Repo, remote: &str, gh: Gh) -> Result<Vec<PackageStatus>, E
             "up to date".to_string()
         };
 
+        let on_registry = if tag_state == "missing" {
+            None
+        } else {
+            crate::registry::exists(crate::registry::version_url(package, &p.name, &p.version), http)
+                .unwrap_or(None)
+        };
         out.push(PackageStatus {
             package: p.name.clone(),
             version: p.version.to_string(),
@@ -147,6 +159,7 @@ pub fn status(repo: &Repo, remote: &str, gh: Gh) -> Result<Vec<PackageStatus>, E
             tag_state,
             release: release_state,
             assets,
+            on_registry,
             pending_changesets: pending,
             next_version,
             release_pr,

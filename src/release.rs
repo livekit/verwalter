@@ -23,9 +23,6 @@ pub struct Released {
     pub first_release: bool,
     /// committed | tagged | drafted | published, as in the spec.
     pub status: &'static str,
-    /// In-repo dependencies released in the same run. They come earlier in
-    /// the list and must be published to the registry before this one.
-    pub depends_on: Vec<String>,
 }
 
 /// What `run` may do beyond tagging and creating releases.
@@ -69,8 +66,6 @@ pub fn view(gh: Gh, tag: &str) -> Option<ReleaseState> {
 ///
 /// Packages are handled in dependency order and the run stops at the
 /// first failure, so a dependent is never released before its dependency.
-/// The report lists `depends_on` per entry so the publish step can keep
-/// that order too.
 pub fn run(repo: &Repo, remote: &str, options: &Options, gh: Gh) -> Result<Vec<Released>, Error> {
     let deps_of = |name: &str| -> Vec<&str> {
         repo.packages
@@ -92,14 +87,9 @@ pub fn run(repo: &Repo, remote: &str, options: &Options, gh: Gh) -> Result<Vec<R
             .find(|p| p.name == name)
             .expect("ordered from packages")
             .version;
-        if let Some(mut released) = release_one(repo, remote, options, name, version, gh)
+        if let Some(released) = release_one(repo, remote, options, name, version, gh)
             .map_err(|e| resume_hint(e, name, options))?
         {
-            released.depends_on = deps_of(name)
-                .into_iter()
-                .filter(|d| out.iter().any(|r| r.package == *d))
-                .map(String::from)
-                .collect();
             out.push(released);
         }
     }
@@ -239,9 +229,7 @@ fn release_one(
     if !fresh && status != "drafted" && options.package.is_none() {
         return Ok(None);
     }
-    let first_release = crate::prerelease::released_versions(repo, name)?
-        .iter()
-        .all(|v| v == version);
+    let first_release = first_release(repo, name, version)?;
     Ok(Some(Released {
         package: name.to_string(),
         previous_version: previous_version(&changelog, &version.to_string()),
@@ -250,8 +238,24 @@ fn release_one(
         prerelease: version.is_prerelease(),
         first_release,
         status,
-        depends_on: Vec::new(),
     }))
+}
+
+/// Spec: Package.first_release. The registry has no version of the
+/// package when one is configured, else no tag other than `version`.
+pub fn first_release(repo: &Repo, name: &str, version: &crate::Version) -> Result<bool, Error> {
+    let cfg = &repo.config.packages[name];
+    match crate::registry::exists(crate::registry::package_url(cfg, name), &crate::registry::curl)? {
+        Some(has_any) => Ok(!has_any),
+        None => first_release_by_tags(repo, name, version),
+    }
+}
+
+/// No tag of the package other than `version` itself.
+pub fn first_release_by_tags(repo: &Repo, name: &str, version: &crate::Version) -> Result<bool, Error> {
+    Ok(crate::prerelease::released_versions(repo, name)?
+        .iter()
+        .all(|v| v == version))
 }
 
 /// Spec: MaintainerAbandonsRelease. Removes the GitHub release and the

@@ -281,10 +281,10 @@ fn number_from_url(url: &str) -> Result<u64, Error> {
 }
 
 /// The PR body: one section per package with its changelog entry.
-/// Spec: Package.first_release. No tag of the package exists.
+/// Spec: Package.first_release, for a version not yet tagged.
 pub fn is_first_release(repo: &Repo, package: &str) -> bool {
-    crate::prerelease::released_versions(repo, package)
-        .map(|v| v.is_empty())
+    let p = repo.packages.iter().find(|p| p.name == package);
+    p.and_then(|p| crate::release::first_release(repo, package, &p.version).ok())
         .unwrap_or(false)
 }
 

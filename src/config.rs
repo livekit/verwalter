@@ -57,6 +57,13 @@ pub struct Package {
     /// `max_bump = "minor"` bumps minor. In a fixed group the lowest
     /// ceiling applies to the group.
     pub max_bump: Option<BumpLevel>,
+    /// Where the package is published, for the exists check before a
+    /// publish command runs and for `status`. Default: no check.
+    #[serde(default)]
+    pub registry: crate::registry::Registry,
+    /// For `registry = "custom"`: a URL with `{name}` and `{version}` that
+    /// answers 200 when the version exists and 404 when it does not.
+    pub exists_url: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]

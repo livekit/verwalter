@@ -23,6 +23,8 @@ pub mod workspace;
 pub mod branches;
 pub mod check;
 pub mod prerelease;
+pub mod publish;
+pub mod registry;
 pub mod release;
 pub mod status;
 

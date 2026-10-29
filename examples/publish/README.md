@@ -1,29 +1,45 @@
-# Publish steps that are safe to re-run
+# Publish commands for `verwalter publish --each`
 
-verwalter never touches a registry. The publish job is yours. If anything
-after the tag failed, the release run is repeated. The job must then skip
-a version that is already on the registry. It must still fail on every
-other error. Do not grep the error output of the publish command for "already
-exists". A revoked token, a missing `repository.url` for provenance and a
-conflict all come back as a 403 or a 422 from some registries.
+verwalter never publishes. `verwalter publish --each <command>` runs your
+command once per tagged package, dependencies first, and owns the order
+and the stop. Before each run it asks the registry named in
+`verwalter.toml` whether the version exists. If it does, the package is
+skipped and the command does not run. So the command only publishes, and
+every error it returns is a real failure. Do not grep its output for
+"already exists". A revoked token, a missing `repository.url` for
+provenance and a conflict all come back as a 403 or a 422 from some
+registries.
 
-Ask the registry first. Each snippet below reads `package` and `version`
-from one entry of verwalter's `releases` output, a matrix over
-`fromJSON(needs.release.outputs.releases)`. It checks whether that version
-exists. If it does not, the snippet publishes. Every error of the publish
-command itself fails the job.
+The command sees `VERWALTER_PACKAGE`, `VERWALTER_VERSION`, `VERWALTER_TAG`,
+`VERWALTER_PRERELEASE` and `VERWALTER_FIRST_RELEASE`. A `{package}`,
+`{version}` or `{tag}` in the command line is replaced too. A script per
+repository, `scripts/publish.sh`, is the usual shape:
 
-The `first_release` field of the same entry says that the package has no
-earlier tag. Trusted publishing cannot create a new package on crates.io,
-npm or PyPI, so the first upload is done by hand. A step stops early with
-a clear message:
-
-```yaml
-- if: matrix.release.first_release
-  run: |
-    echo "::error::${{ matrix.release.package }} has no release yet. Publish the first version by hand, then re-run."
-    exit 1
+```sh
+#!/bin/sh
+set -eu
+case "$VERWALTER_PACKAGE" in
+  livekit-protocol|livekit-api|livekit) cargo publish -p "$VERWALTER_PACKAGE" --no-verify ;;
+  @livekit/rtc-node) (cd packages/livekit-rtc && npm publish --provenance --access public) ;;
+  *) echo "no publish step for $VERWALTER_PACKAGE" >&2; exit 1 ;;
+esac
 ```
+
+`VERWALTER_FIRST_RELEASE` is `true` when the registry has no version of
+the package at all. Trusted publishing cannot create a new package on
+crates.io, npm or PyPI, so the first upload is done by hand. A script
+stops early with a clear message:
+
+```sh
+if [ "$VERWALTER_FIRST_RELEASE" = true ]; then
+  echo "$VERWALTER_PACKAGE has no release yet. Publish the first version by hand, then re-run." >&2
+  exit 1
+fi
+```
+
+Without a `registry` in the config, the existence check is the command's
+job. The checks below are what the tool does for each registry, for a
+command that needs its own.
 
 ## crates.io
 

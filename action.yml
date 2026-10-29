@@ -26,8 +26,20 @@ outputs:
     description: "`release` only: true when at least one release was tagged, drafted or published."
     value: ${{ steps.run.outputs.released }}
   releases:
-    description: "`release` only: JSON list of {package, previous_version, version, tag, prerelease, first_release, status, depends_on}."
+    description: "`release` only: JSON list of {package, previous_version, version, tag, prerelease, first_release, status}, dependencies first."
     value: ${{ steps.run.outputs.releases }}
+  published:
+    description: "`publish` only: JSON list of package names the command published."
+    value: ${{ steps.run.outputs.published }}
+  failed:
+    description: "`publish` only: JSON list of package names whose command failed."
+    value: ${{ steps.run.outputs.failed }}
+  blocked:
+    description: "`publish` only: JSON list of package names not run because a dependency failed."
+    value: ${{ steps.run.outputs.blocked }}
+  outcomes:
+    description: "`publish` only: JSON list of {package, version, tag, status, reason}."
+    value: ${{ steps.run.outputs.outcomes }}
 
 runs:
   using: composite

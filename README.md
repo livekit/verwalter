@@ -92,19 +92,24 @@ cargo install --git https://github.com/lukasIO/verwalter --tag v0.13.0
 | Output (`release` only) | Meaning |
 |---|---|
 | `released` | `true` if at least one release was tagged, drafted or published. |
-| `releases` | JSON list of `{package, previous_version, version, tag, prerelease, first_release, status, depends_on}`, dependencies first. |
+| `releases` | JSON list of `{package, previous_version, version, tag, prerelease, first_release, status}`, dependencies first. |
+
+| Output (`publish` only) | Meaning |
+|---|---|
+| `published`, `failed`, `blocked` | JSON lists of package names. |
+| `outcomes` | JSON list of `{package, version, tag, status, reason}`. |
 
 ### The workflows
 
 [examples/workflows](examples/workflows) has the three workflows to copy,
-and [examples/publish](examples/publish/README.md) has publish steps that
-are safe to re-run:
+and [examples/publish](examples/publish/README.md) has publish commands
+per registry for `publish --each`:
 
 | Workflow | Trigger | Command |
 |---|---|---|
 | `changeset-check.yml` | `pull_request` on `main` | `check` |
 | `release-pr.yml` | `push` to `main` | `pr` |
-| `release.yml` | `pull_request` closed, merged, head `release/*`, author `github-actions[bot]`, body with the verwalter marker | `release`, then your publish jobs |
+| `release.yml` | `pull_request` closed, merged, head `release/*`, author `github-actions[bot]`, body with the verwalter marker | `release`, then `publish --each <your script>` |
 
 An rc workflow is one `workflow_dispatch` job. It runs
 `pre-release <package> --level <l> --target ${{ github.ref_name }}` with
@@ -143,6 +148,8 @@ tag_template = "{package}-v{version}"      # default in a monorepo, v{version} w
 release = "tag_and_release"                # none | tag | tag_and_release
 draft = false
 max_bump = "minor"                         # optional ceiling on the bump level
+registry = "crates"                        # none | crates | npm | pypi | pubdev | custom
+exists_url = "https://r/{name}/{version}"  # for custom: 200 when the version exists, 404 when not
 ```
 
 Dependencies between packages are read from the manifests, not configured.
@@ -175,7 +182,9 @@ The first file of a package is its version.
 | Changeset command | Writes a changeset for the packages the branch changes and no pending changeset covers, or for named packages. | `changeset --level --package --summary` |
 | One release PR | Every package with a pending bump goes in one PR. Each push regenerates the branch from `main` and updates the PR in place. With nothing pending, the PR is closed. | `pr`, `release_branch_prefix` |
 | Dependent bumps | A package whose in-repo dependency is released gets a bump too, transitively. Its dependency floor moves in its manifest and the lock files. | `dependent_bump_level`, `pin_files` |
-| Dependency order | Releases, tags and the handoff list go dependencies first. A failure stops before any dependent. | `release`, `depends_on` |
+| Dependency order | Releases, tags and the handoff list go dependencies first. A failure stops before any dependent. | `release` |
+| Publish scheduler | Runs your publish command once per tagged package, dependencies first, independent packages in parallel. A failure blocks its transitive dependents and nothing else. A version the registry has is skipped before the command runs. Nothing is remembered: a re-run repeats the command. | `publish --each --jobs`, `registry` |
+| Registry check | One GET per registry answers whether a version exists. 200 skips, 404 publishes, anything else fails. `status` shows the answer. | `registry`, `exists_url` |
 | Fixed groups | Members release at one version: the highest in the group, bumped by the highest level any member needs. A member without a changeset gets a "Released with" line. | `fixed` |
 | Bump ceiling | Caps what a changeset can do to a package. A group takes the lowest cap. | `max_bump` |
 | 0.x rule | `major` on `0.x` gives `1.0.0`, as changesets does. | |
@@ -183,7 +192,7 @@ The first file of a package is its version.
 | Draft releases | The release is created as a draft. A later job uploads the assets and flips it with `--publish`. It is reported until published. | `draft`, `release --publish` |
 | Changelog | One entry per release with PR number and author, read from the commit that added each changeset. Multi-line summaries stay bullets. | `changelog` |
 | Workspace check | A Cargo, pnpm or uv member without a private marker must be in the config. A missing one fails `check` and warns elsewhere. `publish.workspace = true` is resolved. | `ignore` |
-| First release | A package with no tag is named in the PR body and flagged in the handoff. Trusted publishing cannot create a new package. | `first_release` |
+| First release | A package with no tag, or no version on its registry, is named in the PR body and flagged in the handoff. Trusted publishing cannot create a new package. | `first_release` |
 | Abandon | Removes a GitHub release and its tag, local and remote. The registry is not touched. | `release --abandon <tag>` |
 | Dry run | Every push, tag and GitHub write is printed instead of done. | `--dry-run`, action `dry-run` |
 | Status | Per package: version, tag, release, pending changesets, open PRs, next step. | `status` |
@@ -206,6 +215,9 @@ The first file of a package is its version.
 | An rc is requested twice, or by another member of the group | One branch per package or group, updated in place. The number continues. |
 | A GitHub release is deleted but the tag remains | The next release run recreates it from the changelog. |
 | Two release runs race on the same tag | The run that loses the create sees the existing release and reports it. |
+| A publish fails for one package | Its transitive dependents are blocked and reported with the cause. Every other package publishes. The run exits non-zero. |
+| A publish is re-run | Versions the registry has are skipped before the command runs. The rest publish. |
+| The registry is down during a publish | A 503 is an error, not "not there yet". The package fails, its dependents are blocked. |
 
 ### When a step fails
 
@@ -233,7 +245,7 @@ and `origin/<base>` are current.
 
 | Not covered | Why, and what to do instead |
 |---|---|
-| Registry publish and re-runs | The workflow's job. Ask the registry whether the version exists before publishing, and skip only then. Every other error must fail. Do not grep the error output: a conflict and a bad token look alike. Snippets per registry are in [examples/publish](examples/publish/README.md). |
+| The registry publish itself | Your command, run by `publish --each`. The tool checks existence first, so the command never greps its own errors: a conflict and a bad token look alike. Commands per registry are in [examples/publish](examples/publish/README.md). |
 | First upload of a new package under trusted publishing | No registry allows it. Upload the first version by hand. The PR body and `first_release` tell you when. |
 | Snapshot or nightly releases from any commit | Not built. Use an rc PR, or a workflow that publishes under a dist tag with a version the tool never sees. |
 | Cross-repo version coupling | A workflow precondition, not a tool concern. |
@@ -253,9 +265,10 @@ and `origin/<base>` are current.
 | `verwalter pr [--remote origin]` | Push the branch and open or update the PR. |
 | `verwalter release [--asset <file>]... [--package <name>] [--publish]` | Tag and create GitHub releases for every untagged version that has a changelog entry. Uploads assets to drafts or a named package. `--publish` flips a draft. |
 | `verwalter release --abandon <tag>` | Delete a GitHub release and its tag. |
+| `verwalter publish --each <command> [--jobs <n>]` | Run `command` once per tagged package, dependencies first, up to `n` at once. `{package}`, `{version}`, `{tag}` are replaced, and `VERWALTER_PACKAGE`, `VERWALTER_VERSION`, `VERWALTER_TAG`, `VERWALTER_PRERELEASE`, `VERWALTER_FIRST_RELEASE` are set. A failure blocks dependents. A version on the registry is skipped. |
 | `verwalter pre-release <package> [--target <branch>] [--level <l>]` | Open an rc PR for one package and its fixed group. Changesets stay pending. |
 
 All commands take `--config <file>` and an optional checkout path. `pr`,
-`release`, `pre-release` and `check` take `--dry-run`. Every push, tag and
+`release`, `pre-release`, `publish` and `check` take `--dry-run`. Every push, tag and
 GitHub write is then printed instead of done. Local release branches are
 still regenerated.
