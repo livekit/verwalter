@@ -1,0 +1,19 @@
+# Commands
+
+| Command | What it does |
+|---|---|
+| `verwalter status` | Per package: version, tag, GitHub release, pending changesets, open PRs, next step. |
+| `verwalter plan` | Print the release plan: next versions, dependencies first. |
+| `verwalter changeset [--level <l>] [--package <name>]... [--summary <text>]` | Write a changeset for the packages the branch changes and no pending changeset covers. With `--package`, exactly the named packages. The summary defaults to the last commit subject. |
+| `verwalter check --pr <n>` | Changeset and API check for a contributor PR, with comment. |
+| `verwalter branches [--base <ref>]` | Create the release branch locally. |
+| `verwalter pr [--remote origin]` | Push the branch and open or update the PR. |
+| `verwalter release [--asset <file>]... [--package <name>] [--publish]` | Tag and create GitHub releases for every untagged version that has a changelog entry. Uploads assets to drafts or a named package. `--publish` flips a draft. |
+| `verwalter release --abandon <tag>` | Delete a GitHub release and its tag. |
+| `verwalter publish [--jobs <n>]` | Run each package's publish command once per tagged package, dependencies first, up to `n` at once. A failure blocks dependents. A version on the registry is skipped. |
+| `verwalter pre-release <package> [--target <branch>] [--level <l>]` | Open an rc PR for one package and its fixed group. Changesets stay pending. |
+
+All commands take `--config <file>` and an optional checkout path. `pr`,
+`release`, `pre-release`, `publish` and `check` take `--dry-run`. Every push, tag and
+GitHub write is then printed instead of done. Local release branches are
+still regenerated.
