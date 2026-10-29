@@ -1180,15 +1180,17 @@ fn publish_runs_dependencies_first_and_blocks_dependents_of_a_failure() {
         dry_run: true,
         only: Some(["livekit-api".to_string()].into_iter().collect()),
     };
-    let out = verwalter::publish::run(&Repo::load(root).unwrap(), &dry, &no_registry).unwrap();
+    let missing = |_: &str| -> Result<u16, verwalter::Error> { Ok(404) };
+    let out = verwalter::publish::run(&Repo::load(root).unwrap(), &dry, &missing).unwrap();
     assert!(out[0].reason.contains("pnpm publish"), "{out:?}");
     let dry = verwalter::publish::Options {
         only: Some(["livekit".to_string()].into_iter().collect()),
         ..dry
     };
-    let out = verwalter::publish::run(&Repo::load(root).unwrap(), &dry, &no_registry).unwrap();
+    let out = verwalter::publish::run(&Repo::load(root).unwrap(), &dry, &missing).unwrap();
     assert!(out[0].reason.contains("npm publish"), "{out:?}");
     fs::remove_file(root.join("livekit-api/pnpm-workspace.yaml")).unwrap();
+    write(root, "verwalter.toml", &base);
 
     // No command at all: an error before anything runs.
     let err = verwalter::publish::run(&Repo::load(root).unwrap(), &opts, &no_registry)
