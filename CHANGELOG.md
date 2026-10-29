@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.14.1
+
+### Patch Changes
+
+- `VERWALTER_ROOT` is absolute. A relative checkout path made `$VERWALTER_ROOT/dist` resolve inside the package. - [`1a3e582`](https://github.com/lukasIO/verwalter/commit/1a3e582f17b3ef2bda17bf621961417cd3027aff) ([@lukasIO](https://github.com/lukasIO))
+- README and example workflows pin v0.14.0. - [`56be448`](https://github.com/lukasIO/verwalter/commit/56be448fe8f1caf79a3a819c46225d2d838cffc5) ([@lukasIO](https://github.com/lukasIO))
+
 ## 0.14.0
 
 ### Minor Changes
