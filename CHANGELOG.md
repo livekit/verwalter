@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.19.0
+
+### Minor Changes
+
+- `versioned_files` and `changelog` are relative to the package's `path`, with `..` for a sibling directory, and `changelog` defaults to `CHANGELOG.md`, with `changelog = false` to keep none. Repo-relative paths in an existing config must drop the package prefix. - [`26f2470`](https://github.com/lukasIO/verwalter/commit/26f2470d57aaaca22dbaf2ba48b139579f11457e) ([@lukasIO](https://github.com/lukasIO))
+
+### Patch Changes
+
+- README, docs and example workflows pin v0.18.1. - [`09a1dbc`](https://github.com/lukasIO/verwalter/commit/09a1dbccf8683bb7683df024b589a1e94caa01d2) ([@lukasIO](https://github.com/lukasIO))
+
 ## 0.18.1
 
 ### Patch Changes
