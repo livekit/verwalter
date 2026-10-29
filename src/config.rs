@@ -8,6 +8,7 @@ use serde::Deserialize;
 use crate::version::BumpLevel;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum ReleaseMode {
     None,
@@ -20,6 +21,7 @@ pub enum ReleaseMode {
 /// file name, or `{ path, regex }` for any other text file. The regex must
 /// have a `(?<version>...)` capture group; only that group is rewritten.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 #[serde(untagged)]
 pub enum VersionedFile {
     Path(String),
@@ -42,6 +44,7 @@ impl VersionedFile {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 pub struct Package {
     pub path: String,
@@ -67,6 +70,7 @@ pub struct Package {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 pub struct Config {
     #[serde(default = "default_base_branch")]
@@ -109,6 +113,7 @@ pub struct Config {
 /// Spec: config.publish. The default registry and command for every
 /// package; `registry` and `publish` on a package override them.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Default)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 pub struct Publish {
     /// Packages run at once, independent ones only.
@@ -132,6 +137,7 @@ pub struct Publish {
 /// Spec: config.check. The API check that `verwalter check` runs for
 /// every affected package that a changeset covers.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Default)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 pub struct Check {
     /// Shell command, run in the package's path with the claimed level
@@ -406,5 +412,20 @@ release = "tag"
     fn unknown_keys_are_errors() {
         assert!(Config::parse(&format!("{MONO}\npublsh = \"cargo publish\"\n")).is_err());
         assert!(Config::parse(&format!("[publish]\njob = 2\n{MONO}\n")).is_err());
+    }
+
+    /// The editor schema. An additive change updates v1.json in place. A
+    /// breaking change freezes v1.json and starts v2.json.
+    #[test]
+    fn schema_is_current() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/schemas/v1.json");
+        let schema = serde_json::to_string_pretty(&schemars::schema_for!(Config)).unwrap() + "\n";
+        if std::env::var_os("UPDATE_SCHEMA").is_some() {
+            std::fs::write(path, &schema).unwrap();
+        }
+        assert!(
+            std::fs::read_to_string(path).is_ok_and(|s| s == schema),
+            "schemas/v1.json is stale: run UPDATE_SCHEMA=1 cargo test schema_is_current"
+        );
     }
 }

@@ -1,3 +1,4 @@
+#:schema ./schemas/v1.json
 # verwalter versions itself.
 [packages.verwalter]
 path = "."

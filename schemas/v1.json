@@ -1,0 +1,261 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Config",
+  "type": "object",
+  "properties": {
+    "base_branch": {
+      "type": "string",
+      "default": "main"
+    },
+    "exempt_label": {
+      "type": "string",
+      "default": "internal"
+    },
+    "release_branch_prefix": {
+      "type": "string",
+      "default": "release/"
+    },
+    "release_label": {
+      "type": "string",
+      "default": "release"
+    },
+    "dependent_bump_level": {
+      "$ref": "#/$defs/BumpLevel"
+    },
+    "prerelease_label": {
+      "description": "Pre-release label: `1.6.0-rc.1`. Written as PEP 440 in pyproject.toml\n(`1.6.0rc1`; `alpha` and `beta` become `a` and `b`).",
+      "type": "string",
+      "default": "rc"
+    },
+    "pin_files": {
+      "description": "Files outside any package that pin every package's version: a\nworkspace Cargo.toml, Cargo.lock, package-lock.json. Each release\nupdates its own entry in each of them.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
+    "ignore": {
+      "description": "Workspace members the consistency check must not report, by package\nname or path; a trailing `*` matches a prefix (`examples/*`).",
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
+    "fixed": {
+      "description": "Groups of packages that always release at one shared version: the\nhighest version in the group, bumped by the highest level any\nmember needs. `fixed = [[\"play-core\", \"play-ffi\"]]`.",
+      "type": "array",
+      "items": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "default": []
+    },
+    "publish": {
+      "description": "Defaults for `verwalter publish`, overridden per package.",
+      "$ref": "#/$defs/Publish"
+    },
+    "check": {
+      "description": "Spec: config.check.",
+      "$ref": "#/$defs/Check"
+    },
+    "packages": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/Package"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "packages"
+  ],
+  "$defs": {
+    "BumpLevel": {
+      "type": "string",
+      "enum": [
+        "patch",
+        "minor",
+        "major"
+      ]
+    },
+    "Publish": {
+      "description": "Spec: config.publish. The default registry and command for every\npackage; `registry` and `publish` on a package override them.",
+      "type": "object",
+      "properties": {
+        "jobs": {
+          "description": "Packages run at once, independent ones only.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0,
+          "default": 4
+        },
+        "registry": {
+          "$ref": "#/$defs/Registry"
+        },
+        "exists_url": {
+          "description": "For `registry = \"custom\"`: a URL with `{name}` and `{version}`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "publish": {
+          "description": "Shell command, run in the package's path. Applies to packages on\nthe default registry; others take the built-in default for theirs.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "workspace": {
+          "description": "One command, run once from the root, that publishes every package\non the default registry without a `publish` of its own: the\necosystem's recursive publish (`pnpm -r publish`,\n`cargo publish --workspace`). Order and skipping are its job; the\ntool checks the registry before and after and reports per package.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "Registry": {
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "crates",
+            "npm",
+            "pypi",
+            "pubdev"
+          ]
+        },
+        {
+          "description": "No check. The publish command handles it, or the package is private.",
+          "type": "string",
+          "const": "none"
+        },
+        {
+          "description": "`exists_url` with `{name}` and `{version}` placeholders: Maven, a\nprivate npm registry, anything with a URL that answers 200 or 404.",
+          "type": "string",
+          "const": "custom"
+        }
+      ]
+    },
+    "Check": {
+      "description": "Spec: config.check. The API check that `verwalter check` runs for\nevery affected package that a changeset covers.",
+      "type": "object",
+      "properties": {
+        "api": {
+          "description": "Shell command, run in the package's path with the claimed level\nand the baseline tag in the environment. It prints the lowest\nchange kind it can prove the diff needs, `major`, `minor` or\n`patch`, or nothing when it cannot tell.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "Package": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "versioned_files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/VersionedFile"
+          }
+        },
+        "changelog": {
+          "type": "string"
+        },
+        "tag_template": {
+          "description": "Default: \"v{version}\" with one package, \"{package}-v{version}\" otherwise.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "release": {
+          "$ref": "#/$defs/ReleaseMode"
+        },
+        "draft": {
+          "type": "boolean",
+          "default": false
+        },
+        "registry": {
+          "description": "Where the package is published. Default: `[publish].registry`.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Registry"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "exists_url": {
+          "description": "For `registry = \"custom\"`: a URL with `{name}` and `{version}` that\nanswers 200 when the version exists and 404 when it does not.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "publish": {
+          "description": "Shell command that publishes this package, run in `path`. Default:\n`[publish].publish` when on the default registry, else the built-in\ncommand for the registry.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "api": {
+          "description": "Spec: Package.api_command. Overrides `[check].api` for this package.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "versioned_files",
+        "changelog"
+      ]
+    },
+    "VersionedFile": {
+      "description": "A versioned file: a bare path for a format knope-versioning knows by\nfile name, or `{ path, regex }` for any other text file. The regex must\nhave a `(?<version>...)` capture group; only that group is rewritten.",
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "regex": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "path",
+            "regex"
+          ]
+        }
+      ]
+    },
+    "ReleaseMode": {
+      "type": "string",
+      "enum": [
+        "none",
+        "tag",
+        "tag_and_release"
+      ]
+    }
+  }
+}
