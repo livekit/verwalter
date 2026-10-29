@@ -24,6 +24,6 @@ jobs:
         with:
           fetch-depth: 0                       # the API check needs the baseline tag
       - uses: taiki-e/install-action@cargo-semver-checks   # only with [check].api
-      - uses: lukasIO/verwalter@v0.13.0
+      - uses: lukasIO/verwalter@v0.14.0
         with:
           command: check

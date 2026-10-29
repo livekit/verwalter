@@ -66,13 +66,13 @@ Download a binary from the
 from source:
 
 ```bash
-cargo install --git https://github.com/lukasIO/verwalter --tag v0.13.0
+cargo install --git https://github.com/lukasIO/verwalter --tag v0.14.0
 ```
 
 ### The action
 
 ```yaml
-- uses: lukasIO/verwalter@v0.13.0
+- uses: lukasIO/verwalter@v0.14.0
   with:
     command: pr        # check | changeset | plan | pr | release | pre-release | status
     token: ${{ secrets.RELEASE_TOKEN || github.token }}
