@@ -90,7 +90,8 @@ fn candidates(
             ws.members.push((p.name.clone(), p.version.clone(), tag));
             continue;
         }
-        let command = repo.config.publish_command(&p.name).ok_or_else(|| {
+        let pnpm = repo.root.join("pnpm-workspace.yaml").exists();
+        let command = repo.config.publish_command(&p.name, pnpm).ok_or_else(|| {
             format!("{}: no publish command: set `registry` or `publish` on the package, or `[publish]` defaults", p.name)
         })?;
         out.insert(

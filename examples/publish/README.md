@@ -18,7 +18,7 @@ registry = "crates"
 publish = "cargo publish --no-verify"
 
 [packages."@livekit/rtc-node"]
-registry = "npm"                                   # built-in: npm publish --provenance --access public
+registry = "npm"                                   # built-in: npm publish --provenance --access public, pnpm publish in a pnpm workspace
 
 [packages.livekit-rtc]
 registry = "pypi"
@@ -86,6 +86,18 @@ version that does not exist and 200 for one that does. curl sends the
 `User-Agent` that the API requires.
 
 ## npm
+
+The commands run in each package's directory, and the manifest in the
+tarball is what the tool writes. `pnpm publish` and `pnpm pack` replace
+a `workspace:*` range with the dependency's version (`1.5.0`) and
+`workspace:^` with `^1.5.0`, from the linked `node_modules`, so run
+`pnpm install` in the workflow first. `npm publish` ships the literal
+`workspace:*`, which no installer accepts. The built-in command is
+therefore `pnpm publish` when `pnpm-workspace.yaml` exists. `cargo
+publish` does the same for a path or `workspace = true` dependency: the
+published manifest keeps only the `version`, and cargo refuses to package
+a crate whose dependency's version is not on the index yet, which is why
+dependencies go first.
 
 ```yaml
 - name: Publish ${{ matrix.release.package }} ${{ matrix.release.version }}

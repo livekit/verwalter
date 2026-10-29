@@ -13,7 +13,7 @@ What the tool does, what it catches, and what to do when a step fails.
 | Dependent bumps | A package whose in-repo dependency is released gets a bump too, transitively. Its dependency floor moves in its manifest and the lock files. | `dependent_bump_level`, `pin_files` |
 | Dependency order | Releases, tags and the handoff list go dependencies first. A failure stops before any dependent. | `release` |
 | Publish scheduler | Runs each package's publish command for the packages the run released, from the `releases` output, dependencies first, independent packages in parallel. A failure blocks its transitive dependents and nothing else. A version the registry has is skipped before the command runs. Without `releases`, every tagged package runs. | `publish`, `[publish]`, `registry`, `publish` per package |
-| Workspace publish | One recursive command for every package on the default registry, run once from the root, with per-package reporting from the registry afterwards. | `[publish].workspace` |
+| Workspace publish | One recursive command for every package on the default registry, run once from the root, with per-package reporting from the registry afterwards. Per-package commands resolve workspace ranges too: the npm default is `pnpm publish` in a pnpm workspace. | `[publish].workspace` |
 | Registry check | One GET per registry answers whether a version exists. 200 skips, 404 publishes, anything else fails. `status` shows the answer. | `registry`, `exists_url` |
 | Fixed groups | Members release at one version: the highest in the group, bumped by the highest level any member needs. A member without a changeset gets a "Released with" line. | `fixed` |
 | 0.x rule | `major` on `0.x` gives `1.0.0`, as changesets does. | |

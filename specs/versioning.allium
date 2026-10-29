@@ -137,7 +137,9 @@ entity Package {
     -- the package's own, else config.publish.publish when the package is
     -- on the default registry, else the built-in command for its
     -- registry (cargo publish, npm publish, twine upload, dart pub
-    -- publish), else none and `publish` refuses to start.
+    -- publish), else none and `publish` refuses to start. In a pnpm
+    -- workspace the npm default is pnpm publish: npm ships a
+    -- `workspace:` range as is, pnpm resolves it to the version.
     publish_command: String?
     -- True when config.publish.workspace is set and the package has no
     -- publish command of its own and no registry other than the default:

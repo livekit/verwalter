@@ -221,7 +221,10 @@ impl Config {
     /// Spec: Package.publish_command. The package's own, else the default
     /// when the package is on the default registry, else the built-in
     /// command for its registry. None when nothing applies.
-    pub fn publish_command(&self, package: &str) -> Option<String> {
+    /// `pnpm` is whether the repo is a pnpm workspace: `npm publish`
+    /// ships a `workspace:` range as is, `pnpm publish` resolves it to
+    /// the dependency's version.
+    pub fn publish_command(&self, package: &str, pnpm: bool) -> Option<String> {
         use crate::registry::Registry;
         let p = &self.packages[package];
         if let Some(c) = &p.publish {
@@ -236,6 +239,9 @@ impl Config {
         Some(
             match registry {
                 Registry::Crates => "cargo publish",
+                Registry::Npm if pnpm => {
+                    "pnpm publish --provenance --access public --no-git-checks"
+                }
                 Registry::Npm => "npm publish --provenance --access public",
                 Registry::Pypi => "python -m twine upload dist/*",
                 Registry::Pubdev => "dart pub publish --force",

@@ -153,7 +153,7 @@ mod tests {
             "",
         );
         assert_eq!(
-            c.publish_command("x").as_deref(),
+            c.publish_command("x", false).as_deref(),
             Some("cargo publish --no-verify")
         );
         // Another registry does not inherit the default command.
@@ -162,8 +162,14 @@ mod tests {
             "registry = \"npm\"",
         );
         assert_eq!(
-            c.publish_command("x").as_deref(),
+            c.publish_command("x", false).as_deref(),
             Some("npm publish --provenance --access public")
+        );
+        // A pnpm workspace takes pnpm, which resolves `workspace:` ranges.
+        let c = config("", "registry = \"npm\"");
+        assert_eq!(
+            c.publish_command("x", true).as_deref(),
+            Some("pnpm publish --provenance --access public --no-git-checks")
         );
         // The package's own wins.
         let c = config(
@@ -171,13 +177,13 @@ mod tests {
             "publish = \"pnpm publish --no-git-checks\"",
         );
         assert_eq!(
-            c.publish_command("x").as_deref(),
+            c.publish_command("x", false).as_deref(),
             Some("pnpm publish --no-git-checks")
         );
         // Nothing applies.
-        assert_eq!(config("", "").publish_command("x"), None);
+        assert_eq!(config("", "").publish_command("x", false), None);
         assert_eq!(
-            config("", "registry = \"custom\"").publish_command("x"),
+            config("", "registry = \"custom\"").publish_command("x", false),
             None
         );
     }
