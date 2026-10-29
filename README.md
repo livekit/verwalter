@@ -96,7 +96,9 @@ Versioned files are handled by
 `Cargo.lock`, `package.json`, `package-lock.json`, `pyproject.toml`,
 `pubspec.yaml`, `go.mod`, `pom.xml` and more. `uv.lock` is handled by the
 tool itself. The first file of a package is its version. Files of one
-package that disagree are reported as a warning.
+package that disagree are reported as a warning. `pnpm-lock.yaml` and
+`yarn.lock` need no edit: a `workspace:*` or `catalog:` range stores no
+version of an internal package, and the tool leaves such ranges alone.
 
 Any other text file takes a regex with a `version` capture group. Only the
 captured text changes. This covers `gradle.properties`, a `.podspec`, a
@@ -116,7 +118,7 @@ See [examples/workflows](examples/workflows) for the three workflows:
 changeset check on PRs, release PRs on push, release after merge.
 
 ```yaml
-- uses: lukasIO/verwalter@v0.11.0
+- uses: lukasIO/verwalter@v0.12.0
   with:
     command: check   # check | plan | pr | release
 ```

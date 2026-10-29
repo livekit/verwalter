@@ -502,6 +502,13 @@ version = "1.0.228"
 }"#;
 
     #[test]
+    fn package_json_workspace_range_is_left_alone() {
+        let json = PACKAGE_JSON.replace("\"1.30.0\"", "\"workspace:*\"");
+        let written = write_version("package.json", None, &json, Some("@livekit/protocol"), &v("1.31.0")).unwrap();
+        assert_eq!(written, json);
+    }
+
+    #[test]
     fn package_json() {
         let written = check("packages/livekit-rtc/package.json", PACKAGE_JSON, "0.14.0");
         assert_one_line_changed(PACKAGE_JSON, &written);
