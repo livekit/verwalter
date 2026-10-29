@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.15.0
+
+### Minor Changes
+
+- The check comment lists the bump each changeset claims, per package, on a passing PR too. It is deleted only when the PR claims nothing. - [`45b4d6f`](https://github.com/lukasIO/verwalter/commit/45b4d6f54a3fc913bd27806dfa4072a3c45bb4b9) ([@lukasIO](https://github.com/lukasIO))
+
+### Patch Changes
+
+- README and example workflows pin v0.14.1. - [`1f53e16`](https://github.com/lukasIO/verwalter/commit/1f53e16429b714a94c8d790735c8f49870b3f993) ([@lukasIO](https://github.com/lukasIO))
+- Internal cleanup: toml 1 (one toml stack instead of two), shared helpers, dead code removed. No behaviour change. - [#20](https://github.com/lukasIO/verwalter/pull/20) ([@lukasIO](https://github.com/lukasIO))
+- The README is a quick start. Configuration, the action, features and failure paths, the API check and the commands moved to `docs/`. - [`6a457da`](https://github.com/lukasIO/verwalter/commit/6a457dab5141d43a0dd40ca4d8748b25e641fbc2) ([@lukasIO](https://github.com/lukasIO))
+
 ## 0.14.1
 
 ### Patch Changes
