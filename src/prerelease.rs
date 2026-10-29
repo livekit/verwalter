@@ -73,7 +73,7 @@ pub fn plan(
             .flat_map(|m| m.dependencies.iter().cloned())
             .collect();
         for d in deps {
-            if pending(&d) && !groups.iter().any(|g| g.iter().any(|m| *m == d)) {
+            if pending(&d) && !groups.iter().any(|g| g.contains(&d)) {
                 groups.push(group_of(&d));
             }
         }
