@@ -15,8 +15,17 @@ use crate::{
     Error, Version,
 };
 
+/// One rc branch per fixed group, named after its first member by name,
+/// whichever member was requested: two members never open two rc PRs.
 pub fn branch_name(repo: &Repo, package: &str) -> String {
-    format!("{}{package}-rc", repo.config.release_branch_prefix)
+    let name = repo
+        .config
+        .fixed_with(package)
+        .into_iter()
+        .chain(std::iter::once(package.to_string()))
+        .min()
+        .unwrap();
+    format!("{}{name}-rc", repo.config.release_branch_prefix)
 }
 
 /// Versions of `package` that have a release tag.

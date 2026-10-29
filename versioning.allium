@@ -126,7 +126,9 @@ entity Package {
     open_release_pull_request: release_pull_requests where status = open and kind = release
     dependents: Package with dependencies.any(d => d = this)
 
-    has_pending_bump: pending_changesets.any(c => c.unreleased_for(this.name))
+    -- A package left at a pre-release has its promotion pending, with or
+    -- without changesets: an rc is never the last word.
+    has_pending_bump: pending_changesets.any(c => c.unreleased_for(this.name)) or version.is_prerelease
 }
 
 -- Exactly the changesets file format: `.changeset/<name>.md`, YAML front

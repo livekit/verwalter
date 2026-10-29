@@ -243,6 +243,8 @@ fn print_plan(repo: &Repo, releases: &[verwalter::plan::PlannedRelease]) {
             r.changesets.join(", ")
         } else if !r.bumped_dependencies.is_empty() {
             format!("deps: {}", r.bumped_dependencies.join(", "))
+        } else if r.from.is_prerelease() {
+            "promotes the pre-release".to_string()
         } else {
             format!("fixed with {}", r.fixed_with.join(", "))
         };

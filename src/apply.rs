@@ -131,6 +131,9 @@ pub fn render_entry(
                 .collect();
             lines.push(format!("- Released with {}", members.join(", ")));
         }
+        if level == release.level && release.changesets.is_empty() && release.from.is_prerelease() {
+            lines.push(format!("- Promotes `{}` with no further changes", release.from));
+        }
         if level == BumpLevel::Patch && !release.bumped_dependencies.is_empty() {
             let deps: Vec<String> = release
                 .bumped_dependencies

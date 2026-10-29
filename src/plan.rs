@@ -134,6 +134,12 @@ pub fn plan(
         }
     }
 
+    // Spec: has_pending_bump. A package left at a pre-release is promoted
+    // even without changesets; patch resolves to the rc's target.
+    for p in packages.iter().filter(|p| p.version.is_prerelease()) {
+        level.entry(&p.name).or_insert(BumpLevel::Patch);
+    }
+
     // Dependent bumps and fixed groups, to a fixpoint: a package whose
     // planned dependency is bumped gets at least `dependent_level`; a
     // fixed group with any planned member is planned whole, at the highest
@@ -363,5 +369,10 @@ mod tests {
         let changesets = [cs("x.md", &[("livekit", BumpLevel::Major)])];
         let p = plan(&packages, &changesets, BumpLevel::Patch);
         assert_eq!(p[0].to.to_string(), "2.0.0");
+        // No changeset at all: the rc is still promoted.
+        let p = plan(&packages, &[], BumpLevel::Patch);
+        assert_eq!(p.len(), 1);
+        assert_eq!(p[0].to.to_string(), "1.6.0");
+        assert!(p[0].changesets.is_empty());
     }
 }
