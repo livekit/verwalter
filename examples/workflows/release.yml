@@ -34,6 +34,9 @@ jobs:
         with:
           ref: main
       # Build whatever the release needs: wheels, binaries, packages.
+      # A matrix build gives each job its own artifact name, such as
+      # `dist-${{ matrix.target }}`, and the release job downloads them
+      # all with `pattern: dist-*` and `merge-multiple: true`.
       - run: mkdir -p dist && echo "built" > dist/artifact.txt
       - uses: actions/upload-artifact@v7
         with:
@@ -61,9 +64,11 @@ jobs:
         uses: livekit/verwalter@v0.22.0
         with:
           command: release
-          # Attached to the GitHub release when it is created. Leave out
-          # for packages with `release.draft = true`, whose assets are built later.
-          args: --asset dist/artifact.txt ${{ inputs.package && format('--package {0}', inputs.package) || '' }}
+          # Every file in dist/ is attached to the GitHub release when it
+          # is created. Not a glob: `dist/*` would expand to several
+          # arguments. Leave out for packages with `release.draft = true`,
+          # whose assets are built later.
+          args: --asset dist ${{ inputs.package && format('--package {0}', inputs.package) || '' }}
 
   # `publish` runs each package's publish command from verwalter.toml
   # (`[publish]` defaults, `publish.registry` and `publish.command` per package) for the

@@ -682,7 +682,9 @@ rule MaintainerAbandonsRelease {
 -- a failed upload; attaching is idempotent. A draft takes them, a
 -- published release only when the workflow names its package: in a
 -- monorepo an asset must not land on every complete release. A tag-only
--- release has no GitHub release to attach to.
+-- release has no GitHub release to attach to. An asset given as a
+-- directory stands for every file directly in it, so a matrix build
+-- names its download directory once.
 rule WorkflowAttachesAssets {
     when: WorkflowAttachesAssets(workflow, release, assets, package_named)
     requires: release.status = drafted or (release.status = published and package_named)

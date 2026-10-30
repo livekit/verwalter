@@ -29,7 +29,8 @@ pub struct Released {
 #[derive(Debug, Clone, Default)]
 pub struct Options {
     /// Attached when a release is created; uploaded with `--clobber` to an
-    /// existing release when it is a draft or `package` names it.
+    /// existing release when it is a draft or `package` names it. A
+    /// directory stands for every file directly in it (`expand_assets`).
     pub assets: Vec<String>,
     /// Only this package; the others are left as they are.
     pub package: Option<String>,
@@ -76,6 +77,11 @@ pub fn run(repo: &Repo, remote: &str, options: &Options, gh: Gh) -> Result<Vec<R
     };
     let order =
         crate::plan::dependency_order(repo.packages.iter().map(|p| p.name.as_str()), &deps_of);
+    // The hint keeps the arguments as given: a directory, not its files.
+    let expanded = Options {
+        assets: expand_assets(&repo.root, &options.assets)?,
+        ..options.clone()
+    };
     let mut out: Vec<Released> = Vec::new();
     for name in order {
         if options.package.as_deref().is_some_and(|only| only != name) {
@@ -87,11 +93,41 @@ pub fn run(repo: &Repo, remote: &str, options: &Options, gh: Gh) -> Result<Vec<R
             .find(|p| p.name == name)
             .expect("ordered from packages")
             .version;
-        if let Some(released) = release_one(repo, remote, options, name, version, gh)
+        if let Some(released) = release_one(repo, remote, &expanded, name, version, gh)
             .map_err(|e| resume_hint(e, name, options))?
         {
             out.push(released);
         }
+    }
+    Ok(out)
+}
+
+/// Spec: WorkflowAttachesAssets. An asset that is a directory stands for
+/// every file directly in it, sorted, so a matrix build that downloads its
+/// artifacts into one directory names it once. Hidden files and
+/// subdirectories are left out. Paths stay relative to the checkout, where
+/// gh runs. A file is passed on as it is: gh reports a missing one.
+pub fn expand_assets(root: &Path, assets: &[String]) -> Result<Vec<String>, Error> {
+    let mut out = Vec::new();
+    for asset in assets {
+        let dir = root.join(asset);
+        if !dir.is_dir() {
+            out.push(asset.clone());
+            continue;
+        }
+        let mut files: Vec<String> = fs::read_dir(&dir)
+            .map_err(|e| format!("--asset {asset}: {e}"))?
+            .filter_map(Result::ok)
+            .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
+            .filter_map(|e| e.file_name().into_string().ok())
+            .filter(|n| !n.starts_with('.'))
+            .map(|n| format!("{}/{n}", asset.trim_end_matches('/')))
+            .collect();
+        if files.is_empty() {
+            return Err(format!("--asset {asset}: the directory has no files").into());
+        }
+        files.sort();
+        out.extend(files);
     }
     Ok(out)
 }

@@ -8,7 +8,7 @@ use verwalter::{
     version::BumpLevel, workspace, Error,
 };
 
-const USAGE: &str = "usage: verwalter <status|plan|branches|pr> [--config <file>] [--base <ref>] [--remote <name>] [--dry-run] [<checkout>]\n       verwalter changeset [--level major|minor|patch] [--package <name>]... [--base <ref>] [--summary <text>] [<checkout>]\n       verwalter release [--asset <file>]... [--package <name>] [--publish] [--abandon <tag>] [--remote <name>] [--dry-run] [<checkout>]\n       verwalter check --pr <number> [--config <file>] [--dry-run] [<checkout>]\n       verwalter publish [--releases <json>] [--jobs <n>] [--dry-run] [<checkout>]\n       verwalter pre-release [--target <branch>] [--remote <name>] [--dry-run] [<checkout>]";
+const USAGE: &str = "usage: verwalter <status|plan|branches|pr> [--config <file>] [--base <ref>] [--remote <name>] [--dry-run] [<checkout>]\n       verwalter changeset [--level major|minor|patch] [--package <name>]... [--base <ref>] [--summary <text>] [<checkout>]\n       verwalter release [--asset <file|dir>]... [--package <name>] [--publish] [--abandon <tag>] [--remote <name>] [--dry-run] [<checkout>]\n       verwalter check --pr <number> [--config <file>] [--dry-run] [<checkout>]\n       verwalter publish [--releases <json>] [--jobs <n>] [--dry-run] [<checkout>]\n       verwalter pre-release [--target <branch>] [--remote <name>] [--dry-run] [<checkout>]";
 
 fn main() -> ExitCode {
     match run() {
@@ -41,6 +41,7 @@ fn run() -> Result<(), Error> {
     let mut only: Option<String> = None;
     let mut publish = false;
     let mut root = PathBuf::from(".");
+    let mut root_given = false;
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--config" => config = Some(PathBuf::from(args.next().ok_or(USAGE)?)),
@@ -84,7 +85,20 @@ fn run() -> Result<(), Error> {
             }
             "--publish" => publish = true,
             "--level" => level = Some(args.next().ok_or(USAGE)?.parse().map_err(|()| USAGE)?),
-            _ => root = PathBuf::from(arg),
+            _ if arg.starts_with("--") => return Err(format!("unknown flag {arg}\n{USAGE}").into()),
+            // A file, or a second positional argument, is most often a glob
+            // that the shell expanded after `--asset`: say so instead of
+            // reading the last file as the checkout.
+            _ if root_given || Path::new(&arg).is_file() => {
+                return Err(format!(
+                    "unexpected argument {arg}: the <checkout> is one directory. `--asset` takes one file or one directory, and a glob such as `--asset dist/*` expands to several arguments: pass `--asset dist`"
+                )
+                .into())
+            }
+            _ => {
+                root = PathBuf::from(arg);
+                root_given = true;
+            }
         }
     }
     // Commands run in package paths see VERWALTER_ROOT: it must be

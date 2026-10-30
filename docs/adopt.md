@@ -467,14 +467,17 @@ out drifts on the next release.
 
 1. Move the build into `release.yml` (preferred). The build job produces
    the assets, `release` attaches them, `publish` runs the registry
-   command. The tag-triggered workflow is deleted.
+   command. The tag-triggered workflow is deleted. A matrix build keeps
+   its matrix: each job uploads `dist-<target>`, and the release job
+   downloads them with `pattern: dist-*` and `merge-multiple: true` into
+   `dist`, then passes `--asset dist`.
 2. Keep the tag-triggered workflow and give the action a PAT or App
    token in `token`, because a tag pushed with `github.token` fires no
    `push` event. Then `release.mode = "tag"` when the old workflow
    creates the GitHub release itself.
 
 goreleaser creates the GitHub release on its own. Either run it with
-`--skip=publish` in the build job and attach `dist/*` with `--asset`, or
+`--skip=publish` in the build job and attach `dist` with `--asset dist`, or
 choose option 2 and let goreleaser own the release.
 
 **Delete.** `release-instructions.md` or the release section of the
