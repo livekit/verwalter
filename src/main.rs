@@ -12,85 +12,114 @@ use verwalter::{
 
 /// Changeset-based versioning for single packages and monorepos.
 // args_override_self: a repeated option takes its last value, as before clap.
+// allow_hyphen_values: `--summary -x` takes `-x` as the value, as before clap.
 #[derive(Parser)]
 #[command(args_override_self = true)]
 struct Cli {
     #[command(subcommand)]
     command: Command,
+    /// The repository checkout [default: .]
+    // A Vec, not one value: a repeated checkout takes the last, as before clap.
+    #[arg(global = true)]
+    checkout: Vec<PathBuf>,
+    /// Config file [default: <checkout>/verwalter.toml]
+    #[arg(long, global = true, allow_hyphen_values = true)]
+    config: Option<PathBuf>,
+    /// Print every write instead of running it
+    // Global although plan, branches and changeset ignore it: the action
+    // appends `--dry-run` to any command.
+    #[arg(long, global = true)]
+    dry_run: bool,
 }
 
-// Every command takes every option and ignores the ones it does not use:
-// the action appends `--dry-run` and the user's `args` to any command.
 #[derive(clap::Subcommand)]
 enum Command {
     /// Per package: version, tag, GitHub release, pending changesets, open PRs, next step
-    Status(Args),
+    Status {
+        /// Git remote
+        #[arg(long, default_value = "origin", allow_hyphen_values = true)]
+        remote: String,
+    },
     /// Print the release plan: next versions, dependencies first
-    Plan(Args),
+    Plan,
     /// Create the release branch locally
-    Branches(Args),
+    Branches {
+        /// Ref to branch from [default: the base branch]
+        #[arg(long, allow_hyphen_values = true)]
+        base: Option<String>,
+    },
     /// Push the release branch and open or update the PR
-    Pr(Args),
+    Pr {
+        /// Ref to branch from [default: <remote>/<base branch>]
+        #[arg(long, allow_hyphen_values = true)]
+        base: Option<String>,
+        /// Git remote
+        #[arg(long, default_value = "origin", allow_hyphen_values = true)]
+        remote: String,
+    },
     /// Write a changeset for the packages the branch changes and no pending changeset covers
-    Changeset(Args),
+    Changeset {
+        /// Bump level
+        #[arg(long, default_value_t = BumpLevel::Patch, allow_hyphen_values = true)]
+        level: BumpLevel,
+        /// Exactly these packages, not the changed ones
+        #[arg(long = "package", value_name = "NAME", allow_hyphen_values = true)]
+        packages: Vec<String>,
+        /// Ref to diff against [default: <remote>/<base branch>, else the base branch]
+        #[arg(long, allow_hyphen_values = true)]
+        base: Option<String>,
+        /// Changeset summary [default: the last commit subject]
+        #[arg(long, allow_hyphen_values = true)]
+        summary: Option<String>,
+        /// Git remote
+        #[arg(long, default_value = "origin", allow_hyphen_values = true)]
+        remote: String,
+    },
     /// Tag and create GitHub releases for every untagged version with a changelog entry
-    Release(Args),
+    Release {
+        /// Asset to upload to drafts or the named package
+        #[arg(long = "asset", value_name = "FILE", allow_hyphen_values = true)]
+        assets: Vec<String>,
+        /// Release only this package
+        #[arg(long, value_name = "NAME", allow_hyphen_values = true)]
+        package: Option<String>,
+        /// Publish the draft release
+        #[arg(long)]
+        publish: bool,
+        /// Delete this tag's GitHub release and the tag
+        #[arg(long, value_name = "TAG", allow_hyphen_values = true)]
+        abandon: Option<String>,
+        /// Git remote
+        #[arg(long, default_value = "origin", allow_hyphen_values = true)]
+        remote: String,
+    },
     /// Changeset and API check for a contributor PR, with comment
-    Check(Args),
+    Check {
+        /// Pull request number
+        #[arg(long, value_name = "NUMBER", allow_hyphen_values = true)]
+        pr: u64,
+        /// Git remote
+        #[arg(long, default_value = "origin", allow_hyphen_values = true)]
+        remote: String,
+    },
     /// Run each package's publish command, dependencies first
-    Publish(Args),
+    Publish {
+        /// The `releases` output of `release`: only these packages [default: every tagged package]
+        #[arg(long, value_name = "JSON", value_parser = releases, allow_hyphen_values = true)]
+        releases: Option<BTreeSet<String>>,
+        /// Packages to publish at once
+        #[arg(long, value_name = "N", allow_hyphen_values = true)]
+        jobs: Option<usize>,
+    },
     /// Open an rc PR for every package with a pending changeset
-    PreRelease(Args),
-}
-
-// allow_hyphen_values: `--summary -x` takes `-x` as the value, as before clap.
-#[derive(clap::Args, Clone)]
-struct Args {
-    /// The repository checkout [default: .]
-    // A Vec, not one value: a repeated checkout takes the last, as before clap.
-    checkout: Vec<PathBuf>,
-    /// Config file [default: <checkout>/verwalter.toml]
-    #[arg(long, allow_hyphen_values = true)]
-    config: Option<PathBuf>,
-    /// Base ref to diff against or branch from
-    #[arg(long, allow_hyphen_values = true)]
-    base: Option<String>,
-    /// Git remote
-    #[arg(long, default_value = "origin", allow_hyphen_values = true)]
-    remote: String,
-    /// Pull request number (check)
-    #[arg(long, allow_hyphen_values = true)]
-    pr: Option<u64>,
-    /// Asset to upload (release)
-    #[arg(long = "asset", value_name = "FILE", allow_hyphen_values = true)]
-    assets: Vec<String>,
-    /// Delete this tag's GitHub release and the tag (release)
-    #[arg(long, allow_hyphen_values = true)]
-    abandon: Option<String>,
-    /// Branch to open the rc PR from (pre-release)
-    #[arg(long, allow_hyphen_values = true)]
-    target: Option<String>,
-    /// Changeset summary [default: the last commit subject] (changeset)
-    #[arg(long, allow_hyphen_values = true)]
-    summary: Option<String>,
-    /// Package to act on: repeat for changeset, the last one for release
-    #[arg(long = "package", value_name = "NAME", allow_hyphen_values = true)]
-    packages: Vec<String>,
-    /// Packages to publish at once (publish)
-    #[arg(long, allow_hyphen_values = true)]
-    jobs: Option<usize>,
-    /// The `releases` output of `release`: only these packages (publish)
-    #[arg(long, value_name = "JSON", value_parser = releases, allow_hyphen_values = true)]
-    releases: Option<BTreeSet<String>>,
-    /// Bump level [default: patch] (changeset)
-    #[arg(long, allow_hyphen_values = true)]
-    level: Option<BumpLevel>,
-    /// Print every write instead of running it
-    #[arg(long)]
-    dry_run: bool,
-    /// Publish the draft release (release)
-    #[arg(long)]
-    publish: bool,
+    PreRelease {
+        /// Branch to open the rc PR from [default: the base branch]
+        #[arg(long, value_name = "BRANCH", allow_hyphen_values = true)]
+        target: Option<String>,
+        /// Git remote
+        #[arg(long, default_value = "origin", allow_hyphen_values = true)]
+        remote: String,
+    },
 }
 
 /// A JSON list of objects with a `package`, or of names. Empty means
@@ -120,7 +149,7 @@ fn main() -> ExitCode {
         let _ = e.print();
         std::process::exit(if e.use_stderr() { 1 } else { 0 })
     });
-    match run(cli.command) {
+    match run(cli) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("error: {e}");
@@ -129,34 +158,13 @@ fn main() -> ExitCode {
     }
 }
 
-fn run(command: Command) -> Result<(), Error> {
-    let (Command::Status(args)
-    | Command::Plan(args)
-    | Command::Branches(args)
-    | Command::Pr(args)
-    | Command::Changeset(args)
-    | Command::Release(args)
-    | Command::Check(args)
-    | Command::Publish(args)
-    | Command::PreRelease(args)) = &command;
-    let Args {
+fn run(cli: Cli) -> Result<(), Error> {
+    let Cli {
+        command,
         checkout,
         config,
-        base,
-        remote,
-        pr,
-        assets,
-        abandon,
-        target,
-        summary,
-        packages,
-        jobs,
-        releases: releases_only,
-        level,
         dry_run,
-        publish,
-    } = args.clone();
-    let only = packages.last().cloned();
+    } = cli;
     let root = checkout
         .last()
         .cloned()
@@ -170,15 +178,14 @@ fn run(command: Command) -> Result<(), Error> {
     // Spec: ChangesetCheckOnContributorPullRequest. `check` reads the
     // config only: a broken changeset on the PR is its finding, not a
     // reason to fail before it runs.
-    if let Command::Check(_) = command {
+    if let Command::Check { pr, remote } = &command {
         let config = verwalter::config::Config::load(&root, &config_path)?;
         let findings = workspace::check(&root, &config);
         if !findings.is_empty() {
             return Err(workspace_error(&findings));
         }
-        let pr = pr.ok_or("check requires --pr <number>")?;
-        let mut gh = gh(&root, &remote, dry_run);
-        let c = check::run(&root, &config, pr, &mut gh)?;
+        let mut gh = gh(&root, remote, dry_run);
+        let c = check::run(&root, &config, *pr, &mut gh)?;
         println!(
             "{:?}: affected {:?}, covered {:?}",
             c.status, c.affected, c.covered
@@ -219,7 +226,13 @@ fn run(command: Command) -> Result<(), Error> {
         eprintln!("warning: {w}");
     }
     match command {
-        Command::Changeset(_) => {
+        Command::Changeset {
+            level,
+            packages,
+            base,
+            summary,
+            remote,
+        } => {
             let base = base.unwrap_or_else(|| {
                 let remote_base = format!("{remote}/{}", repo.config.git.base_branch);
                 if verwalter::git::ref_exists(&repo.root, &remote_base) {
@@ -228,13 +241,7 @@ fn run(command: Command) -> Result<(), Error> {
                     repo.config.git.base_branch.clone()
                 }
             });
-            match check::write_changeset(
-                &repo,
-                &base,
-                level.unwrap_or(BumpLevel::Patch),
-                summary.as_deref(),
-                &packages,
-            )? {
+            match check::write_changeset(&repo, &base, level, summary.as_deref(), &packages)? {
                 Some(path) => println!(
                     "{}",
                     path.strip_prefix(&repo.root).unwrap_or(&path).display()
@@ -243,11 +250,11 @@ fn run(command: Command) -> Result<(), Error> {
             }
             Ok(())
         }
-        Command::Plan(_) => {
+        Command::Plan => {
             print_plan(&repo, &releases);
             Ok(())
         }
-        Command::Branches(_) => {
+        Command::Branches { base } => {
             let base = base.unwrap_or_else(|| repo.config.git.base_branch.clone());
             match branches::create(&repo, &releases, &base)? {
                 Some(b) => println!("{b}  on {}", repo.config.git.base_branch),
@@ -255,7 +262,7 @@ fn run(command: Command) -> Result<(), Error> {
             }
             Ok(())
         }
-        Command::Pr(_) => {
+        Command::Pr { base, remote } => {
             let base = base.unwrap_or_else(|| format!("{remote}/{}", repo.config.git.base_branch));
             github::attribute(&mut repo, &mut gh(&root, &remote, dry_run));
             let branch = branches::create(&repo, &releases, &base)?;
@@ -268,7 +275,7 @@ fn run(command: Command) -> Result<(), Error> {
             }
             Ok(())
         }
-        Command::Status(_) => {
+        Command::Status { remote } => {
             let mut gh = gh(&repo.root, &remote, dry_run);
             let rows = status::status(&repo, &remote, &mut gh)?;
             let w = rows.iter().map(|r| r.package.len()).max().unwrap_or(0);
@@ -308,7 +315,7 @@ fn run(command: Command) -> Result<(), Error> {
             }
             Ok(())
         }
-        Command::PreRelease(_) => {
+        Command::PreRelease { target, remote } => {
             let target = target.unwrap_or_else(|| repo.config.git.base_branch.clone());
             github::attribute(&mut repo, &mut gh(&root, &remote, dry_run));
             let mut gh = gh(&repo.root, &remote, dry_run);
@@ -322,11 +329,11 @@ fn run(command: Command) -> Result<(), Error> {
             }
             Ok(())
         }
-        Command::Publish(_) => {
+        Command::Publish { releases, jobs } => {
             let options = verwalter::publish::Options {
                 jobs,
                 dry_run,
-                only: releases_only,
+                only: releases,
             };
             let outcomes = verwalter::publish::run(&repo, &options, &verwalter::registry::curl)?;
             println!("{}", verwalter::publish::write_outputs(&outcomes)?);
@@ -335,7 +342,13 @@ fn run(command: Command) -> Result<(), Error> {
             }
             Ok(())
         }
-        Command::Release(_) => {
+        Command::Release {
+            assets,
+            package,
+            publish,
+            abandon,
+            remote,
+        } => {
             let mut gh = gh(&repo.root, &remote, dry_run);
             if let Some(tag) = abandon {
                 for r in release::abandon(&repo, &remote, &tag, dry_run, &mut gh)? {
@@ -345,7 +358,7 @@ fn run(command: Command) -> Result<(), Error> {
             }
             let options = release::Options {
                 assets,
-                package: only,
+                package,
                 publish,
                 dry_run,
             };
@@ -356,7 +369,7 @@ fn run(command: Command) -> Result<(), Error> {
             println!("{}", release::write_outputs(&released)?);
             Ok(())
         }
-        Command::Check(_) => unreachable!("check returned above"),
+        Command::Check { .. } => unreachable!("check returned above"),
     }
 }
 
