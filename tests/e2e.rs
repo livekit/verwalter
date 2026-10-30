@@ -376,6 +376,7 @@ fn release_tags_and_creates_github_releases_resumably() {
         "notes from the changelog section"
     );
     assert!(!create.contains("--prerelease"));
+    assert!(!create.contains("--latest=false"));
 
     let lk = released.iter().find(|r| r.package == "livekit").unwrap();
     assert_eq!(
@@ -409,6 +410,44 @@ fn release_tags_and_creates_github_releases_resumably() {
         "the draft is reported until the workflow publishes it"
     );
     assert_eq!(again[0].status, "drafted");
+}
+
+// A release below a version already tagged comes from a maintenance
+// branch: it must not take GitHub's Latest badge from the newer line.
+#[test]
+fn maintenance_release_is_not_marked_latest() {
+    let r = fixture("maintenance");
+    let root = &r.0;
+    let _remote = remote(root, "maintenance");
+    git(root, &["tag", "livekit-protocol-v0.3.1"]);
+    git(root, &["tag", "livekit-api-v0.4.3"]);
+    git(root, &["tag", "livekit-v0.7.0"]);
+    git(root, &["tag", "livekit-v1.0.0"]);
+    git(root, &["push", "-q", "origin", "--tags"]);
+    write(root, "livekit/Cargo.toml", "[package]\nname = \"livekit\"\nversion = \"0.7.1\"\n\n[dependencies]\nlivekit-protocol = { workspace = true }\n");
+    write(
+        root,
+        "livekit/CHANGELOG.md",
+        "# Changelog\n\n## 0.7.1\n\n### Patch Changes\n\n- Fix\n\n## 0.7.0\n\n- init\n",
+    );
+    git(root, &["commit", "-qam", "release: livekit 0.7.1"]);
+
+    let repo = Repo::load(root).unwrap();
+    let mut calls: Vec<String> = Vec::new();
+    let mut gh = |args: &[&str]| -> Result<String, verwalter::Error> {
+        calls.push(args.join(" "));
+        match args {
+            ["release", "view", "livekit-v0.7.1", ..] => Err("release not found".into()),
+            ["release", "view", ..] => Ok(r#"{"isDraft":false,"assets":[]}"#.into()),
+            _ => Ok(String::new()),
+        }
+    };
+    verwalter::release::run(&repo, "origin", &Default::default(), &mut gh).unwrap();
+    let create = calls
+        .iter()
+        .find(|c| c.starts_with("release create livekit-v0.7.1"))
+        .unwrap();
+    assert!(create.contains("--latest=false"), "{create}");
 }
 
 #[test]
@@ -1294,7 +1333,7 @@ fn publish_runs_dependencies_first_and_blocks_dependents_of_a_failure() {
     let repo = Repo::load(root).unwrap();
     assert_eq!(
         repo.config
-            .publish_command("livekit-protocol", false, false)
+            .publish_command("livekit-protocol", false, None)
             .as_deref(),
         Some("exit 7")
     );

@@ -113,7 +113,9 @@ fn candidates(
             ws.members.push((p.name.clone(), p.version.clone(), tag));
             continue;
         }
-        let command = repo.config.publish_command(&p.name, in_pnpm_workspace(&repo.root, &cfg.path), p.version.is_prerelease()).ok_or_else(|| {
+        let released = crate::prerelease::released_versions(repo, &p.name)?;
+        let npm_tag = crate::version::npm_dist_tag(&p.version, &released);
+        let command = repo.config.publish_command(&p.name, in_pnpm_workspace(&repo.root, &cfg.path), npm_tag.as_deref()).ok_or_else(|| {
             format!("{}: no publish command: set `publish.registry` or `publish.command` on the package, or in `[publish]`", p.name)
         })?;
         out.insert(

@@ -530,11 +530,16 @@ impl Config {
     /// command for its registry. None when nothing applies.
     /// `pnpm` is whether the repo is a pnpm workspace: `npm publish`
     /// ships a `workspace:` range as is, `pnpm publish` resolves it to
-    /// the dependency's version. `prerelease` keeps an rc off npm's
-    /// `latest` dist-tag: the built-in command publishes it under `next`.
-    /// Other registries keep pre-releases out of default resolution by
-    /// the version alone.
-    pub fn publish_command(&self, package: &str, pnpm: bool, prerelease: bool) -> Option<String> {
+    /// the dependency's version. `npm_tag` keeps a pre-release or a
+    /// maintenance release off npm's `latest` dist-tag
+    /// (`version::npm_dist_tag`). Other registries resolve to the highest
+    /// version by the version alone.
+    pub fn publish_command(
+        &self,
+        package: &str,
+        pnpm: bool,
+        npm_tag: Option<&str>,
+    ) -> Option<String> {
         use crate::registry::Registry;
         let p = &self.packages[package].publish;
         if let Some(c) = &p.command {
@@ -546,25 +551,17 @@ impl Config {
                 return Some(c.clone());
             }
         }
-        Some(
-            match registry {
-                Registry::Crates => "cargo publish",
-                Registry::Npm if pnpm && prerelease => {
-                    "pnpm publish --provenance --access public --no-git-checks --tag next"
-                }
-                Registry::Npm if pnpm => {
-                    "pnpm publish --provenance --access public --no-git-checks"
-                }
-                Registry::Npm if prerelease => {
-                    "npm publish --provenance --access public --tag next"
-                }
-                Registry::Npm => "npm publish --provenance --access public",
-                Registry::Pypi => "python -m twine upload dist/*",
-                Registry::Pubdev => "dart pub publish --force",
-                Registry::None | Registry::Custom => return None,
+        let tag = npm_tag.map(|t| format!(" --tag {t}")).unwrap_or_default();
+        Some(match registry {
+            Registry::Crates => "cargo publish".into(),
+            Registry::Npm if pnpm => {
+                format!("pnpm publish --provenance --access public --no-git-checks{tag}")
             }
-            .to_string(),
-        )
+            Registry::Npm => format!("npm publish --provenance --access public{tag}"),
+            Registry::Pypi => "python -m twine upload dist/*".into(),
+            Registry::Pubdev => "dart pub publish --force".into(),
+            Registry::None | Registry::Custom => return None,
+        })
     }
 
     /// The other members of `package`'s fixed group, if it is in one.

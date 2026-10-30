@@ -152,7 +152,10 @@ entity Package {
     -- workspace the npm default is pnpm publish: npm ships a
     -- `workspace:` range as is, pnpm resolves it to the version. For a
     -- pre-release the npm default adds `--tag next`, so `latest` stays
-    -- on the last final version. A package that sets registry none
+    -- on the last final version. For a maintenance release (below a final
+    -- version already tagged, such as 1.5.1 after 2.0.0) it adds
+    -- `--tag latest-1` (`latest-0.4` for 0.4.x), so `latest` stays on the
+    -- newest line. A package that sets registry none
     -- itself, with no command, has nothing to publish and is left out
     -- of `publish`: it is released on GitHub only.
     publish_command: String?
@@ -604,6 +607,9 @@ rule ResumeUntaggedReleases {
 }
 
 -- A run asked to publish creates the release published, draft or not.
+-- A maintenance release, below a final version of the package already
+-- tagged, never takes the repository's Latest badge: a v1 branch keeps
+-- shipping without hiding the newest line.
 rule ResumeTaggedReleasesWithoutGitHubRelease {
     when: ToolRunStarted(repository, named?, publish_drafts)
     for release in Releases where package.repository = repository and status = tagged:

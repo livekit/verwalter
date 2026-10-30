@@ -161,7 +161,7 @@ mod tests {
             "",
         );
         assert_eq!(
-            c.publish_command("x", false, false).as_deref(),
+            c.publish_command("x", false, None).as_deref(),
             Some("cargo publish --no-verify")
         );
         // Another registry does not inherit the default command.
@@ -170,25 +170,32 @@ mod tests {
             "publish.registry = \"npm\"",
         );
         assert_eq!(
-            c.publish_command("x", false, false).as_deref(),
+            c.publish_command("x", false, None).as_deref(),
             Some("npm publish --provenance --access public")
         );
         // A pnpm workspace takes pnpm, which resolves `workspace:` ranges.
         let c = config("", "publish.registry = \"npm\"");
         assert_eq!(
-            c.publish_command("x", true, false).as_deref(),
+            c.publish_command("x", true, None).as_deref(),
             Some("pnpm publish --provenance --access public --no-git-checks")
         );
         // An rc goes under the `next` dist-tag on npm.
         assert_eq!(
-            c.publish_command("x", true, true).as_deref(),
+            c.publish_command("x", true, Some("next")).as_deref(),
             Some("pnpm publish --provenance --access public --no-git-checks --tag next")
         );
         assert_eq!(
             config("", "publish.registry = \"npm\"")
-                .publish_command("x", false, true)
+                .publish_command("x", false, Some("next"))
                 .as_deref(),
             Some("npm publish --provenance --access public --tag next")
+        );
+        // A maintenance release goes under its line's dist-tag.
+        assert_eq!(
+            config("", "publish.registry = \"npm\"")
+                .publish_command("x", false, Some("latest-1"))
+                .as_deref(),
+            Some("npm publish --provenance --access public --tag latest-1")
         );
         // The package's own wins.
         let c = config(
@@ -196,13 +203,13 @@ mod tests {
             "publish.command = \"pnpm publish --no-git-checks\"",
         );
         assert_eq!(
-            c.publish_command("x", false, false).as_deref(),
+            c.publish_command("x", false, None).as_deref(),
             Some("pnpm publish --no-git-checks")
         );
         // Nothing applies.
-        assert_eq!(config("", "").publish_command("x", false, false), None);
+        assert_eq!(config("", "").publish_command("x", false, None), None);
         assert_eq!(
-            config("", "publish.registry = \"custom\"").publish_command("x", false, false),
+            config("", "publish.registry = \"custom\"").publish_command("x", false, None),
             None
         );
     }

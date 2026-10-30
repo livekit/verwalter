@@ -47,6 +47,30 @@ fn components(v: &Version) -> (u64, u64, u64) {
     (it.next().unwrap(), it.next().unwrap(), it.next().unwrap())
 }
 
+/// A final version below the highest final version already tagged: a
+/// release from a maintenance branch, such as 1.5.1 after 2.0.0. It must
+/// not take npm's `latest` dist-tag or GitHub's Latest badge.
+pub fn is_maintenance(version: &Version, released: &[Version]) -> bool {
+    !version.is_prerelease() && released.iter().any(|r| !r.is_prerelease() && r > version)
+}
+
+/// The npm dist-tag for `version`, or None for `latest`. A pre-release
+/// goes to `next`. A maintenance release goes to its compatible line:
+/// `latest-1` for 1.x, `latest-0.4` for 0.4.x. npm refuses a tag that
+/// reads as a version range, so `v1` is not an option.
+pub fn npm_dist_tag(version: &Version, released: &[Version]) -> Option<String> {
+    if version.is_prerelease() {
+        return Some("next".into());
+    }
+    if !is_maintenance(version, released) {
+        return None;
+    }
+    Some(match components(version) {
+        (0, minor, _) => format!("latest-0.{minor}"),
+        (major, _, _) => format!("latest-{major}"),
+    })
+}
+
 /// Apply one level to a stable version, changesets rules: `0.x` + major
 /// gives `1.0.0`, no special cases.
 fn bump(v: &Version, level: BumpLevel) -> Version {
@@ -147,6 +171,21 @@ mod tests {
         assert_ne!(v("1.2.3"), v("1.2.3-rc.1"));
         assert!(v("1.2.3-rc.1").is_prerelease());
         assert_eq!(v("1.2.3-rc.1").to_string(), "1.2.3-rc.1");
+    }
+
+    #[test]
+    fn maintenance_releases_stay_off_latest() {
+        let released = [v("1.5.0"), v("2.0.0"), v("2.1.0-rc.1")];
+        assert!(is_maintenance(&v("1.5.1"), &released));
+        assert!(!is_maintenance(&v("2.0.1"), &released));
+        assert!(!is_maintenance(&v("2.0.0"), &released), "its own tag");
+        assert_eq!(npm_dist_tag(&v("2.0.1"), &released), None);
+        assert_eq!(npm_dist_tag(&v("1.5.1"), &released).unwrap(), "latest-1");
+        assert_eq!(
+            npm_dist_tag(&v("0.4.2"), &[v("0.5.0")]).unwrap(),
+            "latest-0.4"
+        );
+        assert_eq!(npm_dist_tag(&v("1.6.0-rc.1"), &released).unwrap(), "next");
     }
 
     // obligation: enum-comparable.BumpLevel

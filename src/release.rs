@@ -210,6 +210,11 @@ fn release_one(
                 }
                 if version.is_prerelease() {
                     args.push("--prerelease");
+                } else if crate::version::is_maintenance(
+                    version,
+                    &crate::prerelease::released_versions(repo, name)?,
+                ) {
+                    args.push("--latest=false");
                 }
                 match gh(&args) {
                     Ok(_) => {

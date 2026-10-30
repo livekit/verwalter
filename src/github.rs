@@ -190,7 +190,7 @@ pub fn sync(
         git::write(&repo.root, dry_run, &["push", "--force", "--quiet", remote, &format!("{branch}:{branch}")]).map_err(|e| {
             if e.to_string().contains("directory file conflict") {
                 let prefix = repo.config.release.branch_prefix.trim_end_matches('/');
-                format!("{e}\na branch named `{prefix}` exists on {remote}, so `{branch}` cannot be created; rename that branch or set release_branch_prefix in verwalter.toml", ).into()
+                format!("{e}\na branch named `{prefix}` exists on {remote}, so `{branch}` cannot be created; rename that branch or set [release].branch_prefix in verwalter.toml", ).into()
             } else {
                 e
             }

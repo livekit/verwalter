@@ -101,7 +101,10 @@ The publish command for a package is its own `publish.command`, else
 `[publish].command` when the package is on the default registry, else the
 built-in command for its registry: `cargo publish`,
 `npm publish --provenance --access public`, `python -m twine upload dist/*`,
-`dart pub publish --force`. A package with none fails `publish` before
+`dart pub publish --force`. The built-in npm command adds `--tag next` for
+a pre-release and `--tag latest-1` for a maintenance release, a final
+version below one already tagged (`latest-0.4` for 0.4.x). A package with
+none fails `publish` before
 anything runs. The command runs in the package's `path` with
 `VERWALTER_PACKAGE`, `VERWALTER_VERSION`, `VERWALTER_TAG`,
 `VERWALTER_REGISTRY`, `VERWALTER_PRERELEASE`, `VERWALTER_FIRST_RELEASE` and
