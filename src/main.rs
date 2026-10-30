@@ -171,6 +171,18 @@ fn run() -> Result<(), Error> {
         }
         "plan" => {
             print_plan(&repo, &releases);
+            // Spec: GoMajorVersion. `branches` fails on it when it writes
+            // the go.mod; the plan says so first.
+            let go: Vec<String> = releases
+                .iter()
+                .filter_map(|r| {
+                    let module = repo.config.packages[&r.package].go_module.as_deref()?;
+                    verwalter::handler::go_major_error(module, &r.to)
+                })
+                .collect();
+            if !go.is_empty() {
+                return Err(go.join("\n").into());
+            }
             Ok(())
         }
         "branches" => {

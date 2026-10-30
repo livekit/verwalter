@@ -1664,3 +1664,125 @@ fn prerelease_of_a_dependent_carries_pending_dependencies() {
     assert!(show("livekit/Cargo.toml").contains("version = \"0.7.0\""));
     assert!(show(".changeset/x.md").contains("livekit-protocol: minor"));
 }
+
+// Spec: Go modules. A go.work names the packages by directory, the go.mod
+// carries the version in its module-line comment (else the latest tag),
+// `require` lines are the dependencies and move with a release, tags are
+// `<dir>/vX.Y.Z`, and the Go module proxy request is the publish.
+#[test]
+fn go_workspace_modules_release_and_publish_through_the_proxy() {
+    let r = Repo_(std::env::temp_dir().join(format!("verwalter-it-{}-go", std::process::id())));
+    let root = &r.0;
+    let _ = fs::remove_dir_all(root);
+    fs::create_dir_all(root).unwrap();
+    git(root, &["init", "-q", "-b", "main"]);
+    write(
+        root,
+        "verwalter.toml",
+        "[workspace]\nmembers = [\"sdk/*\"]\n\n[versioning]\nfiles = [\"go.mod\"]\n\n[publish]\nregistry = \"goproxy\"\n",
+    );
+    write(
+        root,
+        "go.work",
+        "go 1.24\n\nuse (\n\t./sdk/core\n\t./sdk/auth\n)\n",
+    );
+    write(
+        root,
+        "sdk/core/go.mod",
+        "module github.com/acme/sdk/core\n\ngo 1.24\n",
+    );
+    write(root, "sdk/auth/go.mod", "module github.com/acme/sdk/auth // v0.3.0\n\ngo 1.24\n\nrequire github.com/acme/sdk/core v1.2.0\n");
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-q", "-m", "init"]);
+    git(root, &["tag", "sdk/core/v1.2.0"]);
+    git(root, &["tag", "sdk/auth/v0.3.0"]);
+    write(
+        root,
+        ".changeset/scopes.md",
+        "---\n\"sdk/core\": minor\n---\nToken scopes.\n",
+    );
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-q", "-m", "changeset"]);
+
+    let repo = Repo::load(root).unwrap();
+    let core = repo.packages.iter().find(|p| p.name == "sdk/core").unwrap();
+    assert_eq!(
+        core.version.to_string(),
+        "1.2.0",
+        "no comment: the latest tag"
+    );
+    let auth = repo.packages.iter().find(|p| p.name == "sdk/auth").unwrap();
+    assert_eq!(auth.dependencies, ["sdk/core"]);
+    let planned = plan(
+        &repo.packages,
+        &repo.changesets,
+        repo.config.versioning.dependent_bump_level,
+    );
+    let to: Vec<(String, String)> = planned
+        .iter()
+        .map(|p| (p.package.clone(), p.to.to_string()))
+        .collect();
+    assert_eq!(
+        to,
+        [
+            ("sdk/core".to_string(), "1.3.0".to_string()),
+            ("sdk/auth".to_string(), "0.3.1".to_string())
+        ]
+    );
+
+    branches::create(&repo, &planned, "main").unwrap();
+    let core_mod = git(root, &["show", "release/main:sdk/core/go.mod"]);
+    assert!(
+        core_mod.starts_with("module github.com/acme/sdk/core // v1.3.0\n"),
+        "{core_mod}"
+    );
+    let auth_mod = git(root, &["show", "release/main:sdk/auth/go.mod"]);
+    assert!(
+        auth_mod.starts_with("module github.com/acme/sdk/auth // v0.3.1\n"),
+        "{auth_mod}"
+    );
+    assert!(
+        auth_mod.ends_with("require github.com/acme/sdk/core v1.3.0"),
+        "{auth_mod}"
+    );
+
+    // Merged and tagged: the proxy has core, not yet auth.
+    git(root, &["merge", "-q", "--ff-only", "release/main"]);
+    let repo = Repo::load(root).unwrap();
+    for name in ["sdk/core", "sdk/auth"] {
+        let p = repo.packages.iter().find(|p| p.name == name).unwrap();
+        let tag = repo.config.tag_for(name, &p.version);
+        assert!(tag.starts_with(&format!("{name}/v")), "{tag}");
+        git(root, &["tag", &tag]);
+    }
+    let asked = std::sync::Mutex::new(Vec::new());
+    let proxy = |url: &str| -> Result<u16, verwalter::Error> {
+        asked.lock().unwrap().push(url.to_string());
+        Ok(if url.contains("/core/") { 200 } else { 404 })
+    };
+    let opts = verwalter::publish::Options {
+        jobs: Some(1),
+        dry_run: false,
+        only: None,
+    };
+    let out = verwalter::publish::run(&repo, &opts, &proxy).unwrap();
+    let status: Vec<(&str, &str)> = out.iter().map(|o| (o.package.as_str(), o.status)).collect();
+    assert_eq!(status, [("sdk/core", "published"), ("sdk/auth", "failed")]);
+    assert!(out[1].reason.contains("re-run publish"));
+    assert_eq!(
+        asked.lock().unwrap()[0],
+        "https://proxy.golang.org/github.com/acme/sdk/core/@v/v1.3.0.info"
+    );
+
+    // A dry run names the request and makes none.
+    let dry = verwalter::publish::Options {
+        dry_run: true,
+        ..opts
+    };
+    let none = |_: &str| -> Result<u16, verwalter::Error> { Err("no request in a dry run".into()) };
+    let out = verwalter::publish::run(&repo, &dry, &none).unwrap();
+    assert!(
+        out[0].reason.starts_with("GET https://proxy.golang.org/"),
+        "{out:?}"
+    );
+}

@@ -68,8 +68,9 @@ pub fn apply(
         )?;
     }
     // Pins: repo-level pin files, then every dependent's manifests.
+    let key = config.dependency_key(name);
     for file in &config.workspace.pin_files {
-        rewrite(file, None, Some(name))?;
+        rewrite(file, None, Some(key))?;
     }
     let dependents = packages.iter().filter(|p| {
         p.dependencies.iter().any(|d| d == name) && plan.iter().any(|r| r.package == p.name)
@@ -82,7 +83,7 @@ pub fn apply(
                 .iter()
                 .filter(|f| !is_lock_file(f.path()))
             {
-                rewrite(file.path(), file.regex(), Some(name))?;
+                rewrite(file.path(), file.regex(), Some(key))?;
             }
         }
     }

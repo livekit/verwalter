@@ -49,6 +49,8 @@ impl Repo {
         config: &Config,
     ) -> Result<(Vec<PackageState>, Vec<String>), Error> {
         let names: Vec<&str> = config.packages.keys().map(String::as_str).collect();
+        // Dependents name a package by its key: the module path for Go.
+        let key_of = |n: &str| config.dependency_key(n).to_string();
         let mut packages = Vec::new();
         let mut warnings = Vec::new();
         for (name, package) in &config.packages {
@@ -66,12 +68,26 @@ impl Repo {
                     )),
                     _ => {}
                 }
-                let others: Vec<&str> = names.iter().copied().filter(|n| n != name).collect();
-                for dep in handler::internal_dependencies(file, &content, &others)? {
+                let others: Vec<String> = names
+                    .iter()
+                    .filter(|n| *n != name)
+                    .map(|n| key_of(n))
+                    .collect();
+                let others: Vec<&str> = others.iter().map(String::as_str).collect();
+                for key in handler::internal_dependencies(file, &content, &others)? {
+                    let dep = names
+                        .iter()
+                        .find(|n| key_of(n) == key)
+                        .map_or(key, |n| n.to_string());
                     if !dependencies.contains(&dep) {
                         dependencies.push(dep);
                     }
                 }
+            }
+            // A go.mod before its first release with the tool has no version
+            // comment: the latest tag of the module, else 0.0.0.
+            if version.is_none() && config.is_go(name) {
+                version = Some(go_tag_version(root, config, name));
             }
             let version =
                 version.ok_or_else(|| format!("{name}: no versioned file carries a version"))?;
@@ -84,6 +100,19 @@ impl Repo {
         }
         Ok((packages, warnings))
     }
+}
+
+/// The highest stable version among the package's tags, or 0.0.0. A tag
+/// that git cannot list counts as none: `plan` works without a checkout's
+/// history.
+fn go_tag_version(root: &Path, config: &Config, name: &str) -> Version {
+    crate::git::run(root, &["tag", "--list"])
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|t| config.version_from_tag(name, t))
+        .filter(|v| !v.is_prerelease())
+        .max()
+        .unwrap_or_else(|| Version::new(0, 0, 0, None))
 }
 
 /// Every `*.md` in the changeset directory except `README.md`. A bump line

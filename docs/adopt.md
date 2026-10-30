@@ -93,7 +93,8 @@ Keys that are written when the repository needs them:
 - **`publish.registry`** per package on another registry, and
   `publish.command` only when the built-in command does not fit.
   A package with `registry = "none"` and no command is released on
-  GitHub only. Go modules and Swift packages are that case.
+  GitHub only. Swift packages are that case, and private Go modules.
+  A public Go module takes `registry = "goproxy"`.
 - **`[publish] workspace`** when the repository chooses one recursive
   publish. Where the ecosystem has one (`pnpm -r publish`,
   `cargo publish --workspace`), ask the user which of the two the
@@ -449,11 +450,18 @@ out drifts on the next release.
 - `-SNAPSHOT` in `gradle.properties`: set the released version in the
   migration PR. The next release moves it. There is no snapshot state
   between releases any more.
-- `version.go` (`const Version = "2.19.0"`): a regex entry. Go modules
-  have no registry and no publish command: `[publish]` stays out, which
-  is the default `none`. The tag `v{version}` is the release, which is
-  the single-package default.
-- A nested `/v2` module path is not managed. Say so in the report.
+- Go modules: `go.mod` is the first file. The first release writes the
+  version as a `// vX.Y.Z` comment on the module line. Until then, the
+  latest tag is the version, so the migration PR needs no edit. A
+  `version.go` constant (`const Version = "2.19.0"`) stays as a second,
+  regex entry. A public module takes `publish.registry = "goproxy"`, and
+  a private one keeps the default `none`. The tag is the release:
+  `v{version}` at the root, `<dir>/v{version}` for a module in a
+  subdirectory. A `go.work` repository lists the module directories in
+  `[workspace] members`, and the packages are named by directory.
+- The tool does not change a module path for v2. `plan` refuses a major
+  release without the `/vN` suffix. A module in a major-version
+  directory is not supported. Say so in the report.
 
 **The build workflow.** Two options:
 
@@ -488,7 +496,7 @@ this release unless `CHANGELOG.md` already exists.
 | pub.dev | `dart pub publish --force` | `setup-dart` mints the token from OIDC. |
 | Maven Central | none: `publish.registry = "custom"` with `exists_url`, and the gradle command | `exists_url = "https://repo1.maven.org/maven2/<group path>/{name}/{version}/"` |
 | CocoaPods | none: `publish.command = "pod trunk push ..."` without a registry | No stable existence API. The command fails on a duplicate, which is a real failure to the tool. |
-| Go modules | none: `[publish]` stays out | The tag is the release. |
+| Go modules | none: `publish.registry = "goproxy"` | The proxy request is the publish. A private module stays on `none`: the tag is the release. |
 | GitHub only | none: `[publish]` stays out | Binaries go on the release as `--asset`. |
 
 Trusted publishing cannot create a new package on npm, crates.io or

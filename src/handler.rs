@@ -14,6 +14,108 @@ use crate::{Error, Version};
 
 const NO_TAGS: &[&str] = &[];
 
+fn is_go_mod(path: &str) -> bool {
+    path.rsplit('/').next() == Some("go.mod")
+}
+
+/// go.mod: the module path and the version in the `// vX.Y.Z` comment on
+/// the module line, knope's convention. None without a module line.
+pub fn go_module(content: &str) -> Option<(String, Option<Version>)> {
+    let line = content.lines().find_map(|l| l.strip_prefix("module "))?;
+    let (path, comment) = line.split_once("//").unwrap_or((line, ""));
+    let version = comment
+        .trim()
+        .strip_prefix('v')
+        .and_then(|v| v.parse().ok());
+    Some((path.trim().trim_matches('"').to_string(), version))
+}
+
+/// Spec: GoMajorVersion. Go finds v2 and later only under a module path
+/// that ends in `/vN`, and v0 or v1 only without it. The tool does not
+/// change the path: the imports move with it.
+pub fn go_major_error(module: &str, version: &Version) -> Option<String> {
+    let major: u64 = version
+        .stable_component()
+        .to_string()
+        .split('.')
+        .next()?
+        .parse()
+        .ok()?;
+    let suffix = module
+        .rsplit_once('/')
+        .and_then(|(_, s)| s.strip_prefix('v'))
+        .and_then(|n| n.parse::<u64>().ok())
+        .filter(|n| *n >= 2);
+    // gopkg.in carries the major version as `.vN` and has its own rules.
+    if module.starts_with("gopkg.in/") || suffix == (major >= 2).then_some(major) {
+        return None;
+    }
+    Some(if major >= 2 {
+        format!("{module}: {version} needs the module path {module}/v{major}. Change it and every import in the PR that adds the major changeset")
+    } else {
+        format!("{module}: {version} is below v2, but the module path ends in a major version")
+    })
+}
+
+/// One `require` entry of a go.mod line: the module path and its version.
+/// `in_block` is whether the line is inside `require ( ... )`.
+fn go_require(line: &str, in_block: bool) -> Option<(&str, &str)> {
+    let line = line.trim();
+    let rest = if in_block {
+        line
+    } else {
+        line.strip_prefix("require")
+            .filter(|r| r.starts_with([' ', '\t']))?
+    };
+    let mut parts = rest.split_whitespace();
+    let path = parts.next()?.trim_matches('"');
+    let version = parts.next()?;
+    (path != "(" && path != "//").then_some((path, version))
+}
+
+/// Every line of a go.mod with whether it is a `require` entry.
+fn go_mod_lines(content: &str) -> Vec<(&str, Option<(&str, &str)>)> {
+    let mut in_block = false;
+    content
+        .split_inclusive('\n')
+        .map(|line| {
+            let t = line.trim();
+            if in_block && t == ")" {
+                in_block = false;
+                return (line, None);
+            }
+            if !in_block && t.strip_prefix("require").is_some_and(|r| r.trim() == "(") {
+                in_block = true;
+                return (line, None);
+            }
+            (line, go_require(line, in_block))
+        })
+        .collect()
+}
+
+/// Spec: write_dependency_version for go.mod. The `require` entry of
+/// `module` moves to `version`; comments such as `// indirect` stay.
+/// go.sum is not touched: it gets the new sum once the tag exists.
+fn go_mod_pin(content: &str, module: &str, version: &Version) -> String {
+    go_mod_lines(content)
+        .into_iter()
+        .map(|(line, entry)| match entry {
+            Some((path, old)) if path == module => {
+                let after = line.find(path).map_or(0, |i| i + path.len());
+                match line[after..].find(old) {
+                    Some(i) => format!(
+                        "{}v{version}{}",
+                        &line[..after + i],
+                        &line[after + i + old.len()..]
+                    ),
+                    None => line.to_string(),
+                }
+            }
+            _ => line.to_string(),
+        })
+        .collect()
+}
+
 fn is_pyproject(path: &str) -> bool {
     path.rsplit('/').next() == Some("pyproject.toml")
 }
@@ -95,6 +197,14 @@ fn load(
     )?;
     let content = if is_pyproject(path) {
         normalise_pyproject(content)
+    } else if is_go_mod(path) && go_module(content).is_some_and(|(_, v)| v.is_none()) {
+        // knope reads the version from the comment, else from tags it is
+        // not given here. The placeholder is overwritten on write.
+        let line = content
+            .lines()
+            .find(|l| l.starts_with("module "))
+            .unwrap_or_default();
+        content.replacen(line, &format!("{} // v0.0.0", line.trim_end()), 1)
     } else {
         content.to_string()
     };
@@ -112,6 +222,13 @@ pub fn read_version(path: &str, regex: Option<&str>, content: &str) -> Result<Ve
             .and_then(|c| c.name("version"))
             .ok_or_else(|| format!("{path}: regex `{re}` has no `version` match"))?;
         return Ok(m.as_str().parse()?);
+    }
+    if is_go_mod(path) {
+        let (module, version) =
+            go_module(content).ok_or_else(|| format!("{path}: no module line"))?;
+        return version.ok_or_else(|| {
+            format!("{path}: no `// vX.Y.Z` comment on the module line of {module}").into()
+        });
     }
     Ok(load(path, None, content)?.1.version()?)
 }
@@ -180,6 +297,15 @@ pub fn write_version(
             return Ok(content.to_string());
         }
     }
+    if is_go_mod(path) {
+        if let Some(module) = dependency {
+            return Ok(go_mod_pin(content, module, version));
+        }
+        let (module, _) = go_module(content).ok_or_else(|| format!("{path}: no module line"))?;
+        if let Some(e) = go_major_error(&module, version) {
+            return Err(e.into());
+        }
+    }
     if let (true, Some(dep)) = (path.rsplit('/').next() == Some("uv.lock"), dependency) {
         return uv_lock_pin(content, dep, version);
     }
@@ -197,7 +323,7 @@ pub fn write_version(
         ReleaseNotes::default(),
         None,
     )?;
-    let files = package.set_version(version.clone(), GoVersioning::default(), vec![file])?;
+    let files = package.set_version(version.clone(), GoVersioning::IgnoreMajorRules, vec![file])?;
     let written = files
         .into_iter()
         .next()
@@ -342,9 +468,9 @@ fn uv_lock_pin(content: &str, dep: &str, version: &Version) -> Result<String, Er
 }
 
 /// Spec: internal_dependencies. Which of `candidates` (the other package
-/// names in the repo) this manifest depends on. Only runtime dependencies
-/// count: a devDependency (package.json) does not make a package a
-/// dependent for bumps and ordering, as in changesets.
+/// names in the repo, module paths for go.mod) this manifest depends on.
+/// Only runtime dependencies count: a devDependency (package.json) does
+/// not make a package a dependent for bumps and ordering, as in changesets.
 pub fn internal_dependencies(
     path: &str,
     content: &str,
@@ -384,8 +510,21 @@ pub fn internal_dependencies(
                 .map(|c| c.to_string())
                 .collect()
         }
-        // ponytail: pubspec.yaml and go.mod report no dependencies yet; add
-        // a branch when a monorepo in that language needs dependency ordering.
+        // go.mod names dependencies by module path: the candidates are
+        // module paths here (Config::dependency_key).
+        "go.mod" => {
+            let required: Vec<&str> = go_mod_lines(content)
+                .into_iter()
+                .filter_map(|(_, entry)| entry.map(|(path, _)| path))
+                .collect();
+            candidates
+                .iter()
+                .filter(|c| required.contains(c))
+                .map(|c| c.to_string())
+                .collect()
+        }
+        // ponytail: pubspec.yaml reports no dependencies yet; add a branch
+        // when a monorepo in that language needs dependency ordering.
         _ => Vec::new(),
     };
     Ok(found)
@@ -801,5 +940,87 @@ dev = ["livekit-test-utils~=0.3"]
 
         assert!(read_version("gradle.properties", Some("VERSION_NAME=(.+)"), GRADLE).is_err());
         assert!(read_version("gradle.properties", Some("NOPE=(?<version>.+)"), GRADLE).is_err());
+    }
+
+    const GO_MOD: &str = "module github.com/acme/sdk/auth // v1.4.2\n\ngo 1.24\n\nrequire github.com/acme/sdk/core v1.2.0\n\nrequire (\n\tgithub.com/acme/sdk/proto v0.3.1 // indirect\n\tgolang.org/x/net v0.30.0\n)\n";
+
+    #[test]
+    fn go_mod_version_is_the_module_line_comment() {
+        let written = check("go.mod", GO_MOD, "1.5.0");
+        assert!(written.starts_with("module github.com/acme/sdk/auth // v1.5.0\n"));
+        assert!(
+            written.ends_with("golang.org/x/net v0.30.0\n)\n"),
+            "MinimalEdit"
+        );
+    }
+
+    #[test]
+    fn go_mod_without_comment_has_no_version_until_written() {
+        let bare = "module github.com/acme/greeter\n\ngo 1.24\n";
+        assert!(read_version("go.mod", None, bare).is_err());
+        let written = write_version("go.mod", None, bare, None, &v("0.1.0")).unwrap();
+        assert_eq!(
+            written,
+            "module github.com/acme/greeter // v0.1.0\n\ngo 1.24\n"
+        );
+    }
+
+    #[test]
+    fn go_major_versions_need_the_module_path_suffix() {
+        let bare = "module github.com/acme/greeter // v1.9.0\n";
+        assert!(write_version("go.mod", None, bare, None, &v("2.0.0"))
+            .unwrap_err()
+            .to_string()
+            .contains("github.com/acme/greeter/v2"));
+        let v2 = "module github.com/acme/greeter/v2 // v1.9.0\n";
+        assert_eq!(
+            write_version("go.mod", None, v2, None, &v("2.0.0")).unwrap(),
+            "module github.com/acme/greeter/v2 // v2.0.0\n"
+        );
+        assert!(write_version("go.mod", None, v2, None, &v("3.0.0")).is_err());
+        assert!(go_major_error("github.com/acme/greeter/v2", &v("1.0.0")).is_some());
+        assert!(go_major_error("gopkg.in/yaml.v3", &v("3.0.1")).is_none());
+    }
+
+    #[test]
+    fn go_mod_requires_are_dependencies_and_pins() {
+        let candidates = [
+            "github.com/acme/sdk/core",
+            "github.com/acme/sdk/proto",
+            "github.com/acme/sdk/other",
+        ];
+        assert_eq!(
+            internal_dependencies("auth/go.mod", GO_MOD, &candidates).unwrap(),
+            ["github.com/acme/sdk/core", "github.com/acme/sdk/proto"]
+        );
+        let core = write_version(
+            "auth/go.mod",
+            None,
+            GO_MOD,
+            Some(candidates[0]),
+            &v("1.3.0"),
+        )
+        .unwrap();
+        assert!(core.contains("\nrequire github.com/acme/sdk/core v1.3.0\n"));
+        let proto = write_version(
+            "auth/go.mod",
+            None,
+            &core,
+            Some(candidates[1]),
+            &v("0.4.0-rc.1"),
+        )
+        .unwrap();
+        assert!(proto.contains("\tgithub.com/acme/sdk/proto v0.4.0-rc.1 // indirect\n"));
+        assert_eq!(
+            proto
+                .replace("v1.3.0", "v1.2.0")
+                .replace("v0.4.0-rc.1", "v0.3.1"),
+            GO_MOD,
+            "nothing else moves"
+        );
+        assert_eq!(
+            write_version("go.mod", None, GO_MOD, Some("github.com/x/y"), &v("9.9.9")).unwrap(),
+            GO_MOD
+        );
     }
 }

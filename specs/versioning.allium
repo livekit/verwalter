@@ -91,6 +91,14 @@ contract VersionedFileHandler {
     @invariant MinimalEdit
         -- write_version changes only the version fields; formatting and
         -- unrelated content of the file are preserved.
+
+    -- go.mod: the version is the `// vX.Y.Z` comment on the module line
+    -- (knope's convention). Without one, read_version falls back to the
+    -- latest final tag of the package, else 0.0.0. Dependencies are the
+    -- `require` entries, matched by module path, so a Go package's key
+    -- for dependents is its module path. write_dependency_version moves
+    -- the `require` entry; go.sum is left alone and gets the new sum once
+    -- the tag exists.
 }
 
 ------------------------------------------------------------
@@ -100,7 +108,9 @@ contract VersionedFileHandler {
 enum BumpLevel { major | minor | patch }
 
 -- custom: exists_url with {name} and {version}, answering 200 or 404.
-enum Registry { none | crates | npm | pypi | pubdev | custom }
+-- goproxy: the Go module proxy, asked by module path. Asking it for a
+-- version makes it fetch the tag, so the request is the publish.
+enum Registry { none | crates | npm | pypi | pubdev | goproxy | custom }
 
 ------------------------------------------------------------
 -- Entities and Variants
@@ -127,7 +137,10 @@ entity Package {
     dependencies: Set<Package>
     -- Template for the tag name. Default: config.release.tag, else
     -- "v{version}" in a single-package repo, "{package}-v{version}" in a
-    -- monorepo.
+    -- monorepo. A package whose first versioned file is a go.mod takes
+    -- the tag Go reads: "<path>/v{version}", or "v{version}" at the root.
+    -- A Go module in a major-version directory (`lib/v2`) has no such
+    -- default and is a config error without its own tag.
     tag_template: String
     -- Default: config.release.mode.
     release_mode: none | tag | tag_and_release
@@ -136,7 +149,7 @@ entity Package {
     -- config.release.draft.
     release_as_draft: Boolean
     -- Where the package is published: crates | npm | pypi | pubdev |
-    -- custom (an exists_url with {name} and {version}) | none. Defaults
+    -- goproxy | custom (an exists_url with {name} and {version}) | none. Defaults
     -- to config.publish.registry. The tool only asks whether a version is
     -- there; publishing is the command below. The answer is 200, 404, or
     -- an error: a registry outage never reads as "not there yet".
@@ -155,7 +168,9 @@ entity Package {
     -- on the last final version. For a maintenance release (below a final
     -- version already tagged, such as 1.5.1 after 2.0.0) it adds
     -- `--tag latest-1` (`latest-0.4` for 0.4.x), so `latest` stays on the
-    -- newest line. A package that sets registry none
+    -- newest line. On goproxy without a command, the registry request
+    -- itself publishes: found is published, not found is a failure to
+    -- re-run. A package that sets registry none
     -- itself, with no command, has nothing to publish and is left out
     -- of `publish`: it is released on GitHub only.
     publish_command: String?
@@ -317,8 +332,11 @@ config {
     -- is relative to the repository root, and no package overrides these
     -- keys.
     -- members: directories of packages, `*` as a whole path component
-    -- (`packages/*`). Each publishable Cargo, pnpm or uv workspace member
-    -- in them is a Package, named by its manifest; a private one is not.
+    -- (`packages/*`). Each publishable Cargo, pnpm, uv or Go (go.work)
+    -- workspace member in them is a Package, named by its manifest; a
+    -- private one is not. A Go module has no name in its manifest: it is
+    -- named by its directory, the one at the root by the last element of
+    -- its module path.
     -- A directory that is no workspace member is a config error unless
     -- excluded. A configured package of the same name overrides the found
     -- one and needs no path. Empty: the configured packages are all.
@@ -721,6 +739,15 @@ invariant FixedGroupReleasesTogether {
             g.all(p => rpr.releases.any(x => x.package = p)) or g.all(p => not rpr.releases.any(x => x.package = p)))
         and config.versioning.fixed.all(g =>
             rpr.releases.all(a => rpr.releases.all(b => not (a.package in g and b.package in g) or a.to_version = b.to_version))))
+}
+
+-- Go resolves v2 and later only under a module path that ends in /vN,
+-- and v0 or v1 only without it. The tool changes no module path, because
+-- every import moves with it: that is the PR that adds the major
+-- changeset. `plan` and the release branch refuse a release that breaks it.
+invariant GoMajorVersion {
+    filter(ReleasePullRequests, r => r.status = open).all(rpr =>
+        rpr.releases.all(r => go_module_path_fits(r.package, r.to_version)))
 }
 
 ------------------------------------------------------------

@@ -25,7 +25,7 @@ and gets a GitHub release unless `release.mode` says otherwise.
 files = ["Cargo.toml"]             # for every package; a package can set its own
 
 [publish]
-registry = "crates"                # none | crates | npm | pypi | pubdev | custom
+registry = "crates"                # none | crates | npm | pypi | pubdev | goproxy | custom
 
 [packages.livekit-protocol]
 path = "livekit-protocol"

@@ -7,8 +7,8 @@ use std::{collections::BTreeSet, fs, path::Path};
 use std::process::Command;
 
 use crate::{
-    changeset::Changeset, config::Config, github::Gh, handler, repo::CHANGESET_DIR,
-    version::BumpLevel, Error, Version,
+    changeset::Changeset, config::Config, github::Gh, repo::CHANGESET_DIR, version::BumpLevel,
+    Error, Version,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -199,10 +199,12 @@ pub fn api_check(
             .max()
             .unwrap_or(BumpLevel::Patch);
         let package = &config.packages[name];
-        let file = &package.versioning.files[0];
-        let content = fs::read_to_string(root.join(file.path()))
-            .map_err(|e| format!("{}: {e}", file.path()))?;
-        let version = handler::read_version(file.path(), file.regex(), &content)?;
+        let version = crate::repo::Repo::load_packages(root, config)?
+            .0
+            .into_iter()
+            .find(|p| &p.name == name)
+            .map(|p| p.version)
+            .ok_or_else(|| format!("{name}: not loaded"))?;
         let out = Command::new("sh")
             .arg("-c")
             .arg(command)
