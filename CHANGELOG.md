@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.22.1
+
+### Patch Changes
+
+- The action builds verwalter from its own checkout with `cargo` when the release binary cannot be downloaded. - [#34](https://github.com/livekit/verwalter/pull/34) ([@lukasIO](https://github.com/lukasIO))
+- verwalter moved to `livekit/verwalter`. The action, the schema URL, the registry User-Agent and the docs name the new repository, and the README, docs and example workflows pin v0.22.0. - [#32](https://github.com/livekit/verwalter/pull/32) ([@lukasIO](https://github.com/lukasIO))
+
 ## 0.22.0
 
 ### Minor Changes
