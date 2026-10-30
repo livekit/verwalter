@@ -397,3 +397,14 @@ fn print_plan(repo: &Repo, releases: &[verwalter::plan::PlannedRelease]) {
         );
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::CommandFactory;
+
+    #[test]
+    fn cli_definition() {
+        Cli::command().debug_assert();
+    }
+}
