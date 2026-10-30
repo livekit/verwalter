@@ -20,7 +20,7 @@ What the tool does, what it catches, and what to do when a step fails.
 | Pre-releases | An rc PR for every package with a pending changeset and the fixed groups they are in, each group at its own rc version and pinned to each other, from any branch. Nothing is chosen by hand. Dependents without a changeset are untouched. Numbering continues from the tags. The final release follows the pending level. It is never lower than the rc. | `pre-release`, `[versioning].prerelease_label` |
 | Draft releases | The release is created as a draft. A later job uploads the assets and flips it with `--publish`. It is reported until published. | `release.draft`, `release --publish` |
 | Changelog | One entry per release with PR number and author, read from the commit that added each changeset. Multi-line summaries stay bullets. | `versioning.changelog` |
-| Workspace check | A Cargo, pnpm or uv member without a private marker must be in the config. A missing one fails `check` and warns elsewhere. `publish.workspace = true` is resolved. | `[check].ignore` |
+| Workspace check | A Cargo, pnpm or uv member without a private marker must be in the config. A missing one fails `check` and warns elsewhere. `publish.workspace = true` is resolved. | `members`, `exclude` |
 | First release | A package with no tag, or no version on its registry, is named in the PR body and flagged in the handoff. Trusted publishing cannot create a new package. | `first_release` |
 | Abandon | Removes a GitHub release and its tag, local and remote. The registry is not touched. | `release --abandon <tag>` |
 | Dry run | Every push, tag and GitHub write is printed instead of done. | `--dry-run`, action `dry-run` |

@@ -97,10 +97,7 @@ fn run() -> Result<(), Error> {
     // config only: a broken changeset on the PR is its finding, not a
     // reason to fail before it runs.
     if command == "check" {
-        let config = verwalter::config::Config::parse(
-            &std::fs::read_to_string(&config_path)
-                .map_err(|e| format!("{}: {e}", config_path.display()))?,
-        )?;
+        let config = verwalter::config::Config::load(&root, &config_path)?;
         let findings = workspace::check(&root, &config);
         if !findings.is_empty() {
             return Err(workspace_error(&findings));

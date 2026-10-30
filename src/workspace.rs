@@ -194,7 +194,7 @@ fn uv_members(root: &Path) -> Vec<Member> {
 
 /// Directories matching a workspace glob such as `packages/*` or `crates/a`.
 /// Only `*` as a whole path component is supported.
-fn expand(root: &Path, pattern: &str) -> Vec<PathBuf> {
+pub(crate) fn expand(root: &Path, pattern: &str) -> Vec<PathBuf> {
     let mut dirs = vec![root.to_path_buf()];
     for component in pattern.trim_matches('/').split('/') {
         let mut next = Vec::new();
@@ -221,7 +221,7 @@ fn expand(root: &Path, pattern: &str) -> Vec<PathBuf> {
     dirs
 }
 
-fn relative(root: &Path, dir: &Path) -> String {
+pub(crate) fn relative(root: &Path, dir: &Path) -> String {
     let rel = dir
         .strip_prefix(root)
         .unwrap_or(dir)
@@ -245,22 +245,14 @@ pub enum Finding {
 impl std::fmt::Display for Finding {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Unmanaged { name, path } => write!(f, "{name} ({path}) is publishable but not in verwalter.toml: add [packages.{name}] or list it under [check] `ignore`"),
+            Self::Unmanaged { name, path } => write!(f, "{name} ({path}) is publishable but not in verwalter.toml: add [packages.{name}], match it with `members`, or list it in `exclude`"),
             Self::Missing { name, path } => write!(f, "{name} is in verwalter.toml but {path} has none of its versioned files: remove it or fix `path`"),
         }
     }
 }
 
-/// Spec: WorkspaceConsistency. `ignore` entries match a member's name or
-/// its path; a trailing `*` matches a prefix (`examples/*`).
+/// Spec: WorkspaceConsistency.
 pub fn check(root: &Path, config: &Config) -> Vec<Finding> {
-    let ignored = |m: &Member| {
-        config
-            .check
-            .ignore
-            .iter()
-            .any(|pat| matches(pat, &m.name) || matches(pat, &m.path))
-    };
     let mut findings = Vec::new();
     let members = members(root);
     // Names compare normalised (PEP 503 style): a pyproject `play_py_ext`
@@ -272,7 +264,7 @@ pub fn check(root: &Path, config: &Config) -> Vec<Finding> {
             .any(|k| normalise_py(k) == normalise_py(name))
     };
     for m in &members {
-        if !m.private && !configured(&m.name) && !ignored(m) {
+        if !m.private && !configured(&m.name) && !excluded(&config.exclude, &m.name, &m.path) {
             findings.push(Finding::Unmanaged {
                 name: m.name.clone(),
                 path: m.path.clone(),
@@ -293,6 +285,14 @@ pub fn check(root: &Path, config: &Config) -> Vec<Finding> {
         }
     }
     findings
+}
+
+/// `exclude` entries match a member's name or its path; a trailing `*`
+/// matches a prefix (`examples/*`).
+pub(crate) fn excluded(exclude: &[String], name: &str, path: &str) -> bool {
+    exclude
+        .iter()
+        .any(|pat| matches(pat, name) || matches(pat, path))
 }
 
 fn matches(pattern: &str, value: &str) -> bool {
@@ -411,7 +411,7 @@ mod tests {
     }
 
     #[test]
-    fn findings_and_ignore() {
+    fn findings_and_exclude() {
         let t = tmp("findings");
         write(
             &t.0,
@@ -439,7 +439,7 @@ mod tests {
             "[package]\nname = \"e\"\nversion = \"0.1.0\"\n",
         );
         let config = Config::parse(
-            "[check]\nignore = [\"examples/*\", \"b\"]\n[packages.a]\npath = \"crates/a\"\nversioning.files = [\"Cargo.toml\"]\nversioning.changelog = \"CHANGELOG.md\"\n[packages.c]\npath = \"crates/c\"\nversioning.files = [\"Cargo.toml\"]\nversioning.changelog = \"x\"\n[packages.gone]\npath = \"crates/gone\"\nversioning.files = [\"Cargo.toml\"]\nversioning.changelog = \"x\"\n",
+            "exclude = [\"examples/*\", \"b\"]\n[packages.a]\npath = \"crates/a\"\nversioning.files = [\"Cargo.toml\"]\nversioning.changelog = \"CHANGELOG.md\"\n[packages.c]\npath = \"crates/c\"\nversioning.files = [\"Cargo.toml\"]\nversioning.changelog = \"x\"\n[packages.gone]\npath = \"crates/gone\"\nversioning.files = [\"Cargo.toml\"]\nversioning.changelog = \"x\"\n",
         )
         .unwrap();
         let f = check(&t.0, &config);
@@ -449,7 +449,7 @@ mod tests {
                 name: "gone".into(),
                 path: "crates/gone".into()
             }],
-            "b and examples/* are ignored; a and the private c are fine"
+            "b and examples/* are excluded; a and the private c are fine"
         );
         let open = Config::parse("[packages.a]\npath = \"crates/a\"\nversioning.files = [\"Cargo.toml\"]\nversioning.changelog = \"x\"\n").unwrap();
         let unmanaged: Vec<String> = check(&t.0, &open)
@@ -463,5 +463,46 @@ mod tests {
             })
             .collect();
         assert_eq!(unmanaged, ["b", "e"]);
+    }
+
+    // Spec: config.members and config.exclude.
+    #[test]
+    fn members_find_publishable_packages() {
+        let t = tmp("members");
+        write(&t.0, "pnpm-workspace.yaml", "packages:\n  - 'packages/*'\n");
+        for (dir, json) in [
+            ("sdk", r#"{"name": "sdk", "version": "1.0.0"}"#),
+            ("rtc", r#"{"name": "rtc", "version": "1.0.0"}"#),
+            ("internal", r#"{"name": "internal", "private": true}"#),
+            ("skip", r#"{"name": "skip", "version": "1.0.0"}"#),
+        ] {
+            write(&t.0, &format!("packages/{dir}/package.json"), json);
+        }
+        write(&t.0, "packages/docs/README.md", "");
+        write(
+            &t.0,
+            "tools/x/package.json",
+            r#"{"name": "x", "version": "1.0.0"}"#,
+        );
+        let load = |exclude: &str| {
+            write(&t.0, "verwalter.toml", &format!("members = [\"packages/*\"]\nexclude = {exclude}\n[versioning]\nfiles = [\"package.json\"]\n[packages.rtc]\nrelease.draft = true\n[packages.x]\npath = \"tools/x\"\n"));
+            Config::load(&t.0, &t.0.join("verwalter.toml"))
+        };
+        let e = load("[\"skip\"]").unwrap_err();
+        assert!(e.to_string().contains("packages/docs"), "{e}");
+        let c = load("[\"skip\", \"packages/docs\"]").unwrap();
+        assert_eq!(c.packages.keys().collect::<Vec<_>>(), ["rtc", "sdk", "x"]);
+        assert_eq!(c.packages["rtc"].path, "packages/rtc");
+        assert!(c.packages["rtc"].release.draft);
+        assert_eq!(
+            c.packages["sdk"].versioning.files[0].path(),
+            "packages/sdk/package.json"
+        );
+        assert!(check(&t.0, &c).is_empty());
+        // Without a checkout, an entry without a path is an error.
+        assert!(Config::parse(
+            "[versioning]\nfiles = [\"package.json\"]\n[packages.rtc]\nrelease.draft = true\n"
+        )
+        .is_err());
     }
 }

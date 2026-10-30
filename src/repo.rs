@@ -28,10 +28,7 @@ impl Repo {
     }
 
     pub fn load_with_config(root: &Path, config_path: &Path) -> Result<Self, Error> {
-        let config = Config::parse(
-            &fs::read_to_string(config_path)
-                .map_err(|e| format!("{}: {e}", config_path.display()))?,
-        )?;
+        let config = Config::load(root, config_path)?;
         let (packages, warnings) = Self::load_packages(root, &config)?;
         let names: Vec<&str> = config.packages.keys().map(String::as_str).collect();
         let changesets = read_changesets(&root.join(CHANGESET_DIR), &names)?;

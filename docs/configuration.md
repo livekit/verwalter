@@ -25,10 +25,11 @@ package overrides it with a dotted key of the same name, for example
 
 ```toml
 base_branch = "main"            # default
+members = ["packages/*"]        # optional: every publishable workspace member there is a package
+exclude = ["examples/*", "packages/internal-tools"]  # by name or path: not a package, not reported
 
 [check]                          # contributor PRs, for `verwalter check`
 exempt_label = "internal"       # default: PRs with this label need no changeset
-ignore = ["examples/*"]         # workspace members the consistency check skips
 api = "cargo semver-checks --baseline-rev $VERWALTER_BASELINE_TAG 2>&1 | tee /dev/stderr | sed -n 's/.*requires new \\([a-z]*\\) version.*/\\1/p'"
 
 [versioning]                     # what a release changes
@@ -54,7 +55,7 @@ workspace = "cargo publish --workspace" # or: one command from the root for all 
 exists_url = "https://r/{name}/{version}"  # for custom: 200 when the version exists, 404 when not
 
 [packages.livekit-protocol]
-path = "livekit-protocol"        # the only required key
+path = "livekit-protocol"        # the only required key, unless `members` finds the package
 
 [packages.livekit-ffi]
 path = "livekit-ffi"
@@ -68,6 +69,19 @@ publish.command = "pnpm publish --no-git-checks"   # else the built-in one for t
 publish.exists_url = "https://r/{name}/{version}"
 check.api = "griffe check pkg -a $VERWALTER_BASELINE_TAG >/dev/null || echo major"
 ```
+
+`members` takes directories, with `*` as a whole path component. Each
+publishable member of a Cargo, pnpm or uv workspace in them is a package,
+named by its manifest. A private member is left out: list it under
+`[packages]` to release it. A directory that is no workspace member is an
+error unless `exclude` lists it. A `[packages.<name>]` entry for a found
+package overrides its keys and needs no `path`. Without `members`, the
+`[packages]` entries are the whole list.
+
+`exclude` entries match a workspace member's name or its path, and a
+trailing `*` matches a prefix. `members` skips them, and the workspace
+consistency check, which reports a publishable member that no package
+covers, does not report them.
 
 A package sets each key in any TOML form: dotted keys as above, an inline
 table (`release = { draft = true }`) or a `[packages.livekit-ffi.release]`

@@ -4,7 +4,7 @@
 //! The tables group the keys by concept. A package overrides a table key
 //! with a dotted key of the same name: `release.draft = true`.
 
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, path::Path};
 
 use serde::Deserialize;
 
@@ -50,6 +50,8 @@ impl VersionedFile {
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 pub struct Package {
+    /// Required, unless `members` finds the package.
+    #[serde(default)]
     pub path: String,
     /// Overrides `[versioning]`.
     #[serde(default)]
@@ -131,6 +133,17 @@ pub struct PackageCheck {
 pub struct Config {
     #[serde(default = "default_base_branch")]
     pub base_branch: String,
+    /// Spec: config.members. Directories of packages, `*` as a whole path
+    /// component (`packages/*`). Each publishable Cargo, pnpm or uv
+    /// workspace member there is a package, named by its manifest. A
+    /// `[packages]` entry of that name overrides it and needs no `path`.
+    #[serde(default)]
+    pub members: Vec<String>,
+    /// Spec: config.exclude. Workspace members that are no package, by
+    /// name or path; a trailing `*` matches a prefix (`examples/*`).
+    /// `members` skips them, and the consistency check does not report them.
+    #[serde(default)]
+    pub exclude: Vec<String>,
     /// Spec: config.check.
     #[serde(default)]
     pub check: Check,
@@ -141,20 +154,18 @@ pub struct Config {
     /// Spec: config.publish.
     #[serde(default)]
     pub publish: Publish,
+    #[serde(default)]
     pub packages: BTreeMap<String, Package>,
 }
 
-/// Spec: config.check. Contributor PRs: the changeset check, the API
-/// check and the workspace consistency check.
+/// Spec: config.check. Contributor PRs: the changeset check and the API
+/// check.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 #[serde(default, deny_unknown_fields)]
 pub struct Check {
     /// PRs carrying this label need no changeset.
     pub exempt_label: String,
-    /// Workspace members the consistency check must not report, by package
-    /// name or path; a trailing `*` matches a prefix (`examples/*`).
-    pub ignore: Vec<String>,
     /// Shell command, run in the package's path with the claimed level
     /// and the baseline tag in the environment. It prints the lowest
     /// change kind it can prove the diff needs, `major`, `minor` or
@@ -167,7 +178,6 @@ impl Default for Check {
     fn default() -> Self {
         Self {
             exempt_label: "internal".into(),
-            ignore: Vec::new(),
             api: None,
         }
     }
@@ -330,6 +340,52 @@ fn inherit(table: &mut toml::Table) {
     }
 }
 
+/// Spec: config.members. Each publishable workspace member in a
+/// `members` directory gets a package entry, or the `path` of the entry
+/// of its name.
+fn discover(
+    table: &mut toml::Table,
+    root: &Path,
+    members: &[String],
+    exclude: &[String],
+) -> Result<(), crate::Error> {
+    if members.is_empty() {
+        return Ok(());
+    }
+    let known = crate::workspace::members(root);
+    let packages = table
+        .entry("packages")
+        .or_insert_with(|| toml::Table::new().into())
+        .as_table_mut()
+        .ok_or("packages: a table")?;
+    for dir in members
+        .iter()
+        .flat_map(|m| crate::workspace::expand(root, m))
+    {
+        let path = crate::workspace::relative(root, &dir);
+        let Some(m) = known.iter().find(|m| m.path == path) else {
+            if crate::workspace::excluded(exclude, "", &path) {
+                continue;
+            }
+            return Err(format!(
+                "members: {path} is no Cargo, pnpm or uv workspace member: add it to the workspace, or to exclude"
+            )
+            .into());
+        };
+        if m.private || crate::workspace::excluded(exclude, &m.name, &path) {
+            continue;
+        }
+        if let Some(entry) = packages
+            .entry(m.name.clone())
+            .or_insert_with(|| toml::Table::new().into())
+            .as_table_mut()
+        {
+            entry.entry("path").or_insert_with(|| path.into());
+        }
+    }
+    Ok(())
+}
+
 /// `file` relative to a package `path`, as a repo-relative path. `..`
 /// is resolved, so a sibling directory's file is `../sibling/file`.
 fn under(path: &str, file: &str) -> String {
@@ -351,15 +407,36 @@ fn default_base_branch() -> String {
 }
 
 impl Config {
+    /// Reads the config at `path` and finds the `members` packages under
+    /// `root`.
+    pub fn load(root: &Path, path: &Path) -> Result<Self, crate::Error> {
+        let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        Self::parse_in(&text, Some(root))
+    }
+
+    /// The config text alone: `members` finds nothing without a checkout.
     pub fn parse(text: &str) -> Result<Self, crate::Error> {
+        Self::parse_in(text, None)
+    }
+
+    fn parse_in(text: &str, root: Option<&Path>) -> Result<Self, crate::Error> {
         // The file as written first, so an error carries its line.
-        toml::from_str::<Self>(text)?;
+        let written = toml::from_str::<Self>(text)?;
         let mut table: toml::Table = toml::from_str(text)?;
+        if let Some(root) = root {
+            discover(&mut table, root, &written.members, &written.exclude)?;
+        }
         inherit(&mut table);
         let mut config: Self = table.try_into()?;
+        if config.packages.is_empty() {
+            return Err("no packages: add [packages.<name>] or members".into());
+        }
         // Spec: Package.versioned_files and changelog_file are relative to
         // the package's path. Everything after this sees repo-relative paths.
         for (name, p) in &mut config.packages {
+            if p.path.is_empty() {
+                return Err(format!("{name}: no path, and members does not find it").into());
+            }
             if p.versioning.files.is_empty() {
                 return Err(format!(
                     "{name}: no versioning.files, on the package or in [versioning]"

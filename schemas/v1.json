@@ -7,6 +7,22 @@
       "type": "string",
       "default": "main"
     },
+    "members": {
+      "description": "Spec: config.members. Directories of packages, `*` as a whole path\ncomponent (`packages/*`). Each publishable Cargo, pnpm or uv\nworkspace member there is a package, named by its manifest. A\n`[packages]` entry of that name overrides it and needs no `path`.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
+    "exclude": {
+      "description": "Spec: config.exclude. Workspace members that are no package, by\nname or path; a trailing `*` matches a prefix (`examples/*`).\n`members` skips them, and the consistency check does not report them.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
     "check": {
       "description": "Spec: config.check.",
       "$ref": "#/$defs/Check"
@@ -29,26 +45,15 @@
     }
   },
   "additionalProperties": false,
-  "required": [
-    "packages"
-  ],
   "$defs": {
     "Check": {
-      "description": "Spec: config.check. Contributor PRs: the changeset check, the API\ncheck and the workspace consistency check.",
+      "description": "Spec: config.check. Contributor PRs: the changeset check and the API\ncheck.",
       "type": "object",
       "properties": {
         "exempt_label": {
           "description": "PRs carrying this label need no changeset.",
           "type": "string",
           "default": "internal"
-        },
-        "ignore": {
-          "description": "Workspace members the consistency check must not report, by package\nname or path; a trailing `*` matches a prefix (`examples/*`).",
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "default": []
         },
         "api": {
           "description": "Shell command, run in the package's path with the claimed level\nand the baseline tag in the environment. It prints the lowest\nchange kind it can prove the diff needs, `major`, `minor` or\n`patch`, or nothing when it cannot tell. A package's `check.api`\noverrides it.",
@@ -264,7 +269,9 @@
       "type": "object",
       "properties": {
         "path": {
-          "type": "string"
+          "description": "Required, unless `members` finds the package.",
+          "type": "string",
+          "default": ""
         },
         "versioning": {
           "description": "Overrides `[versioning]`.",
@@ -283,10 +290,7 @@
           "$ref": "#/$defs/PackageCheck"
         }
       },
-      "additionalProperties": false,
-      "required": [
-        "path"
-      ]
+      "additionalProperties": false
     },
     "PackageVersioning": {
       "description": "The package keys of `[versioning]`. `Config::parse` fills in the\ndefaults and makes the paths repo-relative.",

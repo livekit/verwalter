@@ -307,11 +307,20 @@ config {
     -- defaults for every package; their paths are relative to each
     -- package's own path. Keys that apply to the whole repository are
     -- not accepted on a package.
-    -- Contributor PRs. A PR carrying exempt_label needs no changeset.
-    -- ignore lists workspace members the consistency check skips, by name
-    -- or path; a trailing `*` matches a prefix (`examples/*`). api is the
-    -- default api_command, overridden per package.
-    check: { exempt_label: String = "internal", ignore: Set<String> = {}, api: String? }
+    -- Directories of packages, `*` as a whole path component
+    -- (`packages/*`). Each publishable Cargo, pnpm or uv workspace member
+    -- in them is a Package, named by its manifest; a private one is not.
+    -- A directory that is no workspace member is a config error unless
+    -- excluded. A configured package of the same name overrides the found
+    -- one and needs no path. Empty: the configured packages are all.
+    members: Set<String> = {}
+    -- Workspace members that are no package, by name or path; a trailing
+    -- `*` matches a prefix (`examples/*`). members skips them, and the
+    -- consistency check does not report them.
+    exclude: Set<String> = {}
+    -- Contributor PRs. A PR carrying exempt_label needs no changeset. api
+    -- is the default api_command, overridden per package.
+    check: { exempt_label: String = "internal", api: String? }
     -- What a release changes. files and changelog are the defaults for
     -- Package.versioned_files and changelog_file.
     -- pin_files: files outside any package that pin every package's
@@ -355,18 +364,18 @@ config {
 ------------------------------------------------------------
 
 -- Workspace consistency: every publishable package the workspace
--- manifests declare must be a configured Package or ignored, and a
+-- manifests declare must be a configured Package or excluded, and a
 -- configured Package must exist. A private package may be configured: it
 -- is versioned and released on GitHub, just not published to a registry.
 -- The check fails on a mismatch, every other command warns, so a new
 -- package cannot escape versioning. is_configured(m): a configured
 -- Package has the member's name, compared normalised (PEP 503:
--- `play_py_ext` is `play-py-ext`). ignored(m) matches config.check.ignore
+-- `play_py_ext` is `play-py-ext`). excluded(m) matches config.exclude
 -- against the name or the path.
 rule WorkspaceConsistencyCheck {
     when: ContributorPullRequestUpdated(pr)
     let members = workspace_members(pr.repository)
-    requires: members.all(m => m.private or is_configured(m) or ignored(m, config.check.ignore))
+    requires: members.all(m => m.private or is_configured(m) or excluded(m, config.exclude))
     requires: filter(Packages, p => p.repository = pr.repository).all(p => package_present(p))
     ensures: WorkspaceConsistent(repository: pr.repository)
 }
