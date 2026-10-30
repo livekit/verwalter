@@ -117,9 +117,8 @@ verwalter status          # needs origin and gh: each package, version equals it
 verwalter pr --dry-run    # needs origin: the branch and the PR that the next push to main produces
 ```
 
-`status` and `pr --dry-run` need the `origin` remote, a token and a
-fresh `git fetch --tags`. In a checkout without them, `plan` is the
-check, and `status` says `tag:local` for every package.
+In a checkout without the `origin` remote, `plan` is the check. See
+"Running locally" in [commands.md](commands.md).
 
 A warning names a real problem: files of one package that disagree, a
 workspace member the config does not cover, a changeset for an unknown
