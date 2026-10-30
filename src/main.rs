@@ -13,8 +13,6 @@ use verwalter::{
 /// Changeset-based versioning for single packages and monorepos.
 #[derive(Parser)]
 struct Cli {
-    #[command(subcommand)]
-    command: Command,
     /// The repository checkout
     #[arg(global = true, default_value = ".")]
     checkout: PathBuf,
@@ -24,6 +22,9 @@ struct Cli {
     /// Print every write instead of running it
     #[arg(long, global = true)]
     dry_run: bool,
+
+    #[command(subcommand)]
+    command: Command,
 }
 
 #[derive(clap::Subcommand)]
