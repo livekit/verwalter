@@ -17,3 +17,14 @@ All commands take `--config <file>` and an optional checkout path. `pr`,
 `release`, `pre-release`, `publish` and `check` take `--dry-run`. Every push, tag and
 GitHub write is then printed instead of done. Local release branches are
 still regenerated.
+
+There is no `--help` and no `--version`. The usage line prints on a
+wrong argument.
+
+## Running locally
+
+Every command reads `verwalter.toml` in the checkout. `plan` works
+offline. Every other command needs the `origin` remote, `gh auth login`
+and a fresh `git fetch --tags`, because the tags number the releases
+and the rcs. Without them, `status` reports `tag:local` and
+`registry:no` for every package. That is the offline case, not drift.
