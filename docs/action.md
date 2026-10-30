@@ -52,10 +52,9 @@ verwalter then keeps a `release/v1` PR into `v1`. A release from `v1` below
 a version already tagged does not take GitHub's Latest badge, and the
 built-in npm command keeps it off npm's `latest` dist-tag.
 
-`livekit/verwalter` is internal, so the `token` of another repository cannot
-download its release binaries. The action then builds verwalter from its
-own checkout, which needs no token. The build needs `cargo`, which
-GitHub-hosted Linux and macOS runners have.
+If the release binary cannot be downloaded, the action builds verwalter
+from its own checkout instead. The build needs `cargo`, which GitHub-hosted
+Linux and macOS runners have.
 
 Repository settings the workflows need:
 

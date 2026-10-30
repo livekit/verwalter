@@ -65,9 +65,8 @@ runs:
         DIR="$RUNNER_TEMP/verwalter-$VERSION"
         if [ ! -x "$DIR/verwalter" ]; then
           mkdir -p "$DIR"
-          # The repo is internal: a token from another repo gets "release
-          # not found". The action's own checkout needs no token, so build
-          # from it instead.
+          # No release binary to download: build from the action's own
+          # checkout instead.
           if [ -z "$TARGET" ] || ! gh release download "v$VERSION" --repo livekit/verwalter --pattern "verwalter-$TARGET.tar.gz" --output - | tar -xz -C "$DIR"; then
             if [ "$VERSION" != "$CHECKOUT" ]; then
               echo "::error::cannot download verwalter v$VERSION, and the action checkout is v$CHECKOUT to build from"
