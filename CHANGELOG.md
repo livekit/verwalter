@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.20.0
+
+### Minor Changes
+
+- Breaking: `verwalter.toml` groups its keys in `[check]`, `[versioning]`, `[release]` and `[publish]`. Keys in `[versioning]` and `[release]` are defaults for every package, and a package overrides any table key with a dotted key such as `release.draft = true`. Renamed keys: `versioned_files` is `versioning.files`, `tag_template` is `release.tag`, `release` is `release.mode`, `release_branch_prefix` is `[release].branch_prefix`, `release_label` is `[release].label`, and `publish` is `publish.command`. See docs/configuration.md for every key. - [`0946061`](https://github.com/lukasIO/verwalter/commit/09460612d8514fd9444e539310631f6d19f67552) ([@lukasIO](https://github.com/lukasIO))
+
+### Patch Changes
+
+- README, docs and example workflows pin v0.19.0. - [`fdccaee`](https://github.com/lukasIO/verwalter/commit/fdccaeed830f406106d990cf655c9c6f45910d11) ([@lukasIO](https://github.com/lukasIO))
+
 ## 0.19.0
 
 ### Minor Changes
