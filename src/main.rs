@@ -1,17 +1,126 @@
 use std::{
+    collections::BTreeSet,
     path::{Path, PathBuf},
     process::ExitCode,
 };
 
+use clap::Parser;
 use verwalter::{
     branches, check, github, plan::plan, prerelease, release, repo::Repo, status,
     version::BumpLevel, workspace, Error,
 };
 
-const USAGE: &str = "usage: verwalter <status|plan|branches|pr> [--config <file>] [--base <ref>] [--remote <name>] [--dry-run] [<checkout>]\n       verwalter changeset [--level major|minor|patch] [--package <name>]... [--base <ref>] [--summary <text>] [<checkout>]\n       verwalter release [--asset <file>]... [--package <name>] [--publish] [--abandon <tag>] [--remote <name>] [--dry-run] [<checkout>]\n       verwalter check --pr <number> [--config <file>] [--dry-run] [<checkout>]\n       verwalter publish [--releases <json>] [--jobs <n>] [--dry-run] [<checkout>]\n       verwalter pre-release [--target <branch>] [--remote <name>] [--dry-run] [<checkout>]";
+/// Changeset-based versioning for single packages and monorepos.
+// args_override_self: a repeated option takes its last value, as before clap.
+#[derive(Parser)]
+#[command(args_override_self = true)]
+struct Cli {
+    #[command(subcommand)]
+    command: Command,
+}
+
+// Every command takes every option and ignores the ones it does not use:
+// the action appends `--dry-run` and the user's `args` to any command.
+#[derive(clap::Subcommand)]
+enum Command {
+    /// Per package: version, tag, GitHub release, pending changesets, open PRs, next step
+    Status(Args),
+    /// Print the release plan: next versions, dependencies first
+    Plan(Args),
+    /// Create the release branch locally
+    Branches(Args),
+    /// Push the release branch and open or update the PR
+    Pr(Args),
+    /// Write a changeset for the packages the branch changes and no pending changeset covers
+    Changeset(Args),
+    /// Tag and create GitHub releases for every untagged version with a changelog entry
+    Release(Args),
+    /// Changeset and API check for a contributor PR, with comment
+    Check(Args),
+    /// Run each package's publish command, dependencies first
+    Publish(Args),
+    /// Open an rc PR for every package with a pending changeset
+    PreRelease(Args),
+}
+
+// allow_hyphen_values: `--summary -x` takes `-x` as the value, as before clap.
+#[derive(clap::Args, Clone)]
+struct Args {
+    /// The repository checkout [default: .]
+    // A Vec, not one value: a repeated checkout takes the last, as before clap.
+    checkout: Vec<PathBuf>,
+    /// Config file [default: <checkout>/verwalter.toml]
+    #[arg(long, allow_hyphen_values = true)]
+    config: Option<PathBuf>,
+    /// Base ref to diff against or branch from
+    #[arg(long, allow_hyphen_values = true)]
+    base: Option<String>,
+    /// Git remote
+    #[arg(long, default_value = "origin", allow_hyphen_values = true)]
+    remote: String,
+    /// Pull request number (check)
+    #[arg(long, allow_hyphen_values = true)]
+    pr: Option<u64>,
+    /// Asset to upload (release)
+    #[arg(long = "asset", value_name = "FILE", allow_hyphen_values = true)]
+    assets: Vec<String>,
+    /// Delete this tag's GitHub release and the tag (release)
+    #[arg(long, allow_hyphen_values = true)]
+    abandon: Option<String>,
+    /// Branch to open the rc PR from (pre-release)
+    #[arg(long, allow_hyphen_values = true)]
+    target: Option<String>,
+    /// Changeset summary [default: the last commit subject] (changeset)
+    #[arg(long, allow_hyphen_values = true)]
+    summary: Option<String>,
+    /// Package to act on: repeat for changeset, the last one for release
+    #[arg(long = "package", value_name = "NAME", allow_hyphen_values = true)]
+    packages: Vec<String>,
+    /// Packages to publish at once (publish)
+    #[arg(long, allow_hyphen_values = true)]
+    jobs: Option<usize>,
+    /// The `releases` output of `release`: only these packages (publish)
+    #[arg(long, value_name = "JSON", value_parser = releases, allow_hyphen_values = true)]
+    releases: Option<BTreeSet<String>>,
+    /// Bump level [default: patch] (changeset)
+    #[arg(long, allow_hyphen_values = true)]
+    level: Option<BumpLevel>,
+    /// Print every write instead of running it
+    #[arg(long)]
+    dry_run: bool,
+    /// Publish the draft release (release)
+    #[arg(long)]
+    publish: bool,
+}
+
+/// A JSON list of objects with a `package`, or of names. Empty means
+/// nothing to publish.
+fn releases(text: &str) -> Result<BTreeSet<String>, serde_json::Error> {
+    #[derive(serde::Deserialize)]
+    #[serde(untagged)]
+    enum Item {
+        Named { package: String },
+        Name(String),
+    }
+    if text.trim().is_empty() {
+        return Ok(BTreeSet::new());
+    }
+    let items: Vec<Item> = serde_json::from_str(text)?;
+    Ok(items
+        .into_iter()
+        .map(|i| match i {
+            Item::Named { package } | Item::Name(package) => package,
+        })
+        .collect())
+}
 
 fn main() -> ExitCode {
-    match run() {
+    // A usage error exits 1, as before clap; clap's own default is 2.
+    let cli = Cli::try_parse().unwrap_or_else(|e| {
+        let _ = e.print();
+        std::process::exit(if e.use_stderr() { 1 } else { 0 })
+    });
+    match run(cli.command) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("error: {e}");
@@ -20,73 +129,38 @@ fn main() -> ExitCode {
     }
 }
 
-fn run() -> Result<(), Error> {
-    let mut args = std::env::args().skip(1).peekable();
-    let Some(command) = args.next() else {
-        return Err(USAGE.into());
-    };
-    let mut config = None;
-    let mut base = None;
-    let mut remote = String::from("origin");
-    let mut pr: Option<u64> = None;
-    let mut assets: Vec<String> = Vec::new();
-    let mut abandon: Option<String> = None;
-    let mut target: Option<String> = None;
-    let mut summary: Option<String> = None;
-    let mut packages: Vec<String> = Vec::new();
-    let mut jobs: Option<usize> = None;
-    let mut releases_only: Option<std::collections::BTreeSet<String>> = None;
-    let mut level: Option<BumpLevel> = None;
-    let mut dry_run = false;
-    let mut only: Option<String> = None;
-    let mut publish = false;
-    let mut root = PathBuf::from(".");
-    while let Some(arg) = args.next() {
-        match arg.as_str() {
-            "--config" => config = Some(PathBuf::from(args.next().ok_or(USAGE)?)),
-            "--base" => base = Some(args.next().ok_or(USAGE)?),
-            "--remote" => remote = args.next().ok_or(USAGE)?,
-            "--pr" => pr = Some(args.next().ok_or(USAGE)?.parse()?),
-            "--asset" => assets.push(args.next().ok_or(USAGE)?),
-            "--abandon" => abandon = Some(args.next().ok_or(USAGE)?),
-            "--target" => target = Some(args.next().ok_or(USAGE)?),
-            "--summary" => summary = Some(args.next().ok_or(USAGE)?),
-            "--jobs" => jobs = Some(args.next().ok_or(USAGE)?.parse()?),
-            // The `releases` output of `release`: a JSON list of objects
-            // with a `package`, or of names. Empty means nothing to publish.
-            "--releases" => {
-                #[derive(serde::Deserialize)]
-                #[serde(untagged)]
-                enum Item {
-                    Named { package: String },
-                    Name(String),
-                }
-                let text = args.next().ok_or(USAGE)?;
-                let items: Vec<Item> = if text.trim().is_empty() {
-                    Vec::new()
-                } else {
-                    serde_json::from_str(&text)?
-                };
-                releases_only = Some(
-                    items
-                        .into_iter()
-                        .map(|i| match i {
-                            Item::Named { package } | Item::Name(package) => package,
-                        })
-                        .collect(),
-                );
-            }
-            "--dry-run" => dry_run = true,
-            "--package" => {
-                let p = args.next().ok_or(USAGE)?;
-                only = Some(p.clone());
-                packages.push(p);
-            }
-            "--publish" => publish = true,
-            "--level" => level = Some(args.next().ok_or(USAGE)?.parse().map_err(|()| USAGE)?),
-            _ => root = PathBuf::from(arg),
-        }
-    }
+fn run(command: Command) -> Result<(), Error> {
+    let (Command::Status(args)
+    | Command::Plan(args)
+    | Command::Branches(args)
+    | Command::Pr(args)
+    | Command::Changeset(args)
+    | Command::Release(args)
+    | Command::Check(args)
+    | Command::Publish(args)
+    | Command::PreRelease(args)) = &command;
+    let Args {
+        checkout,
+        config,
+        base,
+        remote,
+        pr,
+        assets,
+        abandon,
+        target,
+        summary,
+        packages,
+        jobs,
+        releases: releases_only,
+        level,
+        dry_run,
+        publish,
+    } = args.clone();
+    let only = packages.last().cloned();
+    let root = checkout
+        .last()
+        .cloned()
+        .unwrap_or_else(|| PathBuf::from("."));
     // Commands run in package paths see VERWALTER_ROOT: it must be
     // absolute, or `$VERWALTER_ROOT/dist` resolves inside the package.
     let root = root
@@ -96,13 +170,13 @@ fn run() -> Result<(), Error> {
     // Spec: ChangesetCheckOnContributorPullRequest. `check` reads the
     // config only: a broken changeset on the PR is its finding, not a
     // reason to fail before it runs.
-    if command == "check" {
+    if let Command::Check(_) = command {
         let config = verwalter::config::Config::load(&root, &config_path)?;
         let findings = workspace::check(&root, &config);
         if !findings.is_empty() {
             return Err(workspace_error(&findings));
         }
-        let pr = pr.ok_or(USAGE)?;
+        let pr = pr.ok_or("check requires --pr <number>")?;
         let mut gh = gh(&root, &remote, dry_run);
         let c = check::run(&root, &config, pr, &mut gh)?;
         println!(
@@ -144,8 +218,8 @@ fn run() -> Result<(), Error> {
     {
         eprintln!("warning: {w}");
     }
-    match command.as_str() {
-        "changeset" => {
+    match command {
+        Command::Changeset(_) => {
             let base = base.unwrap_or_else(|| {
                 let remote_base = format!("{remote}/{}", repo.config.git.base_branch);
                 if verwalter::git::ref_exists(&repo.root, &remote_base) {
@@ -169,11 +243,11 @@ fn run() -> Result<(), Error> {
             }
             Ok(())
         }
-        "plan" => {
+        Command::Plan(_) => {
             print_plan(&repo, &releases);
             Ok(())
         }
-        "branches" => {
+        Command::Branches(_) => {
             let base = base.unwrap_or_else(|| repo.config.git.base_branch.clone());
             match branches::create(&repo, &releases, &base)? {
                 Some(b) => println!("{b}  on {}", repo.config.git.base_branch),
@@ -181,7 +255,7 @@ fn run() -> Result<(), Error> {
             }
             Ok(())
         }
-        "pr" => {
+        Command::Pr(_) => {
             let base = base.unwrap_or_else(|| format!("{remote}/{}", repo.config.git.base_branch));
             github::attribute(&mut repo, &mut gh(&root, &remote, dry_run));
             let branch = branches::create(&repo, &releases, &base)?;
@@ -194,7 +268,7 @@ fn run() -> Result<(), Error> {
             }
             Ok(())
         }
-        "status" => {
+        Command::Status(_) => {
             let mut gh = gh(&repo.root, &remote, dry_run);
             let rows = status::status(&repo, &remote, &mut gh)?;
             let w = rows.iter().map(|r| r.package.len()).max().unwrap_or(0);
@@ -234,7 +308,7 @@ fn run() -> Result<(), Error> {
             }
             Ok(())
         }
-        "pre-release" => {
+        Command::PreRelease(_) => {
             let target = target.unwrap_or_else(|| repo.config.git.base_branch.clone());
             github::attribute(&mut repo, &mut gh(&root, &remote, dry_run));
             let mut gh = gh(&repo.root, &remote, dry_run);
@@ -248,7 +322,7 @@ fn run() -> Result<(), Error> {
             }
             Ok(())
         }
-        "publish" => {
+        Command::Publish(_) => {
             let options = verwalter::publish::Options {
                 jobs,
                 dry_run,
@@ -261,7 +335,7 @@ fn run() -> Result<(), Error> {
             }
             Ok(())
         }
-        "release" => {
+        Command::Release(_) => {
             let mut gh = gh(&repo.root, &remote, dry_run);
             if let Some(tag) = abandon {
                 for r in release::abandon(&repo, &remote, &tag, dry_run, &mut gh)? {
@@ -282,7 +356,7 @@ fn run() -> Result<(), Error> {
             println!("{}", release::write_outputs(&released)?);
             Ok(())
         }
-        _ => Err(USAGE.into()),
+        Command::Check(_) => unreachable!("check returned above"),
     }
 }
 
