@@ -14,7 +14,7 @@
 | `command` | The command to run. Required. |
 | `pr` | PR number for `check`. Defaults to the event's PR. |
 | `token` | Token with `contents` and `pull-requests` write. `github.token` by default. |
-| `version` | verwalter release to download. Defaults to the version the action was checked out at. |
+| `version` | verwalter release to download. Defaults to the version the action was checked out at. If the download fails, the action builds that checked-out version with `cargo`. |
 | `dry-run` | `"true"` passes `--dry-run`. Reads still run, writes are printed. |
 | `args` | Extra arguments passed to the command. |
 | `releases` | `publish` only: the `releases` output of the `release` step. Only those packages are published. |
@@ -51,6 +51,11 @@ To ship releases from a maintenance branch such as `v1` next to `main`:
 verwalter then keeps a `release/v1` PR into `v1`. A release from `v1` below
 a version already tagged does not take GitHub's Latest badge, and the
 built-in npm command keeps it off npm's `latest` dist-tag.
+
+`livekit/verwalter` is internal, so the `token` of another repository cannot
+download its release binaries. The action then builds verwalter from its
+own checkout, which needs no token. The build needs `cargo`, which
+GitHub-hosted Linux and macOS runners have.
 
 Repository settings the workflows need:
 
