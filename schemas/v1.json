@@ -7,60 +7,19 @@
       "type": "string",
       "default": "main"
     },
-    "exempt_label": {
-      "type": "string",
-      "default": "internal"
-    },
-    "release_branch_prefix": {
-      "type": "string",
-      "default": "release/"
-    },
-    "release_label": {
-      "type": "string",
-      "default": "release"
-    },
-    "dependent_bump_level": {
-      "$ref": "#/$defs/BumpLevel"
-    },
-    "prerelease_label": {
-      "description": "Pre-release label: `1.6.0-rc.1`. Written as PEP 440 in pyproject.toml\n(`1.6.0rc1`; `alpha` and `beta` become `a` and `b`).",
-      "type": "string",
-      "default": "rc"
-    },
-    "pin_files": {
-      "description": "Files outside any package that pin every package's version: a\nworkspace Cargo.toml, Cargo.lock, package-lock.json. Each release\nupdates its own entry in each of them.",
-      "type": "array",
-      "items": {
-        "type": "string"
-      },
-      "default": []
-    },
-    "ignore": {
-      "description": "Workspace members the consistency check must not report, by package\nname or path; a trailing `*` matches a prefix (`examples/*`).",
-      "type": "array",
-      "items": {
-        "type": "string"
-      },
-      "default": []
-    },
-    "fixed": {
-      "description": "Groups of packages that always release at one shared version: the\nhighest version in the group, bumped by the highest level any\nmember needs. `fixed = [[\"play-core\", \"play-ffi\"]]`.",
-      "type": "array",
-      "items": {
-        "type": "array",
-        "items": {
-          "type": "string"
-        }
-      },
-      "default": []
-    },
-    "publish": {
-      "description": "Defaults for `verwalter publish`, overridden per package.",
-      "$ref": "#/$defs/Publish"
-    },
     "check": {
       "description": "Spec: config.check.",
       "$ref": "#/$defs/Check"
+    },
+    "versioning": {
+      "$ref": "#/$defs/Versioning"
+    },
+    "release": {
+      "$ref": "#/$defs/Release"
+    },
+    "publish": {
+      "description": "Spec: config.publish.",
+      "$ref": "#/$defs/Publish"
     },
     "packages": {
       "type": "object",
@@ -74,6 +33,109 @@
     "packages"
   ],
   "$defs": {
+    "Check": {
+      "description": "Spec: config.check. Contributor PRs: the changeset check, the API\ncheck and the workspace consistency check.",
+      "type": "object",
+      "properties": {
+        "exempt_label": {
+          "description": "PRs carrying this label need no changeset.",
+          "type": "string",
+          "default": "internal"
+        },
+        "ignore": {
+          "description": "Workspace members the consistency check must not report, by package\nname or path; a trailing `*` matches a prefix (`examples/*`).",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "api": {
+          "description": "Shell command, run in the package's path with the claimed level\nand the baseline tag in the environment. It prints the lowest\nchange kind it can prove the diff needs, `major`, `minor` or\n`patch`, or nothing when it cannot tell. A package's `check.api`\noverrides it.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false
+    },
+    "Versioning": {
+      "description": "What a release changes. `files` and `changelog` are defaults for\nevery package, relative to each package's own `path`.",
+      "type": "object",
+      "properties": {
+        "files": {
+          "description": "Default for `versioning.files` of every package.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/VersionedFile"
+          }
+        },
+        "changelog": {
+          "description": "Default for `versioning.changelog` of every package. `false` keeps\nno changelog. Default: `CHANGELOG.md`.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "pin_files": {
+          "description": "Files outside any package that pin every package's version: a\nworkspace Cargo.toml, Cargo.lock, package-lock.json. Each release\nupdates its own entry in each of them.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "fixed": {
+          "description": "Groups of packages that always release at one shared version: the\nhighest version in the group, bumped by the highest level any\nmember needs. `fixed = [[\"play-core\", \"play-ffi\"]]`.",
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "default": []
+        },
+        "dependent_bump_level": {
+          "$ref": "#/$defs/BumpLevel"
+        },
+        "prerelease_label": {
+          "description": "Pre-release label: `1.6.0-rc.1`. Written as PEP 440 in pyproject.toml\n(`1.6.0rc1`; `alpha` and `beta` become `a` and `b`).",
+          "type": "string",
+          "default": "rc"
+        }
+      },
+      "additionalProperties": false
+    },
+    "VersionedFile": {
+      "description": "A versioned file: a bare path for a format knope-versioning knows by\nfile name, or `{ path, regex }` for any other text file. The regex must\nhave a `(?<version>...)` capture group; only that group is rewritten.",
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "regex": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "path",
+            "regex"
+          ]
+        }
+      ]
+    },
     "BumpLevel": {
       "type": "string",
       "enum": [
@@ -82,8 +144,60 @@
         "major"
       ]
     },
+    "Release": {
+      "description": "The release PR, the tag and the GitHub release. `tag`, `mode` and\n`draft` are defaults for every package.",
+      "type": "object",
+      "properties": {
+        "branch_prefix": {
+          "description": "Release PR branches start with this.",
+          "type": "string",
+          "default": "release/"
+        },
+        "label": {
+          "description": "Release PRs carry this label.",
+          "type": "string",
+          "default": "release"
+        },
+        "tag": {
+          "description": "Default for `release.tag` of every package.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "mode": {
+          "description": "Default for `release.mode` of every package: none | tag |\ntag_and_release. Default: tag_and_release.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ReleaseMode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "draft": {
+          "description": "Default for `release.draft` of every package. Default: false.",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false
+    },
+    "ReleaseMode": {
+      "type": "string",
+      "enum": [
+        "none",
+        "tag",
+        "tag_and_release"
+      ]
+    },
     "Publish": {
-      "description": "Spec: config.publish. The default registry and command for every\npackage; `registry` and `publish` on a package override them.",
+      "description": "Spec: config.publish. The default registry and command for every\npackage; `publish.registry` and `publish.command` on a package\noverride them.",
       "type": "object",
       "properties": {
         "jobs": {
@@ -97,25 +211,28 @@
           "$ref": "#/$defs/Registry"
         },
         "exists_url": {
-          "description": "For `registry = \"custom\"`: a URL with `{name}` and `{version}`.",
+          "description": "For `registry = \"custom\"`: a URL with `{name}` and `{version}` that\nanswers 200 when the version exists and 404 when it does not.",
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "default": null
         },
-        "publish": {
+        "command": {
           "description": "Shell command, run in the package's path. Applies to packages on\nthe default registry; others take the built-in default for theirs.",
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "default": null
         },
         "workspace": {
-          "description": "One command, run once from the root, that publishes every package\non the default registry without a `publish` of its own: the\necosystem's recursive publish (`pnpm -r publish`,\n`cargo publish --workspace`). Order and skipping are its job; the\ntool checks the registry before and after and reports per package.",
+          "description": "One command, run once from the root, that publishes every package\non the default registry without a `publish.command` of its own:\nthe ecosystem's recursive publish (`pnpm -r publish`,\n`cargo publish --workspace`). Order and skipping are its job; the\ntool checks the registry before and after and reports per package.",
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "default": null
         }
       },
       "additionalProperties": false
@@ -143,57 +260,83 @@
         }
       ]
     },
-    "Check": {
-      "description": "Spec: config.check. The API check that `verwalter check` runs for\nevery affected package that a changeset covers.",
-      "type": "object",
-      "properties": {
-        "api": {
-          "description": "Shell command, run in the package's path with the claimed level\nand the baseline tag in the environment. It prints the lowest\nchange kind it can prove the diff needs, `major`, `minor` or\n`patch`, or nothing when it cannot tell.",
-          "type": [
-            "string",
-            "null"
-          ]
-        }
-      },
-      "additionalProperties": false
-    },
     "Package": {
       "type": "object",
       "properties": {
         "path": {
           "type": "string"
         },
-        "versioned_files": {
-          "description": "Relative to `path`. `Config::parse` makes them repo-relative.",
+        "versioning": {
+          "description": "Overrides `[versioning]`.",
+          "$ref": "#/$defs/PackageVersioning"
+        },
+        "release": {
+          "description": "Overrides `[release]`.",
+          "$ref": "#/$defs/PackageRelease"
+        },
+        "publish": {
+          "description": "Overrides `[publish]`.",
+          "$ref": "#/$defs/PackagePublish"
+        },
+        "check": {
+          "description": "Overrides `[check]`.",
+          "$ref": "#/$defs/PackageCheck"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ]
+    },
+    "PackageVersioning": {
+      "description": "The package keys of `[versioning]`. `Config::parse` fills in the\ndefaults and makes the paths repo-relative.",
+      "type": "object",
+      "properties": {
+        "files": {
+          "description": "Relative to the package's `path`. The first file carries the version.",
           "type": "array",
           "items": {
             "$ref": "#/$defs/VersionedFile"
           }
         },
         "changelog": {
-          "description": "Relative to `path`. Default: `CHANGELOG.md` in the package.\n`changelog = false` keeps no changelog: the release notes are\nempty, and a version without a tag is released as is, because\nthere is no entry to tell a hand edit from a release.",
+          "description": "Relative to the package's `path`. Default: `CHANGELOG.md`.\n`changelog = false` keeps no changelog: the release notes are\nempty, and a version without a tag is released as is, because\nthere is no entry to tell a hand edit from a release.",
           "type": [
             "string",
             "null"
           ],
           "default": "CHANGELOG.md"
-        },
-        "tag_template": {
-          "description": "Default: \"v{version}\" with one package, \"{package}-v{version}\" otherwise.",
+        }
+      },
+      "additionalProperties": false
+    },
+    "PackageRelease": {
+      "description": "The package keys of `[release]`. `Config::parse` fills in the defaults.",
+      "type": "object",
+      "properties": {
+        "tag": {
+          "description": "Tag name with `{package}` and `{version}`. Default: \"v{version}\"\nwith one package, \"{package}-v{version}\" otherwise.",
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "default": null
         },
-        "release": {
+        "mode": {
           "$ref": "#/$defs/ReleaseMode"
         },
         "draft": {
           "type": "boolean",
           "default": false
-        },
+        }
+      },
+      "additionalProperties": false
+    },
+    "PackagePublish": {
+      "description": "The package keys of `[publish]`. Unlike the other tables, these hold\nthe package's own values only: whether the default command applies\ndepends on whether the package is on the default registry.",
+      "type": "object",
+      "properties": {
         "registry": {
-          "description": "Where the package is published. Default: `[publish].registry`.",
           "anyOf": [
             {
               "$ref": "#/$defs/Registry"
@@ -204,63 +347,37 @@
           ]
         },
         "exists_url": {
-          "description": "For `registry = \"custom\"`: a URL with `{name}` and `{version}` that\nanswers 200 when the version exists and 404 when it does not.",
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "default": null
         },
-        "publish": {
-          "description": "Shell command that publishes this package, run in `path`. Default:\n`[publish].publish` when on the default registry, else the built-in\ncommand for the registry.",
+        "command": {
+          "description": "Run in the package's `path`. Default: `[publish].command` when on\nthe default registry, else the built-in command for the registry.",
           "type": [
             "string",
             "null"
-          ]
-        },
-        "api": {
-          "description": "Spec: Package.api_command. Overrides `[check].api` for this package.",
-          "type": [
-            "string",
-            "null"
-          ]
+          ],
+          "default": null
         }
       },
-      "additionalProperties": false,
-      "required": [
-        "path",
-        "versioned_files"
-      ]
+      "additionalProperties": false
     },
-    "VersionedFile": {
-      "description": "A versioned file: a bare path for a format knope-versioning knows by\nfile name, or `{ path, regex }` for any other text file. The regex must\nhave a `(?<version>...)` capture group; only that group is rewritten.",
-      "anyOf": [
-        {
-          "type": "string"
-        },
-        {
-          "type": "object",
-          "properties": {
-            "path": {
-              "type": "string"
-            },
-            "regex": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "path",
-            "regex"
-          ]
+    "PackageCheck": {
+      "description": "The package keys of `[check]`, the package's own values only.",
+      "type": "object",
+      "properties": {
+        "api": {
+          "description": "Spec: Package.api_command.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
         }
-      ]
-    },
-    "ReleaseMode": {
-      "type": "string",
-      "enum": [
-        "none",
-        "tag",
-        "tag_and_release"
-      ]
+      },
+      "additionalProperties": false
     }
   }
 }

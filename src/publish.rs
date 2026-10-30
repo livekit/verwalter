@@ -82,14 +82,16 @@ fn candidates(
     let mut out = BTreeMap::new();
     for p in &repo.packages {
         let cfg = &repo.config.packages[&p.name];
-        if cfg.release == ReleaseMode::None || only.is_some_and(|o| !o.contains(&p.name)) {
+        if cfg.release.mode == ReleaseMode::None || only.is_some_and(|o| !o.contains(&p.name)) {
             continue;
         }
         // Spec: Package.publish_command. `registry = "none"` set on the
         // package itself, with no command, says there is nothing to
         // publish: a GitHub-release-only package. The default `none`
         // with nothing configured anywhere is still an error below.
-        if cfg.registry == Some(crate::registry::Registry::None) && cfg.publish.is_none() {
+        if cfg.publish.registry == Some(crate::registry::Registry::None)
+            && cfg.publish.command.is_none()
+        {
             continue;
         }
         let tag = repo.config.tag_for(&p.name, &p.version);
@@ -112,7 +114,7 @@ fn candidates(
             continue;
         }
         let command = repo.config.publish_command(&p.name, in_pnpm_workspace(&repo.root, &cfg.path), p.version.is_prerelease()).ok_or_else(|| {
-            format!("{}: no publish command: set `registry` or `publish` on the package, or `[publish]` defaults", p.name)
+            format!("{}: no publish command: set `publish.registry` or `publish.command` on the package, or in `[publish]`", p.name)
         })?;
         out.insert(
             p.name.clone(),

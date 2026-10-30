@@ -114,19 +114,25 @@ entity Package {
     -- handler; the tool never runs a package manager. The first file is
     -- the version; files that disagree are a warning (VersionedFilesAgree).
     -- Paths are relative to the package's path; `..` reaches a sibling.
+    -- Default: config.versioning.files. A package with neither is a
+    -- config error.
     versioned_files: Set<VersionedFile>
-    -- Relative to the package's path. Default: CHANGELOG.md. None opts
+    -- Relative to the package's path. Default: config.versioning.changelog,
+    -- CHANGELOG.md. None opts
     -- out: no entry is written, the release notes are empty, and
     -- ReleaseNeedsChangelogEntry does not apply.
     changelog_file: String?
     version: Version
     dependencies: Set<Package>
-    -- Template for the tag name. Default: "v{version}" in a single-package
-    -- repo, "{package}-v{version}" in a monorepo.
+    -- Template for the tag name. Default: config.release.tag, else
+    -- "v{version}" in a single-package repo, "{package}-v{version}" in a
+    -- monorepo.
     tag_template: String
+    -- Default: config.release.mode.
     release_mode: none | tag | tag_and_release
     -- When true the GitHub release stays a draft until the repo workflow
-    -- has attached its assets and publishes it.
+    -- has attached its assets and publishes it. Default:
+    -- config.release.draft.
     release_as_draft: Boolean
     -- Where the package is published: crates | npm | pypi | pubdev |
     -- custom (an exists_url with {name} and {version}) | none. Defaults
@@ -138,7 +144,7 @@ entity Package {
     -- null when registry = none.
     on_registry(v): registry_has_version(registry, exists_url, name, v)
     -- The shell command that publishes this package, run in its path:
-    -- the package's own, else config.publish.publish when the package is
+    -- the package's own, else config.publish.command when the package is
     -- on the default registry, else the built-in command for its
     -- registry (cargo publish, npm publish, twine upload, dart pub
     -- publish), else none and `publish` refuses to start. In a pnpm
@@ -295,47 +301,53 @@ entity Release {
 ------------------------------------------------------------
 
 config {
-    -- Bump level the tool applies itself to a package whose internal
-    -- dependency was bumped. A changeset never has to name dependents;
-    -- the changeset check only looks at packages whose own files changed.
-    dependent_bump_level: BumpLevel = patch
-    -- Label of on-demand pre-releases: 1.6.0-rc.1. Spelling per file format
-    -- is the handler's job (PEP 440 in pyproject.toml: 1.6.0rc1).
-    prerelease_label: String = "rc"
-    -- PRs carrying this label need no changeset.
-    exempt_label: String = "internal"
+    -- The keys are grouped by concept. A package overrides a key of a
+    -- table with a key of the same name in its own table of that name
+    -- (release.draft). The package keys of versioning and release are
+    -- defaults for every package; their paths are relative to each
+    -- package's own path. Keys that apply to the whole repository are
+    -- not accepted on a package.
+    -- Contributor PRs. A PR carrying exempt_label needs no changeset.
+    -- ignore lists workspace members the consistency check skips, by name
+    -- or path; a trailing `*` matches a prefix (`examples/*`). api is the
+    -- default api_command, overridden per package.
+    check: { exempt_label: String = "internal", ignore: Set<String> = {}, api: String? }
+    -- What a release changes. files and changelog are the defaults for
+    -- Package.versioned_files and changelog_file.
+    -- pin_files: files outside any package that pin every package's
+    -- version: a workspace Cargo.toml, Cargo.lock, package-lock.json.
+    -- Every release, pre-releases included, updates its own entry in
+    -- each of them, so the workspace still resolves.
+    -- fixed: groups of packages that always release at one shared
+    -- version: the highest version in the group, bumped by the highest
+    -- level any member needs. A member with no changeset of its own comes
+    -- along. A pre-release of a member takes the whole group. Members
+    -- whose committed versions differ are warned about until a release
+    -- aligns them. A package is in at most one group.
+    -- dependent_bump_level: the bump level the tool applies itself to a
+    -- package whose internal dependency was bumped. A changeset never has
+    -- to name dependents; the changeset check only looks at packages
+    -- whose own files changed.
+    -- prerelease_label: label of on-demand pre-releases: 1.6.0-rc.1.
+    -- Spelling per file format is the handler's job (PEP 440 in
+    -- pyproject.toml: 1.6.0rc1).
+    versioning: { files: Set<VersionedFile>?, changelog: String? = "CHANGELOG.md", pin_files: Set<String> = {}, fixed: Set<Set<Package>> = {}, dependent_bump_level: BumpLevel = patch, prerelease_label: String = "rc" }
+    -- The release PR, the tag and the GitHub release. Release PRs are
+    -- recognisable by branch prefix and label so that repo workflows can
+    -- gate them (approvals, registry checks). Gating itself is a workflow
+    -- concern, not the tool's. tag, mode and draft are the defaults for
+    -- Package.tag_template, release_mode and release_as_draft.
+    release: { branch_prefix: String = "release/", label: String = "release", tag: String?, mode: none | tag | tag_and_release = tag_and_release, draft: Boolean = false }
     -- Defaults for `verwalter publish`: how many independent packages run
     -- at once, the registry and the command every package takes unless
     -- it sets its own.
     -- `workspace` is one command, run once from the root, for every
-    -- package on the default registry without a `publish` of its own:
+    -- package on the default registry without a command of its own:
     -- the ecosystem's recursive publish. Order and skipping are its job;
     -- the tool checks the registry before (all there: skip) and after
     -- (per member: there or failed), and blocks dependents of a member
     -- that is not there.
-    publish: { jobs: Integer = 4, registry: Registry = none, exists_url: String?, publish: String?, workspace: String? }
-    -- Default api_command for `verwalter check`, overridden per package.
-    check: { api: String? }
-    -- Files outside any package that pin every package's version: a
-    -- workspace Cargo.toml, Cargo.lock, package-lock.json. Every release,
-    -- pre-releases included, updates its own entry in each of them, so
-    -- the workspace still resolves.
-    pin_files: Set<String> = {}
-    -- Workspace members the consistency check skips, by name or path; a
-    -- trailing `*` matches a prefix (`examples/*`).
-    ignore: Set<String> = {}
-    -- Groups of packages that always release at one shared version: the
-    -- highest version in the group, bumped by the highest level any
-    -- member needs. A member with no changeset of its own comes along.
-    -- A pre-release of a member takes the whole group. Members whose
-    -- committed versions differ are warned about until a release aligns
-    -- them. A package is in at most one group.
-    fixed: Set<Set<Package>> = {}
-    -- Release PRs are recognisable by branch prefix and label so that repo
-    -- workflows can gate them (approvals, registry checks). Gating itself
-    -- is a workflow concern, not the tool's.
-    release_branch_prefix: String = "release/"
-    release_label: String = "release"
+    publish: { jobs: Integer = 4, registry: Registry = none, exists_url: String?, command: String?, workspace: String? }
 }
 
 ------------------------------------------------------------
@@ -349,12 +361,12 @@ config {
 -- The check fails on a mismatch, every other command warns, so a new
 -- package cannot escape versioning. is_configured(m): a configured
 -- Package has the member's name, compared normalised (PEP 503:
--- `play_py_ext` is `play-py-ext`). ignored(m) matches config.ignore
+-- `play_py_ext` is `play-py-ext`). ignored(m) matches config.check.ignore
 -- against the name or the path.
 rule WorkspaceConsistencyCheck {
     when: ContributorPullRequestUpdated(pr)
     let members = workspace_members(pr.repository)
-    requires: members.all(m => m.private or is_configured(m) or ignored(m, config.ignore))
+    requires: members.all(m => m.private or is_configured(m) or ignored(m, config.check.ignore))
     requires: filter(Packages, p => p.repository = pr.repository).all(p => package_present(p))
     ensures: WorkspaceConsistent(repository: pr.repository)
 }
@@ -373,10 +385,10 @@ rule ChangesetCheckOnContributorPullRequest {
     let affected = affected_packages(pr.changed_files)
     let covered = covered_packages(pr.changed_files)
     ensures:
-        if starts_with(pr.head_branch, config.release_branch_prefix):
+        if starts_with(pr.head_branch, config.release.branch_prefix):
             ChangesetCheck.created(pull_request: pr, affected_packages: affected, covered_packages: covered, status: release_pull_request)
         else:
-            if config.exempt_label in pr.labels:
+            if config.check.exempt_label in pr.labels:
                 ChangesetCheck.created(pull_request: pr, affected_packages: affected, covered_packages: covered, status: exempt)
             else:
                 if affected.all(p => p in covered):
@@ -444,7 +456,7 @@ rule OpenOrUpdateReleasePullRequest {
     -- the minor component. (knope and rust-sdks today bump one level
     -- lower on 0.x; this is a deliberate change.) A fixed group moves
     -- whole, from its highest version.
-    let planned = pending.map(p => PlannedRelease(package: p, from_version: p.version, to_version: next_version(p.version, p.pending_changesets, config.dependent_bump_level, config.fixed)))
+    let planned = pending.map(p => PlannedRelease(package: p, from_version: p.version, to_version: next_version(p.version, p.pending_changesets, config.versioning.dependent_bump_level, config.versioning.fixed)))
     let open = filter(ReleasePullRequests, r => r.repository = repository and r.status = open and r.kind = release)
     requires: not pending.empty
     ensures:
@@ -483,18 +495,18 @@ rule CloseReleasePullRequestWithNothingPending {
 -- dependent never ships against a dependency whose change is only on
 -- the branch. Dependents without a changeset are not pre-released and
 -- not pinned to the rc. The rc branch bumps the carried packages' own
--- files, their entries in config.pin_files, the pins among them and
+-- files, their entries in config.versioning.pin_files, the pins among them and
 -- their changelogs.
 rule MaintainerRequestsPreRelease {
     when: MaintainerRequestsPreRelease(maintainer, repository, target_branch)
-    let carried = filter(Packages, p => p.repository = repository and p.has_pending_bump).flat_map(p => fixed_group_of(p, config.fixed))
+    let carried = filter(Packages, p => p.repository = repository and p.has_pending_bump).flat_map(p => fixed_group_of(p, config.versioning.fixed))
     requires: not carried.empty
     ensures:
         ReleasePullRequest.created(
             repository: repository,
             pull_request: release_branch_pull_request(repository, target_branch),
             kind: pre_release,
-            releases: carried.map(p => PlannedRelease(package: p, from_version: p.version, to_version: next_prerelease_version(fixed_group_of(p, config.fixed), config.prerelease_label))),
+            releases: carried.map(p => PlannedRelease(package: p, from_version: p.version, to_version: next_prerelease_version(fixed_group_of(p, config.versioning.fixed), config.versioning.prerelease_label))),
             status: open
         )
 }
@@ -664,8 +676,8 @@ invariant OneOpenPreReleasePullRequestPerPackage {
 
 invariant ReleasePullRequestsAreRecognisable {
     ReleasePullRequests.all(r =>
-        starts_with(r.pull_request.head_branch, config.release_branch_prefix)
-        and config.release_label in r.pull_request.labels)
+        starts_with(r.pull_request.head_branch, config.release.branch_prefix)
+        and config.release.label in r.pull_request.labels)
 }
 
 -- A final release only ever targets the repository base branch. An rc PR
@@ -685,9 +697,9 @@ invariant ReleasePullRequestCoversDependents {
 -- A fixed group is in a PR whole, at one version.
 invariant FixedGroupReleasesTogether {
     filter(ReleasePullRequests, r => r.status = open).all(rpr =>
-        config.fixed.all(g =>
+        config.versioning.fixed.all(g =>
             g.all(p => rpr.releases.any(x => x.package = p)) or g.all(p => not rpr.releases.any(x => x.package = p)))
-        and config.fixed.all(g =>
+        and config.versioning.fixed.all(g =>
             rpr.releases.all(a => rpr.releases.all(b => not (a.package in g and b.package in g) or a.to_version = b.to_version))))
 }
 

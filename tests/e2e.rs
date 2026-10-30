@@ -49,22 +49,23 @@ fn fixture(name: &str) -> Repo_ {
         &root,
         "verwalter.toml",
         r#"
+[versioning]
 pin_files = ["Cargo.toml", "Cargo.lock"]
 
 [packages.livekit-protocol]
 path = "livekit-protocol"
-versioned_files = ["Cargo.toml"]
-changelog = "CHANGELOG.md"
+versioning.files = ["Cargo.toml"]
+versioning.changelog = "CHANGELOG.md"
 
 [packages.livekit-api]
 path = "livekit-api"
-versioned_files = ["Cargo.toml"]
-changelog = "CHANGELOG.md"
+versioning.files = ["Cargo.toml"]
+versioning.changelog = "CHANGELOG.md"
 
 [packages.livekit]
 path = "livekit"
-versioned_files = ["Cargo.toml"]
-changelog = "CHANGELOG.md"
+versioning.files = ["Cargo.toml"]
+versioning.changelog = "CHANGELOG.md"
 "#,
     );
     write(&root, "Cargo.toml", "[workspace]\nmembers = [\"livekit-protocol\", \"livekit-api\", \"livekit\"]\n\n[workspace.dependencies]\nlivekit-protocol = { version = \"0.3.1\", path = \"livekit-protocol\" }\nlivekit-api = { version = \"0.4.3\", path = \"livekit-api\" }\n");
@@ -131,7 +132,7 @@ fn one_branch_from_one_changeset() {
     let plan = plan(
         &repo.packages,
         &repo.changesets,
-        repo.config.dependent_bump_level,
+        repo.config.versioning.dependent_bump_level,
     );
     // Start from a remote-tracking ref, as CI does; the PR still targets `main`.
     git(root, &["update-ref", "refs/remotes/origin/main", "main"]);
@@ -208,7 +209,7 @@ fn merged_release_consumes_the_changesets() {
     let first = plan(
         &repo.packages,
         &repo.changesets,
-        repo.config.dependent_bump_level,
+        repo.config.versioning.dependent_bump_level,
     );
     branches::create(&repo, &first, "main").unwrap();
     git(root, &["merge", "-q", "--ff-only", "release/main"]);
@@ -218,7 +219,7 @@ fn merged_release_consumes_the_changesets() {
     assert!(plan(
         &repo.packages,
         &repo.changesets,
-        repo.config.dependent_bump_level
+        repo.config.versioning.dependent_bump_level
     )
     .is_empty());
 }
@@ -240,7 +241,7 @@ fn pr_sync_pushes_and_creates_updates_closes() {
     let plan = plan(
         &repo.packages,
         &repo.changesets,
-        repo.config.dependent_bump_level,
+        repo.config.versioning.dependent_bump_level,
     );
     let branch = branches::create(&repo, &plan, "main").unwrap();
 
@@ -336,8 +337,8 @@ fn release_tags_and_creates_github_releases_resumably() {
     let cfg = fs::read_to_string(root.join("verwalter.toml"))
         .unwrap()
         .replace(
-            "path = \"livekit\"\nversioned_files = [\"Cargo.toml\"]\nchangelog = \"CHANGELOG.md\"",
-            "path = \"livekit\"\nversioned_files = [\"Cargo.toml\"]\nchangelog = \"CHANGELOG.md\"\ndraft = true",
+            "path = \"livekit\"\nversioning.files = [\"Cargo.toml\"]\nversioning.changelog = \"CHANGELOG.md\"",
+            "path = \"livekit\"\nversioning.files = [\"Cargo.toml\"]\nversioning.changelog = \"CHANGELOG.md\"\nrelease.draft = true",
         );
     write(root, "verwalter.toml", &cfg);
     git(root, &["commit", "-qam", "release: livekit 0.8.0"]);
@@ -597,7 +598,7 @@ fn prerelease_opens_an_rc_pr_without_consuming_changesets() {
     let p = plan(
         &repo.packages,
         &repo.changesets,
-        repo.config.dependent_bump_level,
+        repo.config.versioning.dependent_bump_level,
     );
     assert_eq!(
         p.iter()
@@ -619,7 +620,10 @@ fn prerelease_of_a_fixed_group_member_covers_the_group() {
     write(
         root,
         "verwalter.toml",
-        &format!("fixed = [[\"livekit-protocol\", \"livekit-api\"]]\n{cfg}"),
+        &cfg.replace(
+            "[versioning]\n",
+            "[versioning]\nfixed = [[\"livekit-protocol\", \"livekit-api\"]]\n",
+        ),
     );
     write(
         root,
@@ -682,7 +686,7 @@ fn prerelease_of_a_fixed_group_member_covers_the_group() {
     let plan = plan(
         &repo.packages,
         &repo.changesets,
-        repo.config.dependent_bump_level,
+        repo.config.versioning.dependent_bump_level,
     );
     let got: Vec<(&str, &str)> = plan
         .iter()
@@ -717,7 +721,7 @@ fn dry_run_writes_nothing() {
     let plan = plan(
         &repo.packages,
         &repo.changesets,
-        repo.config.dependent_bump_level,
+        repo.config.versioning.dependent_bump_level,
     );
     let branch = branches::create(&repo, &plan, "main").unwrap();
     let writes = std::cell::Cell::new(0);
@@ -1007,8 +1011,8 @@ fn versioned_files_that_disagree_are_reported() {
         root,
         "verwalter.toml",
         &cfg.replace(
-            "path = \"livekit\"\nversioned_files = [\"Cargo.toml\"]",
-            "path = \"livekit\"\nversioned_files = [\"Cargo.toml\", { path = \"README.md\", regex = 'livekit = \"(?<version>[^\"]+)\"' }]",
+            "path = \"livekit\"\nversioning.files = [\"Cargo.toml\"]",
+            "path = \"livekit\"\nversioning.files = [\"Cargo.toml\", { path = \"README.md\", regex = 'livekit = \"(?<version>[^\"]+)\"' }]",
         ),
     );
     write(root, "livekit/README.md", "livekit = \"0.6.9\"\n");
@@ -1130,7 +1134,7 @@ fn publish_runs_dependencies_first_and_blocks_dependents_of_a_failure() {
         write(
             root,
             "verwalter.toml",
-            &format!("{base}\n[publish]\npublish = '{command}'\n"),
+            &format!("{base}\n[publish]\ncommand = '{command}'\n"),
         );
         Repo::load(root).unwrap()
     };
@@ -1173,8 +1177,8 @@ fn publish_runs_dependencies_first_and_blocks_dependents_of_a_failure() {
         root,
         "verwalter.toml",
         &base.replace(
-            "path = \"livekit\"\nversioned_files = [\"Cargo.toml\"]\nchangelog = \"CHANGELOG.md\"",
-            "path = \"livekit\"\nversioned_files = [\"Cargo.toml\"]\nchangelog = \"CHANGELOG.md\"\nregistry = \"none\"",
+            "path = \"livekit\"\nversioning.files = [\"Cargo.toml\"]\nversioning.changelog = \"CHANGELOG.md\"",
+            "path = \"livekit\"\nversioning.files = [\"Cargo.toml\"]\nversioning.changelog = \"CHANGELOG.md\"\npublish.registry = \"none\"",
         ),
     );
     let github_only = verwalter::publish::Options {
@@ -1285,9 +1289,9 @@ fn publish_runs_dependencies_first_and_blocks_dependents_of_a_failure() {
     write(
         root,
         "verwalter.toml",
-        &format!("{}\n[publish]\npublish = 'echo {{package}} >> $VERWALTER_ROOT/order'\n", base.replace(
-            "path = \"livekit-protocol\"\nversioned_files = [\"Cargo.toml\"]\nchangelog = \"CHANGELOG.md\"",
-            "path = \"livekit-protocol\"\nversioned_files = [\"Cargo.toml\"]\nchangelog = \"CHANGELOG.md\"\nregistry = \"crates\"\npublish = \"exit 7\"",
+        &format!("{}\n[publish]\ncommand = 'echo {{package}} >> $VERWALTER_ROOT/order'\n", base.replace(
+            "path = \"livekit-protocol\"\nversioning.files = [\"Cargo.toml\"]\nversioning.changelog = \"CHANGELOG.md\"",
+            "path = \"livekit-protocol\"\nversioning.files = [\"Cargo.toml\"]\nversioning.changelog = \"CHANGELOG.md\"\npublish.registry = \"crates\"\npublish.command = \"exit 7\"",
         )),
     );
     let repo = Repo::load(root).unwrap();
@@ -1337,8 +1341,8 @@ fn workspace_publish_command_runs_once_and_reports_per_member() {
         &format!(
             "{}\n[publish]\nworkspace = 'echo ws $VERWALTER_PACKAGE $(pwd | xargs basename) >> $VERWALTER_ROOT/order'\n",
             base.replace(
-                "path = \"livekit\"\nversioned_files = [\"Cargo.toml\"]\nchangelog = \"CHANGELOG.md\"",
-                "path = \"livekit\"\nversioned_files = [\"Cargo.toml\"]\nchangelog = \"CHANGELOG.md\"\npublish = \"echo own {package} >> $VERWALTER_ROOT/order\""
+                "path = \"livekit\"\nversioning.files = [\"Cargo.toml\"]\nversioning.changelog = \"CHANGELOG.md\"",
+                "path = \"livekit\"\nversioning.files = [\"Cargo.toml\"]\nversioning.changelog = \"CHANGELOG.md\"\npublish.command = \"echo own {package} >> $VERWALTER_ROOT/order\""
             )
         ),
     );
@@ -1374,8 +1378,8 @@ fn workspace_publish_command_runs_once_and_reports_per_member() {
         &format!(
             "{}\n[publish]\nregistry = \"crates\"\nworkspace = 'true'\n",
             base.replace(
-                "path = \"livekit\"\nversioned_files = [\"Cargo.toml\"]\nchangelog = \"CHANGELOG.md\"",
-                "path = \"livekit\"\nversioned_files = [\"Cargo.toml\"]\nchangelog = \"CHANGELOG.md\"\npublish = \"true\""
+                "path = \"livekit\"\nversioning.files = [\"Cargo.toml\"]\nversioning.changelog = \"CHANGELOG.md\"",
+                "path = \"livekit\"\nversioning.files = [\"Cargo.toml\"]\nversioning.changelog = \"CHANGELOG.md\"\npublish.command = \"true\""
             )
         ),
     );
@@ -1496,8 +1500,8 @@ fn api_check_compares_the_claimed_level_with_the_commands_answer() {
     // VERWALTER_ROOT must be absolute: the command runs in the package.
     let root = &root.canonicalize().unwrap();
     config = config.replace(
-        "path = \"livekit-protocol\"\nversioned_files = [\"Cargo.toml\"]\nchangelog = \"CHANGELOG.md\"",
-        "path = \"livekit-protocol\"\nversioned_files = [\"Cargo.toml\"]\nchangelog = \"CHANGELOG.md\"\napi = \"exit 3\"",
+        "path = \"livekit-protocol\"\nversioning.files = [\"Cargo.toml\"]\nversioning.changelog = \"CHANGELOG.md\"",
+        "path = \"livekit-protocol\"\nversioning.files = [\"Cargo.toml\"]\nversioning.changelog = \"CHANGELOG.md\"\ncheck.api = \"exit 3\"",
     );
     let config = verwalter::config::Config::parse(&config).unwrap();
     write(

@@ -171,7 +171,7 @@ pub fn sync(
     dry_run: bool,
     gh: Gh,
 ) -> Result<Option<PullRequest>, Error> {
-    let label = repo.config.release_label.as_str();
+    let label = repo.config.release.label.as_str();
     gh(&[
         "label",
         "create",
@@ -189,7 +189,7 @@ pub fn sync(
     if let Some(branch) = branch {
         git::write(&repo.root, dry_run, &["push", "--force", "--quiet", remote, &format!("{branch}:{branch}")]).map_err(|e| {
             if e.to_string().contains("directory file conflict") {
-                let prefix = repo.config.release_branch_prefix.trim_end_matches('/');
+                let prefix = repo.config.release.branch_prefix.trim_end_matches('/');
                 format!("{e}\na branch named `{prefix}` exists on {remote}, so `{branch}` cannot be created; rename that branch or set release_branch_prefix in verwalter.toml", ).into()
             } else {
                 e
@@ -356,7 +356,7 @@ mod tests {
     use std::path::PathBuf;
 
     fn repo() -> Repo {
-        let config = Config::parse("[packages.a]\npath = \"a\"\nversioned_files = [\"Cargo.toml\"]\nchangelog = \"CHANGELOG.md\"\n[packages.b]\npath = \"b\"\nversioned_files = [\"Cargo.toml\"]\nchangelog = \"CHANGELOG.md\"\n").unwrap();
+        let config = Config::parse("[packages.a]\npath = \"a\"\nversioning.files = [\"Cargo.toml\"]\nversioning.changelog = \"CHANGELOG.md\"\n[packages.b]\npath = \"b\"\nversioning.files = [\"Cargo.toml\"]\nversioning.changelog = \"CHANGELOG.md\"\n").unwrap();
         Repo {
             root: PathBuf::from("."),
             config,

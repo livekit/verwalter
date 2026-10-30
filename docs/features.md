@@ -6,21 +6,21 @@ What the tool does, what it catches, and what to do when a step fails.
 
 | Feature | What it does | Where |
 |---|---|---|
-| Changeset check | Fails a PR that changes a package without a changeset. It posts one comment with a prefilled new-file link and updates it in place. On a passing PR the comment lists the bump each changeset claims, per package, and the dependents and fixed-group members that are released with them, so the reviewer sees the release the merge causes. It is deleted when the PR claims nothing. An invalid changeset is reported in the same comment. | `check`, `exempt_label` |
-| API check | Runs a configured command (cargo-semver-checks, griffe, break-check) for every changed package that a changeset covers, and fails the PR when the changeset level is below what the command proves. 0.x versions are translated: a breaking change needs `minor`. | `[check].api`, `api` |
+| Changeset check | Fails a PR that changes a package without a changeset. It posts one comment with a prefilled new-file link and updates it in place. On a passing PR the comment lists the bump each changeset claims, per package, and the dependents and fixed-group members that are released with them, so the reviewer sees the release the merge causes. It is deleted when the PR claims nothing. An invalid changeset is reported in the same comment. | `check`, `[check].exempt_label` |
+| API check | Runs a configured command (cargo-semver-checks, griffe, break-check) for every changed package that a changeset covers, and fails the PR when the changeset level is below what the command proves. 0.x versions are translated: a breaking change needs `minor`. | `[check].api`, `check.api` |
 | Changeset command | Writes a changeset for the packages the branch changes and no pending changeset covers, or for named packages. | `changeset --level --package --summary` |
-| One release PR | Every package with a pending bump goes in one PR. Each push regenerates the branch from `main` and updates the PR in place. With nothing pending, the PR is closed. | `pr`, `release_branch_prefix` |
-| Dependent bumps | A package whose in-repo dependency is released gets a bump too, transitively. Its dependency floor moves in its manifest and the lock files. | `dependent_bump_level`, `pin_files` |
+| One release PR | Every package with a pending bump goes in one PR. Each push regenerates the branch from `main` and updates the PR in place. With nothing pending, the PR is closed. | `pr`, `[release].branch_prefix` |
+| Dependent bumps | A package whose in-repo dependency is released gets a bump too, transitively. Its dependency floor moves in its manifest and the lock files. | `[versioning].dependent_bump_level`, `[versioning].pin_files` |
 | Dependency order | Releases, tags and the handoff list go dependencies first. A failure stops before any dependent. | `release` |
-| Publish scheduler | Runs each package's publish command for the packages the run released, from the `releases` output, dependencies first, independent packages in parallel. A package with `registry = "none"` and no command is released on GitHub only and left out. A failure blocks its transitive dependents and nothing else. A version the registry has is skipped before the command runs. Without `releases`, every tagged package runs. | `publish`, `[publish]`, `registry`, `publish` per package |
+| Publish scheduler | Runs each package's publish command for the packages the run released, from the `releases` output, dependencies first, independent packages in parallel. A package with `publish.registry = "none"` and no command is released on GitHub only and left out. A failure blocks its transitive dependents and nothing else. A version the registry has is skipped before the command runs. Without `releases`, every tagged package runs. | `publish`, `[publish]`, `publish.registry`, `publish.command` |
 | Workspace publish | One recursive command for every package on the default registry, run once from the root, with per-package reporting from the registry afterwards. Per-package commands resolve workspace ranges too: the npm default is `pnpm publish` in a pnpm workspace. | `[publish].workspace` |
-| Registry check | One GET per registry answers whether a version exists. 200 skips, 404 publishes, anything else fails. `status` shows the answer. | `registry`, `exists_url` |
-| Fixed groups | Members release at one version: the highest in the group, bumped by the highest level any member needs. A member without a changeset gets a "Released with" line. | `fixed` |
+| Registry check | One GET per registry answers whether a version exists. 200 skips, 404 publishes, anything else fails. `status` shows the answer. | `publish.registry`, `publish.exists_url` |
+| Fixed groups | Members release at one version: the highest in the group, bumped by the highest level any member needs. A member without a changeset gets a "Released with" line. | `[versioning].fixed` |
 | 0.x rule | `major` on `0.x` gives `1.0.0`, as changesets does. | |
-| Pre-releases | An rc PR for every package with a pending changeset and the fixed groups they are in, each group at its own rc version and pinned to each other, from any branch. Nothing is chosen by hand. Dependents without a changeset are untouched. Numbering continues from the tags. The final release follows the pending level. It is never lower than the rc. | `pre-release`, `prerelease_label` |
-| Draft releases | The release is created as a draft. A later job uploads the assets and flips it with `--publish`. It is reported until published. | `draft`, `release --publish` |
-| Changelog | One entry per release with PR number and author, read from the commit that added each changeset. Multi-line summaries stay bullets. | `changelog` |
-| Workspace check | A Cargo, pnpm or uv member without a private marker must be in the config. A missing one fails `check` and warns elsewhere. `publish.workspace = true` is resolved. | `ignore` |
+| Pre-releases | An rc PR for every package with a pending changeset and the fixed groups they are in, each group at its own rc version and pinned to each other, from any branch. Nothing is chosen by hand. Dependents without a changeset are untouched. Numbering continues from the tags. The final release follows the pending level. It is never lower than the rc. | `pre-release`, `[versioning].prerelease_label` |
+| Draft releases | The release is created as a draft. A later job uploads the assets and flips it with `--publish`. It is reported until published. | `release.draft`, `release --publish` |
+| Changelog | One entry per release with PR number and author, read from the commit that added each changeset. Multi-line summaries stay bullets. | `versioning.changelog` |
+| Workspace check | A Cargo, pnpm or uv member without a private marker must be in the config. A missing one fails `check` and warns elsewhere. `publish.workspace = true` is resolved. | `[check].ignore` |
 | First release | A package with no tag, or no version on its registry, is named in the PR body and flagged in the handoff. Trusted publishing cannot create a new package. | `first_release` |
 | Abandon | Removes a GitHub release and its tag, local and remote. The registry is not touched. | `release --abandon <tag>` |
 | Dry run | Every push, tag and GitHub write is printed instead of done. | `--dry-run`, action `dry-run` |
@@ -38,7 +38,7 @@ What the tool does, what it catches, and what to do when a step fails.
 | Files of one package disagree on the version | Every command warns and names the files. The first file wins. The next release aligns them. |
 | A fixed group drifts | Every command warns. The next release aligns the group. |
 | A PR changes a package without a changeset | The check fails with the comment and link. The `internal` label exempts the PR. |
-| A changeset claims `patch` for a breaking change | With an `api` command configured, the check fails and the comment names the level to use and the fix command. |
+| A changeset claims `patch` for a breaking change | With a `check.api` command configured, the check fails and the comment names the level to use and the fix command. |
 | Someone merges a branch named `release/*` by hand | The example release workflow runs only for a PR that the bot authored, with the verwalter marker in its body. |
 | Two pushes to `main` in quick succession | The concurrency group cancels the first run. One PR results. |
 | The release PR is closed without merging, or its branch deleted | The next push regenerates the branch and opens a new PR. |
@@ -65,7 +65,7 @@ and finishes what is missing. Start with `verwalter status`. Add
 | Registry publish | Re-run the publish job. The tag and release stay. The tool does not touch registries. The publish runs in dependency order and stops at the first failure, so dependents were not published. The re-run picks them up. Or dispatch the workflow with `package=<dependent>` once the dependency is on the registry. |
 | The commit itself is broken | `verwalter release --abandon <tag>` removes the release and the tag. Add a changeset and release the next version. |
 | Release PR missing or stale | `verwalter pr`. The branch is regenerated, the PR updated in place. |
-| Push rejected with "directory file conflict" | A branch named like the prefix (`release`) exists. Rename it or set `release_branch_prefix`. |
+| Push rejected with "directory file conflict" | A branch named like the prefix (`release`) exists. Rename it or set `[release].branch_prefix`. |
 | rc PR missing or stale | `verwalter pre-release --target <branch>`. |
 
 Running locally needs push rights and `gh auth login`. Fetch first so tags

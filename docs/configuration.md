@@ -17,43 +17,66 @@ new optional key, updates `v1.json` in place. A breaking change, such as a
 removed or renamed key or a new required key, freezes `v1.json` and adds
 `v2.json`.
 
+The keys are grouped in tables by concept. A key of `[versioning]` or
+`[release]` that a package can carry is the default for every package. A
+package overrides it with a dotted key of the same name, for example
+`release.draft = true`. Keys that apply to the whole repository, such as
+`pin_files` or `jobs`, are not accepted on a package.
+
 ```toml
 base_branch = "main"            # default
-exempt_label = "internal"       # default
-release_branch_prefix = "release/"
-release_label = "release"
-dependent_bump_level = "patch"
-prerelease_label = "rc"          # 1.6.0-rc.1, written as 1.6.0rc1 in pyproject.toml
-pin_files = ["Cargo.toml", "Cargo.lock"]   # workspace manifest and lock files
+
+[check]                          # contributor PRs, for `verwalter check`
+exempt_label = "internal"       # default: PRs with this label need no changeset
 ignore = ["examples/*"]         # workspace members the consistency check skips
-fixed = [["livekit-ffi", "livekit-ffi-node"]]  # groups that release at one shared version
-
-[publish]                        # defaults for `verwalter publish`
-jobs = 4                         # independent packages published at once
-registry = "crates"              # none | crates | npm | pypi | pubdev | custom
-publish = "cargo publish --no-verify"   # command for packages on that registry, run in their path
-workspace = "cargo publish --workspace" # or: one command from the root for all of them (pnpm -r publish)
-
-[check]                          # for `verwalter check`
 api = "cargo semver-checks --baseline-rev $VERWALTER_BASELINE_TAG 2>&1 | tee /dev/stderr | sed -n 's/.*requires new \\([a-z]*\\) version.*/\\1/p'"
 
-[packages.livekit-protocol]
-path = "livekit-protocol"
-versioned_files = ["Cargo.toml"]               # relative to path; the first file carries the version
-changelog = "CHANGELOG.md"                     # relative to path; the default. `false` keeps no changelog
-tag_template = "{package}-v{version}"      # default in a monorepo, v{version} with one package
-release = "tag_and_release"                # none | tag | tag_and_release
-draft = false
-registry = "npm"                           # overrides [publish].registry; "none" with no publish: released on GitHub only
-publish = "pnpm publish --no-git-checks"   # overrides the command; else the built-in one for the registry
+[versioning]                     # what a release changes
+files = ["Cargo.toml"]           # default for every package; relative to its path
+changelog = "CHANGELOG.md"       # default; relative to the package's path. `false` keeps no changelog
+pin_files = ["Cargo.toml", "Cargo.lock"]   # workspace manifest and lock files
+fixed = [["livekit-ffi", "livekit-ffi-node"]]  # groups that release at one shared version
+dependent_bump_level = "patch"   # default
+prerelease_label = "rc"          # 1.6.0-rc.1, written as 1.6.0rc1 in pyproject.toml
+
+[release]                        # the release PR, the tag and the GitHub release
+branch_prefix = "release/"       # default
+label = "release"                # default
+tag = "{package}/v{version}"     # default: v{version} with one package, {package}-v{version} otherwise
+mode = "tag_and_release"         # default. none | tag | tag_and_release
+draft = false                    # default
+
+[publish]                        # for `verwalter publish`
+jobs = 4                         # independent packages published at once
+registry = "crates"              # none | crates | npm | pypi | pubdev | custom
+command = "cargo publish --no-verify"   # for packages on that registry, run in their path
+workspace = "cargo publish --workspace" # or: one command from the root for all of them (pnpm -r publish)
 exists_url = "https://r/{name}/{version}"  # for custom: 200 when the version exists, 404 when not
-api = "griffe check pkg -a $VERWALTER_BASELINE_TAG >/dev/null || echo major"   # overrides [check].api
+
+[packages.livekit-protocol]
+path = "livekit-protocol"        # the only required key
+
+[packages.livekit-ffi]
+path = "livekit-ffi"
+versioning.files = ["Cargo.toml", "../livekit-ffi-node/package.json"]   # the first file carries the version
+versioning.changelog = false
+release.tag = "ffi/v{version}"
+release.mode = "tag"
+release.draft = true
+publish.registry = "npm"         # "none" with no command: released on GitHub only
+publish.command = "pnpm publish --no-git-checks"   # else the built-in one for the registry
+publish.exists_url = "https://r/{name}/{version}"
+check.api = "griffe check pkg -a $VERWALTER_BASELINE_TAG >/dev/null || echo major"
 ```
+
+A package sets each key in any TOML form: dotted keys as above, an inline
+table (`release = { draft = true }`) or a `[packages.livekit-ffi.release]`
+header.
 
 The API check is described in [api-check.md](api-check.md).
 
-The publish command for a package is its own `publish`, else
-`[publish].publish` when the package is on the default registry, else the
+The publish command for a package is its own `publish.command`, else
+`[publish].command` when the package is on the default registry, else the
 built-in command for its registry: `cargo publish`,
 `npm publish --provenance --access public`, `python -m twine upload dist/*`,
 `dart pub publish --force`. A package with none fails `publish` before
@@ -68,7 +91,7 @@ ecosystem's recursive publish instead: `pnpm -r publish`,
 `cargo publish --workspace`. It runs once, from the root, and owns the
 order and the skipping among those packages. The tool still asks the
 registry before (all there: the command is skipped) and after (per
-package: there, or failed), and a package with its own `publish` or
+package: there, or failed), and a package with its own `publish.command` or
 another registry keeps the per-package path and waits for the members it
 depends on.
 
@@ -84,7 +107,7 @@ ranges are left alone. Any other text file takes a regex with a `version`
 capture group. The regex wins over the file name, and every match moves:
 
 ```toml
-versioned_files = [
+versioning.files = [
   "pubspec.yaml",
   { path = "lib/src/livekit.dart", regex = "version = '(?<version>[^']+)'" },
   { path = "gradle.properties", regex = "VERSION_NAME=(?<version>.+)" },

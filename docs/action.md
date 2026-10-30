@@ -47,7 +47,7 @@ Repository settings the workflows need:
 - **Allow GitHub Actions to create and approve pull requests** (Settings →
   Actions → General), or a token of a GitHub App or PAT in `token`. That
   token also lets the release PR trigger CI. `github.token` cannot.
-- A label named `internal` (config: `exempt_label`) for PRs that need no
+- A label named `internal` (config: `[check].exempt_label`) for PRs that need no
   release.
 - "Automatically delete head branches" is fine. The next push regenerates
   the release branch.

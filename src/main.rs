@@ -134,7 +134,7 @@ fn run() -> Result<(), Error> {
     let releases = plan(
         &repo.packages,
         &repo.changesets,
-        repo.config.dependent_bump_level,
+        repo.config.versioning.dependent_bump_level,
     );
     // Spec: WorkspaceConsistency. `check` fails on it, the others warn.
     for f in &workspace::check(&repo.root, &repo.config) {

@@ -10,7 +10,7 @@ and a changeset covers, and fails the PR when the claim is too low.
 api = "cargo semver-checks --baseline-rev $VERWALTER_BASELINE_TAG 2>&1 | tee /dev/stderr | sed -n 's/.*requires new \\([a-z]*\\) version.*/\\1/p'"
 
 [packages.livekit-rtc]
-api = "griffe check livekit.rtc -a $VERWALTER_BASELINE_TAG >/dev/null || echo major"   # overrides [check].api
+check.api = "griffe check livekit.rtc -a $VERWALTER_BASELINE_TAG >/dev/null || echo major"   # overrides [check].api
 ```
 
 ## The contract

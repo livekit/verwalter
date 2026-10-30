@@ -57,7 +57,7 @@ impl Repo {
         for (name, package) in &config.packages {
             let mut version: Option<Version> = None;
             let mut dependencies = Vec::new();
-            for file in &package.versioned_files {
+            for file in &package.versioning.files {
                 let (file, regex) = (file.path(), file.regex());
                 let content =
                     fs::read_to_string(root.join(file)).map_err(|e| format!("{file}: {e}"))?;
@@ -65,7 +65,7 @@ impl Repo {
                     (None, found) => version = found,
                     (Some(first), Some(other)) if *first != other => warnings.push(format!(
                         "{name}: {file} says {other}, {} says {first}; the next release aligns them",
-                        package.versioned_files[0].path()
+                        package.versioning.files[0].path()
                     )),
                     _ => {}
                 }

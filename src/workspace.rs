@@ -245,7 +245,7 @@ pub enum Finding {
 impl std::fmt::Display for Finding {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Unmanaged { name, path } => write!(f, "{name} ({path}) is publishable but not in verwalter.toml: add [packages.{name}] or list it under `ignore`"),
+            Self::Unmanaged { name, path } => write!(f, "{name} ({path}) is publishable but not in verwalter.toml: add [packages.{name}] or list it under [check] `ignore`"),
             Self::Missing { name, path } => write!(f, "{name} is in verwalter.toml but {path} has none of its versioned files: remove it or fix `path`"),
         }
     }
@@ -256,6 +256,7 @@ impl std::fmt::Display for Finding {
 pub fn check(root: &Path, config: &Config) -> Vec<Finding> {
     let ignored = |m: &Member| {
         config
+            .check
             .ignore
             .iter()
             .any(|pat| matches(pat, &m.name) || matches(pat, &m.path))
@@ -280,7 +281,8 @@ pub fn check(root: &Path, config: &Config) -> Vec<Finding> {
     }
     for (name, p) in &config.packages {
         let present = root.join(&p.path).is_dir()
-            && p.versioned_files
+            && p.versioning
+                .files
                 .iter()
                 .any(|f| root.join(f.path()).is_file());
         if !present {
@@ -437,7 +439,7 @@ mod tests {
             "[package]\nname = \"e\"\nversion = \"0.1.0\"\n",
         );
         let config = Config::parse(
-            "ignore = [\"examples/*\", \"b\"]\n[packages.a]\npath = \"crates/a\"\nversioned_files = [\"Cargo.toml\"]\nchangelog = \"CHANGELOG.md\"\n[packages.c]\npath = \"crates/c\"\nversioned_files = [\"Cargo.toml\"]\nchangelog = \"x\"\n[packages.gone]\npath = \"crates/gone\"\nversioned_files = [\"Cargo.toml\"]\nchangelog = \"x\"\n",
+            "[check]\nignore = [\"examples/*\", \"b\"]\n[packages.a]\npath = \"crates/a\"\nversioning.files = [\"Cargo.toml\"]\nversioning.changelog = \"CHANGELOG.md\"\n[packages.c]\npath = \"crates/c\"\nversioning.files = [\"Cargo.toml\"]\nversioning.changelog = \"x\"\n[packages.gone]\npath = \"crates/gone\"\nversioning.files = [\"Cargo.toml\"]\nversioning.changelog = \"x\"\n",
         )
         .unwrap();
         let f = check(&t.0, &config);
@@ -449,7 +451,7 @@ mod tests {
             }],
             "b and examples/* are ignored; a and the private c are fine"
         );
-        let open = Config::parse("[packages.a]\npath = \"crates/a\"\nversioned_files = [\"Cargo.toml\"]\nchangelog = \"x\"\n").unwrap();
+        let open = Config::parse("[packages.a]\npath = \"crates/a\"\nversioning.files = [\"Cargo.toml\"]\nversioning.changelog = \"x\"\n").unwrap();
         let unmanaged: Vec<String> = check(&t.0, &open)
             .iter()
             .filter_map(|f| {

@@ -89,9 +89,9 @@ pub fn evaluate(
                 .unwrap_or(BumpLevel::Patch),
         })
         .collect();
-    let status = if head_branch.starts_with(&config.release_branch_prefix) {
+    let status = if head_branch.starts_with(&config.release.branch_prefix) {
         Status::ReleasePullRequest
-    } else if labels.iter().any(|l| l == &config.exempt_label) {
+    } else if labels.iter().any(|l| l == &config.check.exempt_label) {
         Status::Exempt
     } else if affected.iter().all(|a| covered.contains(a)) {
         Status::Passed
@@ -148,7 +148,11 @@ pub fn plan_also(
         return Ok(());
     }
     let (packages, _) = crate::repo::Repo::load_packages(root, config)?;
-    let planned = crate::plan::plan(&packages, changesets, config.dependent_bump_level);
+    let planned = crate::plan::plan(
+        &packages,
+        changesets,
+        config.versioning.dependent_bump_level,
+    );
     also_released(check, &planned);
     Ok(())
 }
@@ -195,7 +199,7 @@ pub fn api_check(
             .max()
             .unwrap_or(BumpLevel::Patch);
         let package = &config.packages[name];
-        let file = &package.versioned_files[0];
+        let file = &package.versioning.files[0];
         let content = fs::read_to_string(root.join(file.path()))
             .map_err(|e| format!("{}: {e}", file.path()))?;
         let version = handler::read_version(file.path(), file.regex(), &content)?;
@@ -421,7 +425,7 @@ pub fn comment(
         "\n[**Create a changeset for the missing packages**]({link}) (prefilled with `patch`; edit the bump levels as needed), \
          or run `verwalter changeset --level <patch|minor|major>` on the branch.\n\n\
          If this change needs no release, add the `{}` label.\n",
-        config.exempt_label
+        config.check.exempt_label
     ));
     out
 }
@@ -570,13 +574,13 @@ mod tests {
     const CONFIG: &str = r#"
 [packages.livekit-protocol]
 path = "livekit-protocol"
-versioned_files = ["Cargo.toml"]
-changelog = "CHANGELOG.md"
+versioning.files = ["Cargo.toml"]
+versioning.changelog = "CHANGELOG.md"
 
 [packages.livekit-api]
 path = "livekit-api"
-versioned_files = ["Cargo.toml"]
-changelog = "CHANGELOG.md"
+versioning.files = ["Cargo.toml"]
+versioning.changelog = "CHANGELOG.md"
 "#;
 
     fn s(v: &[&str]) -> Vec<String> {
@@ -732,7 +736,7 @@ changelog = "CHANGELOG.md"
         ];
         packages[0].fixed_with = vec!["ffi".into()];
         packages[1].fixed_with = vec!["core".into()];
-        let config = Config::parse("[packages.core]\npath = \"core\"\nversioned_files = [\"Cargo.toml\"]\nchangelog = \"c\"\n[packages.ffi]\npath = \"ffi\"\nversioned_files = [\"Cargo.toml\"]\nchangelog = \"c\"\n[packages.client]\npath = \"client\"\nversioned_files = [\"Cargo.toml\"]\nchangelog = \"c\"\n").unwrap();
+        let config = Config::parse("[packages.core]\npath = \"core\"\nversioning.files = [\"Cargo.toml\"]\nversioning.changelog = \"c\"\n[packages.ffi]\npath = \"ffi\"\nversioning.files = [\"Cargo.toml\"]\nversioning.changelog = \"c\"\n[packages.client]\npath = \"client\"\nversioning.files = [\"Cargo.toml\"]\nversioning.changelog = \"c\"\n").unwrap();
         let cs = [Changeset::parse(".changeset/a.md", "---\ncore: minor\n---\na\n").unwrap()];
         let mut c = evaluate(
             &config,
@@ -757,7 +761,7 @@ changelog = "CHANGELOG.md"
 
     #[test]
     fn single_package_repo_path_dot_matches_everything() {
-        let config = Config::parse("[packages.x]\npath = \".\"\nversioned_files = [\"package.json\"]\nchangelog = \"CHANGELOG.md\"\n").unwrap();
+        let config = Config::parse("[packages.x]\npath = \".\"\nversioning.files = [\"package.json\"]\nversioning.changelog = \"CHANGELOG.md\"\n").unwrap();
         let c = evaluate(&config, "feat", &[], &s(&["src/index.ts"]), &[]);
         assert_eq!(c.missing(), ["x"]);
         let c = evaluate(&config, "feat", &[], &s(&[".changeset/y.md"]), &[]);

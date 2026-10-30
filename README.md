@@ -18,24 +18,26 @@ The behaviour is specified in [specs/versioning.allium](specs/versioning.allium)
 **1. Describe the packages** in `verwalter.toml` at the repository root.
 The first versioned file of a package carries its version. Dependencies
 between packages are read from the manifests. Every package is tagged
-and gets a GitHub release unless `release` says otherwise.
+and gets a GitHub release unless `release.mode` says otherwise.
 
 ```toml
+[versioning]
+files = ["Cargo.toml"]             # for every package; a package can set its own
+
 [publish]
 registry = "crates"                # none | crates | npm | pypi | pubdev | custom
 
 [packages.livekit-protocol]
 path = "livekit-protocol"
-versioned_files = ["Cargo.toml"]
 
 [packages.livekit-api]
 path = "livekit-api"
-versioned_files = ["Cargo.toml"]
 ```
 
-Files are relative to `path`, and the changelog is `CHANGELOG.md` in the
-package unless set, or `false` for none. A single package uses `path = "."`. A version in another text file takes
-a regex: `{ path = "version.go", regex = 'Version = "(?<version>[^"]+)"' }`.
+Files are relative to each package's `path`, and the changelog is
+`CHANGELOG.md` in the package unless `changelog` says otherwise, or `false`
+for none. A single package uses `path = "."`. A version in another text
+file takes a regex: `{ path = "version.go", regex = 'Version = "(?<version>[^"]+)"' }`.
 
 **2. Copy the workflows** from [examples/workflows](examples/workflows):
 

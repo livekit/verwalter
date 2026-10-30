@@ -50,7 +50,7 @@ pub fn status(repo: &Repo, remote: &str, gh: Gh) -> Result<Vec<PackageStatus>, E
         "--state",
         "open",
         "--label",
-        &repo.config.release_label,
+        &repo.config.release.label,
         "--limit",
         "200",
         "--json",
@@ -62,7 +62,7 @@ pub fn status(repo: &Repo, remote: &str, gh: Gh) -> Result<Vec<PackageStatus>, E
     let planned = plan(
         &repo.packages,
         &repo.changesets,
-        repo.config.dependent_bump_level,
+        repo.config.versioning.dependent_bump_level,
     );
 
     let mut out = Vec::new();
@@ -77,7 +77,7 @@ pub fn status(repo: &Repo, remote: &str, gh: Gh) -> Result<Vec<PackageStatus>, E
             (false, true) => "remote",
             (false, false) => "missing",
         };
-        let (release_state, assets) = if package.release != ReleaseMode::TagAndRelease {
+        let (release_state, assets) = if package.release.mode != ReleaseMode::TagAndRelease {
             ("not wanted".to_string(), 0)
         } else if !local && !on_remote {
             ("none".to_string(), 0)
@@ -110,7 +110,7 @@ pub fn status(repo: &Repo, remote: &str, gh: Gh) -> Result<Vec<PackageStatus>, E
             .find(|pr| pr.head == prerelease::branch_name(repo, &repo.config.base_branch))
             .map(|pr| pr.number);
 
-        let next_step = if package.release == ReleaseMode::None {
+        let next_step = if package.release.mode == ReleaseMode::None {
             match next_version.as_deref() {
                 Some(v) => format!("release PR for {v}: verwalter pr"),
                 None => "up to date".to_string(),

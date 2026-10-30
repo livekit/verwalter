@@ -113,7 +113,7 @@ mod tests {
 
     fn config(top: &str, extra: &str) -> Config {
         Config::parse(&format!(
-            "{top}\n[packages.x]\npath = \"x\"\nversioned_files = [\"Cargo.toml\"]\nchangelog = \"CHANGELOG.md\"\n{extra}\n"
+            "{top}\n[packages.x]\npath = \"x\"\nversioning.files = [\"Cargo.toml\"]\nversioning.changelog = \"CHANGELOG.md\"\n{extra}\n"
         ))
         .unwrap()
     }
@@ -123,7 +123,7 @@ mod tests {
         let v: Version = "1.6.0-rc.1".parse().unwrap();
         assert_eq!(version_url(&config("", ""), "x", &v), None);
         assert_eq!(
-            version_url(&config("", "registry = \"crates\""), "x", &v).unwrap(),
+            version_url(&config("", "publish.registry = \"crates\""), "x", &v).unwrap(),
             "https://crates.io/api/v1/crates/x/1.6.0-rc.1"
         );
         // The default registry applies to a package without one.
@@ -132,14 +132,14 @@ mod tests {
             "https://registry.npmjs.org/x/1.6.0-rc.1"
         );
         assert_eq!(
-            version_url(&config("", "registry = \"pypi\""), "x", &v).unwrap(),
+            version_url(&config("", "publish.registry = \"pypi\""), "x", &v).unwrap(),
             "https://pypi.org/pypi/x/1.6.0rc1/json"
         );
         assert_eq!(
             version_url(
                 &config(
                     "",
-                    "registry = \"custom\"\nexists_url = \"https://r/{name}/{version}/\""
+                    "publish.registry = \"custom\"\npublish.exists_url = \"https://r/{name}/{version}/\""
                 ),
                 "x",
                 &v
@@ -148,7 +148,7 @@ mod tests {
             "https://r/x/1.6.0-rc.1/"
         );
         assert_eq!(
-            package_url(&config("", "registry = \"pubdev\""), "x").unwrap(),
+            package_url(&config("", "publish.registry = \"pubdev\""), "x").unwrap(),
             "https://pub.dev/api/packages/x"
         );
     }
@@ -157,7 +157,7 @@ mod tests {
     #[test]
     fn publish_command_resolution() {
         let c = config(
-            "[publish]\nregistry = \"crates\"\npublish = \"cargo publish --no-verify\"",
+            "[publish]\nregistry = \"crates\"\ncommand = \"cargo publish --no-verify\"",
             "",
         );
         assert_eq!(
@@ -166,15 +166,15 @@ mod tests {
         );
         // Another registry does not inherit the default command.
         let c = config(
-            "[publish]\nregistry = \"crates\"\npublish = \"cargo publish --no-verify\"",
-            "registry = \"npm\"",
+            "[publish]\nregistry = \"crates\"\ncommand = \"cargo publish --no-verify\"",
+            "publish.registry = \"npm\"",
         );
         assert_eq!(
             c.publish_command("x", false, false).as_deref(),
             Some("npm publish --provenance --access public")
         );
         // A pnpm workspace takes pnpm, which resolves `workspace:` ranges.
-        let c = config("", "registry = \"npm\"");
+        let c = config("", "publish.registry = \"npm\"");
         assert_eq!(
             c.publish_command("x", true, false).as_deref(),
             Some("pnpm publish --provenance --access public --no-git-checks")
@@ -185,7 +185,7 @@ mod tests {
             Some("pnpm publish --provenance --access public --no-git-checks --tag next")
         );
         assert_eq!(
-            config("", "registry = \"npm\"")
+            config("", "publish.registry = \"npm\"")
                 .publish_command("x", false, true)
                 .as_deref(),
             Some("npm publish --provenance --access public --tag next")
@@ -193,7 +193,7 @@ mod tests {
         // The package's own wins.
         let c = config(
             "[publish]\nregistry = \"npm\"",
-            "publish = \"pnpm publish --no-git-checks\"",
+            "publish.command = \"pnpm publish --no-git-checks\"",
         );
         assert_eq!(
             c.publish_command("x", false, false).as_deref(),
@@ -202,7 +202,7 @@ mod tests {
         // Nothing applies.
         assert_eq!(config("", "").publish_command("x", false, false), None);
         assert_eq!(
-            config("", "registry = \"custom\"").publish_command("x", false, false),
+            config("", "publish.registry = \"custom\"").publish_command("x", false, false),
             None
         );
     }

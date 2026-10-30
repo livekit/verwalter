@@ -62,11 +62,11 @@ jobs:
         with:
           command: release
           # Attached to the GitHub release when it is created. Leave out
-          # for packages with `draft = true`, whose assets are built later.
+          # for packages with `release.draft = true`, whose assets are built later.
           args: --asset dist/artifact.txt ${{ inputs.package && format('--package {0}', inputs.package) || '' }}
 
   # `publish` runs each package's publish command from verwalter.toml
-  # (`[publish]` defaults, `registry` and `publish` per package) for the
+  # (`[publish]` defaults, `publish.registry` and `publish.command` per package) for the
   # packages this run released, dependencies first, independent packages
   # in parallel. A failure blocks the transitive dependents and nothing
   # else. A version the registry already has is skipped, so a re-run of
@@ -89,7 +89,7 @@ jobs:
           path: dist
       # Set up the registry tooling the commands need: setup-node with
       # registry-url for npm provenance, cargo login, twine, ...
-      # For packages with `draft = true`, the command also uploads the
+      # For packages with `release.draft = true`, the command also uploads the
       # assets built here and publishes the GitHub release:
       #   gh release upload "$VERWALTER_TAG" dist/* --clobber
       #   gh release edit "$VERWALTER_TAG" --draft=false

@@ -18,7 +18,7 @@ use crate::{
 
 /// The rc branch, named after the target like the release PR: `release/main-rc`.
 pub fn branch_name(repo: &Repo, target: &str) -> String {
-    format!("{}{target}-rc", repo.config.release_branch_prefix)
+    format!("{}{target}-rc", repo.config.release.branch_prefix)
 }
 
 /// Versions of `package` that have a release tag.
@@ -71,7 +71,12 @@ pub fn plan(repo: &Repo) -> Result<Vec<PlannedRelease>, Error> {
         for m in &members {
             released.extend(released_versions(repo, &m.name)?);
         }
-        let to = next_prerelease_version(base, &released, level, &repo.config.prerelease_label);
+        let to = next_prerelease_version(
+            base,
+            &released,
+            level,
+            &repo.config.versioning.prerelease_label,
+        );
         for m in &members {
             out.push(PlannedRelease {
                 package: m.name.clone(),
@@ -185,7 +190,7 @@ pub fn open(
         target,
         &title,
         &body,
-        &repo.config.release_label,
+        &repo.config.release.label,
     )?;
     Ok((releases, pr))
 }

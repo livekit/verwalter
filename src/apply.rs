@@ -60,7 +60,7 @@ pub fn apply(
         };
 
     // Own version. A lock file holds it under the package's own entry.
-    for file in &package.versioned_files {
+    for file in &package.versioning.files {
         rewrite(
             file.path(),
             file.regex(),
@@ -68,7 +68,7 @@ pub fn apply(
         )?;
     }
     // Pins: repo-level pin files, then every dependent's manifests.
-    for file in &config.pin_files {
+    for file in &config.versioning.pin_files {
         rewrite(file, None, Some(name))?;
     }
     let dependents = packages.iter().filter(|p| {
@@ -76,14 +76,19 @@ pub fn apply(
     });
     for dependent in dependents {
         if let Some(d) = config.packages.get(&dependent.name) {
-            for file in d.versioned_files.iter().filter(|f| !is_lock_file(f.path())) {
+            for file in d
+                .versioning
+                .files
+                .iter()
+                .filter(|f| !is_lock_file(f.path()))
+            {
                 rewrite(file.path(), file.regex(), Some(name))?;
             }
         }
     }
 
     // Changelog, unless the package keeps none.
-    if let Some(changelog) = &package.changelog {
+    if let Some(changelog) = &package.versioning.changelog {
         let path = root.join(changelog);
         let before = fs::read_to_string(&path).unwrap_or_else(|_| "# Changelog\n".to_string());
         let after = insert_entry(&before, &render_entry(release, changesets, plan));
@@ -187,17 +192,18 @@ mod tests {
     use crate::plan::plan;
 
     const CONFIG: &str = r#"
+[versioning]
 pin_files = ["Cargo.toml", "Cargo.lock"]
 
 [packages.livekit-protocol]
 path = "livekit-protocol"
-versioned_files = ["Cargo.toml"]
-changelog = "CHANGELOG.md"
+versioning.files = ["Cargo.toml"]
+versioning.changelog = "CHANGELOG.md"
 
 [packages.livekit-api]
 path = "livekit-api"
-versioned_files = ["Cargo.toml"]
-changelog = "CHANGELOG.md"
+versioning.files = ["Cargo.toml"]
+versioning.changelog = "CHANGELOG.md"
 "#;
 
     struct Repo(PathBuf);

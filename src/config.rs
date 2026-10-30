@@ -1,5 +1,8 @@
 //! Spec: config block and the per-package fields of entity Package.
 //! Loaded from `verwalter.toml` at the repository root.
+//!
+//! The tables group the keys by concept. A package overrides a table key
+//! with a dotted key of the same name: `release.draft = true`.
 
 use std::collections::BTreeMap;
 
@@ -48,30 +51,77 @@ impl VersionedFile {
 #[serde(deny_unknown_fields)]
 pub struct Package {
     pub path: String,
-    /// Relative to `path`. `Config::parse` makes them repo-relative.
-    pub versioned_files: Vec<VersionedFile>,
-    /// Relative to `path`. Default: `CHANGELOG.md` in the package.
+    /// Overrides `[versioning]`.
+    #[serde(default)]
+    pub versioning: PackageVersioning,
+    /// Overrides `[release]`.
+    #[serde(default)]
+    pub release: PackageRelease,
+    /// Overrides `[publish]`.
+    #[serde(default)]
+    pub publish: PackagePublish,
+    /// Overrides `[check]`.
+    #[serde(default)]
+    pub check: PackageCheck,
+}
+
+/// The package keys of `[versioning]`. `Config::parse` fills in the
+/// defaults and makes the paths repo-relative.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+#[serde(default, deny_unknown_fields)]
+pub struct PackageVersioning {
+    /// Relative to the package's `path`. The first file carries the version.
+    pub files: Vec<VersionedFile>,
+    /// Relative to the package's `path`. Default: `CHANGELOG.md`.
     /// `changelog = false` keeps no changelog: the release notes are
     /// empty, and a version without a tag is released as is, because
     /// there is no entry to tell a hand edit from a release.
-    #[serde(default = "default_changelog", deserialize_with = "changelog_or_off")]
+    #[serde(deserialize_with = "changelog_or_off")]
     pub changelog: Option<String>,
-    /// Default: "v{version}" with one package, "{package}-v{version}" otherwise.
-    pub tag_template: Option<String>,
-    #[serde(default)]
-    pub release: ReleaseMode,
-    #[serde(default)]
+}
+
+impl Default for PackageVersioning {
+    fn default() -> Self {
+        Self {
+            files: Vec::new(),
+            changelog: Some("CHANGELOG.md".into()),
+        }
+    }
+}
+
+/// The package keys of `[release]`. `Config::parse` fills in the defaults.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Default)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+#[serde(default, deny_unknown_fields)]
+pub struct PackageRelease {
+    /// Tag name with `{package}` and `{version}`. Default: "v{version}"
+    /// with one package, "{package}-v{version}" otherwise.
+    pub tag: Option<String>,
+    pub mode: ReleaseMode,
     pub draft: bool,
-    /// Where the package is published. Default: `[publish].registry`.
+}
+
+/// The package keys of `[publish]`. Unlike the other tables, these hold
+/// the package's own values only: whether the default command applies
+/// depends on whether the package is on the default registry.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Default)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+#[serde(default, deny_unknown_fields)]
+pub struct PackagePublish {
     pub registry: Option<crate::registry::Registry>,
-    /// For `registry = "custom"`: a URL with `{name}` and `{version}` that
-    /// answers 200 when the version exists and 404 when it does not.
     pub exists_url: Option<String>,
-    /// Shell command that publishes this package, run in `path`. Default:
-    /// `[publish].publish` when on the default registry, else the built-in
-    /// command for the registry.
-    pub publish: Option<String>,
-    /// Spec: Package.api_command. Overrides `[check].api` for this package.
+    /// Run in the package's `path`. Default: `[publish].command` when on
+    /// the default registry, else the built-in command for the registry.
+    pub command: Option<String>,
+}
+
+/// The package keys of `[check]`, the package's own values only.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Default)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+#[serde(default, deny_unknown_fields)]
+pub struct PackageCheck {
+    /// Spec: Package.api_command.
     pub api: Option<String>,
 }
 
@@ -81,80 +131,152 @@ pub struct Package {
 pub struct Config {
     #[serde(default = "default_base_branch")]
     pub base_branch: String,
-    #[serde(default = "default_exempt_label")]
-    pub exempt_label: String,
-    #[serde(default = "default_release_branch_prefix")]
-    pub release_branch_prefix: String,
-    #[serde(default = "default_release_label")]
-    pub release_label: String,
-    #[serde(default = "default_dependent_bump_level")]
-    pub dependent_bump_level: BumpLevel,
-    /// Pre-release label: `1.6.0-rc.1`. Written as PEP 440 in pyproject.toml
-    /// (`1.6.0rc1`; `alpha` and `beta` become `a` and `b`).
-    #[serde(default = "default_prerelease_label")]
-    pub prerelease_label: String,
-    /// Files outside any package that pin every package's version: a
-    /// workspace Cargo.toml, Cargo.lock, package-lock.json. Each release
-    /// updates its own entry in each of them.
-    #[serde(default)]
-    pub pin_files: Vec<String>,
-    /// Workspace members the consistency check must not report, by package
-    /// name or path; a trailing `*` matches a prefix (`examples/*`).
-    #[serde(default)]
-    pub ignore: Vec<String>,
-    /// Groups of packages that always release at one shared version: the
-    /// highest version in the group, bumped by the highest level any
-    /// member needs. `fixed = [["play-core", "play-ffi"]]`.
-    #[serde(default)]
-    pub fixed: Vec<Vec<String>>,
-    /// Defaults for `verwalter publish`, overridden per package.
-    #[serde(default)]
-    pub publish: Publish,
     /// Spec: config.check.
     #[serde(default)]
     pub check: Check,
+    #[serde(default)]
+    pub versioning: Versioning,
+    #[serde(default)]
+    pub release: Release,
+    /// Spec: config.publish.
+    #[serde(default)]
+    pub publish: Publish,
     pub packages: BTreeMap<String, Package>,
 }
 
-/// Spec: config.publish. The default registry and command for every
-/// package; `registry` and `publish` on a package override them.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Default)]
+/// Spec: config.check. Contributor PRs: the changeset check, the API
+/// check and the workspace consistency check.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
-#[serde(deny_unknown_fields)]
+#[serde(default, deny_unknown_fields)]
+pub struct Check {
+    /// PRs carrying this label need no changeset.
+    pub exempt_label: String,
+    /// Workspace members the consistency check must not report, by package
+    /// name or path; a trailing `*` matches a prefix (`examples/*`).
+    pub ignore: Vec<String>,
+    /// Shell command, run in the package's path with the claimed level
+    /// and the baseline tag in the environment. It prints the lowest
+    /// change kind it can prove the diff needs, `major`, `minor` or
+    /// `patch`, or nothing when it cannot tell. A package's `check.api`
+    /// overrides it.
+    pub api: Option<String>,
+}
+
+impl Default for Check {
+    fn default() -> Self {
+        Self {
+            exempt_label: "internal".into(),
+            ignore: Vec::new(),
+            api: None,
+        }
+    }
+}
+
+/// What a release changes. `files` and `changelog` are defaults for
+/// every package, relative to each package's own `path`.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+#[serde(default, deny_unknown_fields)]
+pub struct Versioning {
+    /// Default for `versioning.files` of every package.
+    pub files: Option<Vec<VersionedFile>>,
+    /// Default for `versioning.changelog` of every package. `false` keeps
+    /// no changelog. Default: `CHANGELOG.md`.
+    #[serde(deserialize_with = "changelog_or_off")]
+    pub changelog: Option<String>,
+    /// Files outside any package that pin every package's version: a
+    /// workspace Cargo.toml, Cargo.lock, package-lock.json. Each release
+    /// updates its own entry in each of them.
+    pub pin_files: Vec<String>,
+    /// Groups of packages that always release at one shared version: the
+    /// highest version in the group, bumped by the highest level any
+    /// member needs. `fixed = [["play-core", "play-ffi"]]`.
+    pub fixed: Vec<Vec<String>>,
+    pub dependent_bump_level: BumpLevel,
+    /// Pre-release label: `1.6.0-rc.1`. Written as PEP 440 in pyproject.toml
+    /// (`1.6.0rc1`; `alpha` and `beta` become `a` and `b`).
+    pub prerelease_label: String,
+}
+
+impl Default for Versioning {
+    fn default() -> Self {
+        Self {
+            files: None,
+            changelog: None,
+            pin_files: Vec::new(),
+            fixed: Vec::new(),
+            dependent_bump_level: BumpLevel::Patch,
+            prerelease_label: "rc".into(),
+        }
+    }
+}
+
+/// The release PR, the tag and the GitHub release. `tag`, `mode` and
+/// `draft` are defaults for every package.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+#[serde(default, deny_unknown_fields)]
+pub struct Release {
+    /// Release PR branches start with this.
+    pub branch_prefix: String,
+    /// Release PRs carry this label.
+    pub label: String,
+    /// Default for `release.tag` of every package.
+    pub tag: Option<String>,
+    /// Default for `release.mode` of every package: none | tag |
+    /// tag_and_release. Default: tag_and_release.
+    pub mode: Option<ReleaseMode>,
+    /// Default for `release.draft` of every package. Default: false.
+    pub draft: Option<bool>,
+}
+
+impl Default for Release {
+    fn default() -> Self {
+        Self {
+            branch_prefix: "release/".into(),
+            label: "release".into(),
+            tag: None,
+            mode: None,
+            draft: None,
+        }
+    }
+}
+
+/// Spec: config.publish. The default registry and command for every
+/// package; `publish.registry` and `publish.command` on a package
+/// override them.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+#[serde(default, deny_unknown_fields)]
 pub struct Publish {
     /// Packages run at once, independent ones only.
-    #[serde(default = "default_jobs")]
     pub jobs: usize,
-    #[serde(default)]
     pub registry: crate::registry::Registry,
-    /// For `registry = "custom"`: a URL with `{name}` and `{version}`.
+    /// For `registry = "custom"`: a URL with `{name}` and `{version}` that
+    /// answers 200 when the version exists and 404 when it does not.
     pub exists_url: Option<String>,
     /// Shell command, run in the package's path. Applies to packages on
     /// the default registry; others take the built-in default for theirs.
-    pub publish: Option<String>,
+    pub command: Option<String>,
     /// One command, run once from the root, that publishes every package
-    /// on the default registry without a `publish` of its own: the
-    /// ecosystem's recursive publish (`pnpm -r publish`,
+    /// on the default registry without a `publish.command` of its own:
+    /// the ecosystem's recursive publish (`pnpm -r publish`,
     /// `cargo publish --workspace`). Order and skipping are its job; the
     /// tool checks the registry before and after and reports per package.
     pub workspace: Option<String>,
 }
 
-/// Spec: config.check. The API check that `verwalter check` runs for
-/// every affected package that a changeset covers.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Default)]
-#[cfg_attr(test, derive(schemars::JsonSchema))]
-#[serde(deny_unknown_fields)]
-pub struct Check {
-    /// Shell command, run in the package's path with the claimed level
-    /// and the baseline tag in the environment. It prints the lowest
-    /// change kind it can prove the diff needs, `major`, `minor` or
-    /// `patch`, or nothing when it cannot tell.
-    pub api: Option<String>,
-}
-
-fn default_changelog() -> Option<String> {
-    Some("CHANGELOG.md".into())
+impl Default for Publish {
+    fn default() -> Self {
+        Self {
+            jobs: 4,
+            registry: Default::default(),
+            exists_url: None,
+            command: None,
+            workspace: None,
+        }
+    }
 }
 
 /// `changelog = "path"` or `changelog = false`.
@@ -174,6 +296,40 @@ fn changelog_or_off<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<Str
     }
 }
 
+/// Spec: config.versioning and config.release. Their package keys are
+/// defaults: each one a package does not set is copied into it, before
+/// paths are made relative to the package.
+fn inherit(table: &mut toml::Table) {
+    let shared: [(&str, &[&str]); 2] = [
+        ("versioning", &["files", "changelog"]),
+        ("release", &["tag", "mode", "draft"]),
+    ];
+    for (section, keys) in shared {
+        let Some(defaults) = table.get(section).and_then(toml::Value::as_table).cloned() else {
+            continue;
+        };
+        let Some(packages) = table
+            .get_mut("packages")
+            .and_then(toml::Value::as_table_mut)
+        else {
+            return;
+        };
+        for package in packages.iter_mut().filter_map(|(_, p)| p.as_table_mut()) {
+            let own = package
+                .entry(section)
+                .or_insert_with(|| toml::Table::new().into());
+            let Some(own) = own.as_table_mut() else {
+                continue;
+            };
+            for key in keys {
+                if let Some(value) = defaults.get(*key) {
+                    own.entry(*key).or_insert_with(|| value.clone());
+                }
+            }
+        }
+    }
+}
+
 /// `file` relative to a package `path`, as a repo-relative path. `..`
 /// is resolved, so a sibling directory's file is `../sibling/file`.
 fn under(path: &str, file: &str) -> String {
@@ -190,46 +346,37 @@ fn under(path: &str, file: &str) -> String {
     parts.join("/")
 }
 
-fn default_jobs() -> usize {
-    4
-}
-
 fn default_base_branch() -> String {
     "main".into()
-}
-fn default_exempt_label() -> String {
-    "internal".into()
-}
-fn default_release_branch_prefix() -> String {
-    "release/".into()
-}
-fn default_release_label() -> String {
-    "release".into()
-}
-fn default_dependent_bump_level() -> BumpLevel {
-    BumpLevel::Patch
-}
-fn default_prerelease_label() -> String {
-    "rc".into()
 }
 
 impl Config {
     pub fn parse(text: &str) -> Result<Self, crate::Error> {
-        let mut config: Self = toml::from_str(text)?;
+        // The file as written first, so an error carries its line.
+        toml::from_str::<Self>(text)?;
+        let mut table: toml::Table = toml::from_str(text)?;
+        inherit(&mut table);
+        let mut config: Self = table.try_into()?;
         // Spec: Package.versioned_files and changelog_file are relative to
         // the package's path. Everything after this sees repo-relative paths.
-        for p in config.packages.values_mut() {
-            for f in &mut p.versioned_files {
+        for (name, p) in &mut config.packages {
+            if p.versioning.files.is_empty() {
+                return Err(format!(
+                    "{name}: no versioning.files, on the package or in [versioning]"
+                )
+                .into());
+            }
+            for f in &mut p.versioning.files {
                 match f {
                     VersionedFile::Path(path) | VersionedFile::Regex { path, .. } => {
                         *path = under(&p.path, path)
                     }
                 }
             }
-            p.changelog = p.changelog.as_deref().map(|c| under(&p.path, c));
+            p.versioning.changelog = p.versioning.changelog.as_deref().map(|c| under(&p.path, c));
         }
         let mut seen = std::collections::BTreeSet::new();
-        for group in &config.fixed {
+        for group in &config.versioning.fixed {
             for name in group {
                 if !config.packages.contains_key(name) {
                     return Err(format!("fixed group names unknown package {name}").into());
@@ -245,6 +392,7 @@ impl Config {
     /// Spec: Package.api_command. The package's own, else `[check].api`.
     pub fn api_command(&self, package: &str) -> Option<&str> {
         self.packages[package]
+            .check
             .api
             .as_deref()
             .or(self.check.api.as_deref())
@@ -253,6 +401,7 @@ impl Config {
     /// Spec: Package.registry. The package's own, else the default.
     pub fn registry_of(&self, package: &str) -> crate::registry::Registry {
         self.packages[package]
+            .publish
             .registry
             .unwrap_or(self.publish.registry)
     }
@@ -260,6 +409,7 @@ impl Config {
     /// Spec: Package.exists_url, with the same fallback.
     pub fn exists_url_of(&self, package: &str) -> Option<&str> {
         self.packages[package]
+            .publish
             .exists_url
             .as_deref()
             .or(self.publish.exists_url.as_deref())
@@ -267,9 +417,9 @@ impl Config {
 
     /// Spec: Package.in_workspace_publish. Covered by `[publish].workspace`.
     pub fn in_workspace_publish(&self, package: &str) -> bool {
-        let p = &self.packages[package];
+        let p = &self.packages[package].publish;
         self.publish.workspace.is_some()
-            && p.publish.is_none()
+            && p.command.is_none()
             && p.registry.is_none_or(|r| r == self.publish.registry)
     }
 
@@ -284,13 +434,13 @@ impl Config {
     /// the version alone.
     pub fn publish_command(&self, package: &str, pnpm: bool, prerelease: bool) -> Option<String> {
         use crate::registry::Registry;
-        let p = &self.packages[package];
-        if let Some(c) = &p.publish {
+        let p = &self.packages[package].publish;
+        if let Some(c) = &p.command {
             return Some(c.clone());
         }
         let registry = self.registry_of(package);
         if p.registry.is_none_or(|r| r == self.publish.registry) {
-            if let Some(c) = &self.publish.publish {
+            if let Some(c) = &self.publish.command {
                 return Some(c.clone());
             }
         }
@@ -317,7 +467,8 @@ impl Config {
 
     /// The other members of `package`'s fixed group, if it is in one.
     pub fn fixed_with(&self, package: &str) -> Vec<String> {
-        self.fixed
+        self.versioning
+            .fixed
             .iter()
             .find(|g| g.iter().any(|n| n == package))
             .map(|g| g.iter().filter(|n| *n != package).cloned().collect())
@@ -326,7 +477,7 @@ impl Config {
 
     /// Spec: Package.tag_template default.
     pub fn tag_template(&self, package: &str) -> String {
-        match self.packages[package].tag_template.clone() {
+        match self.packages[package].release.tag.clone() {
             Some(t) => t,
             None if self.packages.len() == 1 => "v{version}".into(),
             None => "{package}-v{version}".into(),
@@ -353,28 +504,26 @@ mod tests {
     use super::*;
 
     const MONO: &str = r#"
+[versioning]
 pin_files = ["Cargo.toml", "Cargo.lock"]
 
 [packages.livekit-protocol]
 path = "livekit-protocol"
-versioned_files = ["Cargo.toml", "Cargo.lock"]
-changelog = "CHANGELOG.md"
+versioning.files = ["Cargo.toml", "Cargo.lock"]
 
 [packages.livekit-ffi]
 path = "livekit-ffi"
-versioned_files = ["Cargo.toml", "livekit-ffi-node-bindings/package.json"]
-changelog = "CHANGELOG.md"
-tag_template = "ffi/v{version}"
-release = "tag_and_release"
-draft = true
+versioning.files = ["Cargo.toml", "livekit-ffi-node-bindings/package.json"]
+release.tag = "ffi/v{version}"
+release.mode = "tag_and_release"
+release.draft = true
 "#;
 
     const SINGLE: &str = r#"
 [packages.livekit-client]
 path = "."
-versioned_files = ["package.json"]
-changelog = "CHANGELOG.md"
-release = "tag"
+versioning.files = ["package.json"]
+release.mode = "tag"
 "#;
 
     // obligations: config-default.* (all four)
@@ -382,32 +531,41 @@ release = "tag"
     fn config_defaults() {
         let c = Config::parse(MONO).unwrap();
         assert_eq!(c.base_branch, "main");
-        assert_eq!(c.exempt_label, "internal");
-        assert_eq!(c.release_branch_prefix, "release/");
-        assert_eq!(c.release_label, "release");
-        assert_eq!(c.dependent_bump_level, BumpLevel::Patch);
-        assert_eq!(c.prerelease_label, "rc");
-        assert_eq!(c.pin_files, vec!["Cargo.toml", "Cargo.lock"]);
-        assert!(Config::parse(SINGLE).unwrap().pin_files.is_empty());
+        assert_eq!(c.check.exempt_label, "internal");
+        assert_eq!(c.release.branch_prefix, "release/");
+        assert_eq!(c.release.label, "release");
+        assert_eq!(c.versioning.dependent_bump_level, BumpLevel::Patch);
+        assert_eq!(c.versioning.prerelease_label, "rc");
+        assert_eq!(c.versioning.pin_files, vec!["Cargo.toml", "Cargo.lock"]);
+        assert_eq!(c.publish.jobs, 4);
+        assert!(Config::parse(SINGLE)
+            .unwrap()
+            .versioning
+            .pin_files
+            .is_empty());
     }
 
     #[test]
     fn config_overrides() {
         let c = Config::parse(&format!(
-            "base_branch = \"next\"\ndependent_bump_level = \"minor\"\n{MONO}"
+            "base_branch = \"next\"\n{}",
+            MONO.replace(
+                "[versioning]\n",
+                "[versioning]\ndependent_bump_level = \"minor\"\n"
+            )
         ))
         .unwrap();
         assert_eq!(c.base_branch, "next");
-        assert_eq!(c.dependent_bump_level, BumpLevel::Minor);
+        assert_eq!(c.versioning.dependent_bump_level, BumpLevel::Minor);
     }
 
     #[test]
     fn versioned_files_accept_paths_and_regex_entries() {
         let c = Config::parse(
-            "[packages.sdk]\npath = \".\"\nversioned_files = [\"pubspec.yaml\", { path = \"lib/src/livekit.dart\", regex = \"version = '(?<version>[^']+)'\" }]\nchangelog = \"CHANGELOG.md\"\n",
+            "[packages.sdk]\npath = \".\"\nversioning.files = [\"pubspec.yaml\", { path = \"lib/src/livekit.dart\", regex = \"version = '(?<version>[^']+)'\" }]\n",
         )
         .unwrap();
-        let files = &c.packages["sdk"].versioned_files;
+        let files = &c.packages["sdk"].versioning.files;
         assert_eq!((files[0].path(), files[0].regex()), ("pubspec.yaml", None));
         assert_eq!(
             (files[1].path(), files[1].regex()),
@@ -423,11 +581,55 @@ release = "tag"
     fn package_fields_and_defaults() {
         let c = Config::parse(MONO).unwrap();
         let protocol = &c.packages["livekit-protocol"];
-        assert_eq!(protocol.release, ReleaseMode::TagAndRelease);
-        assert!(!protocol.draft);
+        assert_eq!(protocol.release.mode, ReleaseMode::TagAndRelease);
+        assert!(!protocol.release.draft);
         let ffi = &c.packages["livekit-ffi"];
-        assert!(ffi.draft);
-        assert_eq!(ffi.versioned_files.len(), 2);
+        assert!(ffi.release.draft);
+        assert_eq!(ffi.versioning.files.len(), 2);
+    }
+
+    // Spec: config.versioning and config.release hold defaults for every
+    // package; a package's own dotted key wins.
+    #[test]
+    fn table_keys_are_package_defaults() {
+        let c = Config::parse(
+            r#"
+[versioning]
+files = ["Cargo.toml"]
+changelog = false
+
+[release]
+tag = "{package}/v{version}"
+mode = "tag"
+
+[packages.a]
+path = "crates/a"
+
+[packages.b]
+path = "crates/b"
+versioning.files = ["Cargo.toml", "node/package.json"]
+versioning.changelog = "CHANGES.md"
+release.mode = "tag_and_release"
+"#,
+        )
+        .unwrap();
+        let v: crate::Version = "1.0.0".parse().unwrap();
+        let a = &c.packages["a"];
+        assert_eq!(a.versioning.files[0].path(), "crates/a/Cargo.toml");
+        assert_eq!(a.versioning.changelog, None);
+        assert_eq!(a.release.mode, ReleaseMode::Tag);
+        assert_eq!(c.tag_for("a", &v), "a/v1.0.0");
+        let b = &c.packages["b"];
+        assert_eq!(b.versioning.files.len(), 2);
+        assert_eq!(
+            b.versioning.changelog.as_deref(),
+            Some("crates/b/CHANGES.md")
+        );
+        assert_eq!(b.release.mode, ReleaseMode::TagAndRelease);
+        assert_eq!(c.tag_for("b", &v), "b/v1.0.0");
+
+        let e = Config::parse("[packages.a]\npath = \"a\"\n").unwrap_err();
+        assert!(e.to_string().contains("no versioning.files"));
     }
 
     #[test]
@@ -457,24 +659,26 @@ release = "tag"
 
         let single = Config::parse(SINGLE).unwrap();
         assert_eq!(single.tag_for("livekit-client", &v), "v1.2.0");
-        assert_eq!(single.packages["livekit-client"].release, ReleaseMode::Tag);
+        assert_eq!(
+            single.packages["livekit-client"].release.mode,
+            ReleaseMode::Tag
+        );
     }
 
     #[test]
     fn fixed_groups_are_validated() {
-        let c = Config::parse(&format!(
-            "fixed = [[\"livekit-protocol\", \"livekit-ffi\"]]\n{MONO}"
-        ))
-        .unwrap();
+        let with = |fixed: &str| {
+            Config::parse(&MONO.replace(
+                "[versioning]\n",
+                &format!("[versioning]\nfixed = {fixed}\n"),
+            ))
+        };
+        let c = with("[[\"livekit-protocol\", \"livekit-ffi\"]]").unwrap();
         assert_eq!(c.fixed_with("livekit-ffi"), ["livekit-protocol"]);
         assert!(c.fixed_with("nobody").is_empty());
-        let e =
-            Config::parse(&format!("fixed = [[\"livekit-protocol\", \"x\"]]\n{MONO}")).unwrap_err();
+        let e = with("[[\"livekit-protocol\", \"x\"]]").unwrap_err();
         assert!(e.to_string().contains("unknown package x"));
-        let e = Config::parse(&format!(
-            "fixed = [[\"livekit-protocol\"], [\"livekit-protocol\"]]\n{MONO}"
-        ))
-        .unwrap_err();
+        let e = with("[[\"livekit-protocol\"], [\"livekit-protocol\"]]").unwrap_err();
         assert!(e.to_string().contains("two fixed groups"));
     }
 
@@ -482,6 +686,9 @@ release = "tag"
     fn unknown_keys_are_errors() {
         assert!(Config::parse(&format!("{MONO}\npublsh = \"cargo publish\"\n")).is_err());
         assert!(Config::parse(&format!("[publish]\njob = 2\n{MONO}\n")).is_err());
+        // A repo-wide key on a package, and a key of the old layout.
+        assert!(Config::parse(&format!("{MONO}\nversioning.pin_files = []\n")).is_err());
+        assert!(Config::parse(&format!("{MONO}\nversioned_files = []\n")).is_err());
     }
 
     /// The editor schema. An additive change updates v1.json in place. A
@@ -489,22 +696,25 @@ release = "tag"
     // Spec: Package.versioned_files and changelog_file are relative to path.
     #[test]
     fn files_are_relative_to_the_package_path() {
-        let c = Config::parse("[packages.a]\npath = \"crates/a\"\nversioned_files = [\"Cargo.toml\", { path = \"../bindings/package.json\", regex = \"v(?<version>.+)\" }]\n[packages.b]\npath = \".\"\nversioned_files = [\"package.json\"]\nchangelog = \"docs/CHANGES.md\"\n").unwrap();
+        let c = Config::parse("[packages.a]\npath = \"crates/a\"\nversioning.files = [\"Cargo.toml\", { path = \"../bindings/package.json\", regex = \"v(?<version>.+)\" }]\n[packages.b]\npath = \".\"\nversioning.files = [\"package.json\"]\nversioning.changelog = \"docs/CHANGES.md\"\n").unwrap();
         let a = &c.packages["a"];
-        assert_eq!(a.versioned_files[0].path(), "crates/a/Cargo.toml");
-        assert_eq!(a.versioned_files[1].path(), "crates/bindings/package.json");
-        assert_eq!(a.changelog.as_deref(), Some("crates/a/CHANGELOG.md"));
+        assert_eq!(a.versioning.files[0].path(), "crates/a/Cargo.toml");
+        assert_eq!(a.versioning.files[1].path(), "crates/bindings/package.json");
+        assert_eq!(
+            a.versioning.changelog.as_deref(),
+            Some("crates/a/CHANGELOG.md")
+        );
         let b = &c.packages["b"];
-        assert_eq!(b.versioned_files[0].path(), "package.json");
-        assert_eq!(b.changelog.as_deref(), Some("docs/CHANGES.md"));
+        assert_eq!(b.versioning.files[0].path(), "package.json");
+        assert_eq!(b.versioning.changelog.as_deref(), Some("docs/CHANGES.md"));
         // Opt out.
         let c = Config::parse(
-            "[packages.a]\npath = \"a\"\nversioned_files = [\"Cargo.toml\"]\nchangelog = false\n",
+            "[packages.a]\npath = \"a\"\nversioning.files = [\"Cargo.toml\"]\nversioning.changelog = false\n",
         )
         .unwrap();
-        assert_eq!(c.packages["a"].changelog, None);
+        assert_eq!(c.packages["a"].versioning.changelog, None);
         assert!(Config::parse(
-            "[packages.a]\npath = \"a\"\nversioned_files = [\"Cargo.toml\"]\nchangelog = true\n"
+            "[packages.a]\npath = \"a\"\nversioning.files = [\"Cargo.toml\"]\nversioning.changelog = true\n"
         )
         .is_err());
     }

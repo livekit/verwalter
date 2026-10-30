@@ -2,8 +2,8 @@
 
 verwalter never publishes. `verwalter publish` runs each package's publish
 command once per tagged package, dependencies first, and owns the order
-and the stop. The command comes from `verwalter.toml`: `publish` on the
-package, else `[publish].publish` for packages on the default registry,
+and the stop. The command comes from `verwalter.toml`: `publish.command` on the
+package, else `[publish].command` for packages on the default registry,
 else the built-in command for the registry. Before each run the tool asks
 the registry whether the version exists. If it does, the package is
 skipped and the command does not run. So the command only publishes, and
@@ -15,14 +15,14 @@ registries.
 ```toml
 [publish]
 registry = "crates"
-publish = "cargo publish --no-verify"
+command = "cargo publish --no-verify"
 
 [packages."@livekit/rtc-node"]
-registry = "npm"                                   # built-in: npm publish --provenance --access public, pnpm publish in a pnpm workspace
+publish.registry = "npm"                              # built-in: npm publish --provenance --access public, pnpm publish in a pnpm workspace
 
 [packages.livekit-rtc]
-registry = "pypi"
-publish = "python -m twine upload dist/livekit_rtc-*"
+publish.registry = "pypi"
+publish.command = "python -m twine upload dist/livekit_rtc-*"
 ```
 
 The command runs in the package's `path` and sees `VERWALTER_PACKAGE`,
@@ -30,7 +30,7 @@ The command runs in the package's `path` and sees `VERWALTER_PACKAGE`,
 `VERWALTER_PRERELEASE`, `VERWALTER_FIRST_RELEASE` and `VERWALTER_ROOT`.
 `{package}`, `{version}` and `{tag}` in the command are replaced. Anything
 longer than a line is a script the command points at:
-`publish = "scripts/publish-wheels.sh"`.
+`publish.command = "scripts/publish-wheels.sh"`.
 
 `VERWALTER_FIRST_RELEASE` is `true` when the registry has no version of
 the package at all. Trusted publishing cannot create a new package on
@@ -38,7 +38,7 @@ crates.io, npm or PyPI, so the first upload is done by hand. A command
 stops early with a clear message:
 
 ```toml
-publish = "[ \"$VERWALTER_FIRST_RELEASE\" != true ] || { echo 'first release: publish by hand' >&2; exit 1; }; cargo publish"
+publish.command = "[ \"$VERWALTER_FIRST_RELEASE\" != true ] || { echo 'first release: publish by hand' >&2; exit 1; }; cargo publish"
 ```
 
 ## Workspaces
@@ -58,7 +58,7 @@ workspace = "pnpm -r publish --access public --no-git-checks"
 The command runs once from the root. verwalter asks the registry before
 it runs, and skips it if every package is there. Afterwards it asks per
 package and reports each one as published or failed. A package with its
-own `publish`, or on another registry, is published by the tool as
+own `publish.command`, or on another registry, is published by the tool as
 before and waits for the workspace packages it depends on.
 
 Without a `registry`, the existence check is the command's job. The

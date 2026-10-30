@@ -2,7 +2,5 @@
 # verwalter versions itself.
 [packages.verwalter]
 path = "."
-versioned_files = ["Cargo.toml", "Cargo.lock"]
-changelog = "CHANGELOG.md"
-release = "tag_and_release"
-draft = false                                  # release.yml builds first and attaches the binaries on creation
+versioning.files = ["Cargo.toml", "Cargo.lock"]
+release.draft = false                          # release.yml builds first and attaches the binaries on creation

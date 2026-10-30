@@ -1,6 +1,6 @@
 # Fails a contributor PR that changes a versioned package without a
 # changeset, with a comment that links to a prefilled changeset file.
-# The `internal` label (config: exempt_label) skips the check.
+# The `internal` label (config: [check] exempt_label) skips the check.
 # With `[check].api` in verwalter.toml, the same run checks the public
 # API of each covered package against its changeset level. The tool it
 # names must be installed first, and the baseline tag must be in the

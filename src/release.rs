@@ -116,7 +116,7 @@ fn release_one(
 ) -> Result<Option<Released>, Error> {
     let root = repo.root.as_path();
     let package = &repo.config.packages[name];
-    if package.release == ReleaseMode::None {
+    if package.release.mode == ReleaseMode::None {
         return Ok(None);
     }
     let dry_run = options.dry_run;
@@ -126,6 +126,7 @@ fn release_one(
     // or on the remote, counts as done wherever it points.
     let mut fresh = false;
     let changelog = package
+        .versioning
         .changelog
         .as_ref()
         .map(|c| fs::read_to_string(root.join(c)).unwrap_or_default())
@@ -136,7 +137,7 @@ fn release_one(
         // package without a changelog has nothing to tell them apart.
         let heading = format!("## {version}");
         if options.package.is_none()
-            && package.changelog.is_some()
+            && package.versioning.changelog.is_some()
             && !changelog.lines().any(|l| l.trim() == heading)
         {
             eprintln!(
@@ -169,7 +170,7 @@ fn release_one(
 
     // Spec: CreateGitHubRelease / ResumeTaggedReleasesWithoutGitHubRelease,
     // then WorkflowPublishesRelease for drafts.
-    if package.release == ReleaseMode::TagAndRelease {
+    if package.release.mode == ReleaseMode::TagAndRelease {
         match view(gh, &tag) {
             Some(existing) => {
                 let mut draft = existing.draft;
@@ -203,7 +204,7 @@ fn release_one(
                     "--verify-tag",
                 ];
                 args.extend(options.assets.iter().map(String::as_str));
-                let draft = package.draft && !options.publish;
+                let draft = package.release.draft && !options.publish;
                 if draft {
                     args.push("--draft");
                 }
