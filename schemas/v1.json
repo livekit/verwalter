@@ -282,6 +282,11 @@
           "const": "none"
         },
         {
+          "description": "The Go module proxy, proxy.golang.org. Asking it for a version makes\nit fetch the tag, so the check is the publish: no command runs.\nPublic modules only.",
+          "type": "string",
+          "const": "goproxy"
+        },
+        {
           "description": "`exists_url` with `{name}` and `{version}` placeholders: Maven, a\nprivate npm registry, anything with a URL that answers 200 or 404.",
           "type": "string",
           "const": "custom"
@@ -342,7 +347,7 @@
       "type": "object",
       "properties": {
         "tag": {
-          "description": "Tag name with `{package}` and `{version}`. Default: \"v{version}\"\nwith one package, \"{package}-v{version}\" otherwise.",
+          "description": "Tag name with `{package}` and `{version}`. Default: \"v{version}\"\nwith one package, \"{package}-v{version}\" otherwise, and the Go\nmodule tag \"<path>/v{version}\" when the first file is a go.mod.",
           "type": [
             "string",
             "null"

@@ -115,7 +115,10 @@ fn candidates(
         }
         let released = crate::prerelease::released_versions(repo, &p.name)?;
         let npm_tag = crate::version::npm_dist_tag(&p.version, &released);
-        let command = repo.config.publish_command(&p.name, in_pnpm_workspace(&repo.root, &cfg.path), npm_tag.as_deref()).ok_or_else(|| {
+        // Spec: Registry goproxy. The proxy request is the publish: an
+        // empty command marks it.
+        let goproxy = repo.config.registry_of(&p.name) == registry::Registry::Goproxy;
+        let command = repo.config.publish_command(&p.name, in_pnpm_workspace(&repo.root, &cfg.path), npm_tag.as_deref()).or_else(|| goproxy.then(String::new)).ok_or_else(|| {
             format!("{}: no publish command: set `publish.registry` or `publish.command` on the package, or in `[publish]`", p.name)
         })?;
         out.insert(
@@ -309,6 +312,25 @@ pub fn run(repo: &Repo, options: &Options, http: Http) -> Result<Vec<Outcome>, E
                         resolved = true;
                         continue;
                     }
+                } else if c.command.is_empty() {
+                    // goproxy: asking for the version makes the proxy fetch it.
+                    let url = registry::version_url(&repo.config, name, &c.version);
+                    let (status, reason) = if options.dry_run {
+                        ("dry-run", format!("GET {}", url.unwrap_or_default()))
+                    } else {
+                        match registry::exists(url, http)? {
+                            Some(true) => ("published", String::new()),
+                            _ => (
+                                "failed",
+                                "the Go module proxy does not serve the tag yet: re-run publish"
+                                    .to_string(),
+                            ),
+                        }
+                    };
+                    done.insert(name.clone(), status);
+                    outcomes.push(outcome(name, &c.version, &c.tag, status, reason));
+                    resolved = true;
+                    continue;
                 } else {
                     let on_registry = registry::exists(
                         registry::version_url(&repo.config, name, &c.version),

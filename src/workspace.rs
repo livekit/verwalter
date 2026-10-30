@@ -3,8 +3,8 @@
 //! A publishable member that is not configured would silently escape
 //! versioning, so `check` reports the difference. A private member may
 //! still be configured: livekit-ffi has `publish = false` and ships as
-//! binaries on its GitHub release. Cargo, pnpm and uv workspaces are
-//! understood.
+//! binaries on its GitHub release. Cargo, pnpm, uv and Go workspaces
+//! are understood.
 
 use std::{
     fs,
@@ -28,6 +28,7 @@ pub fn members(root: &Path) -> Vec<Member> {
     out.extend(cargo_members(root));
     out.extend(pnpm_members(root));
     out.extend(uv_members(root));
+    out.extend(go_members(root));
     out.sort_by(|a, b| a.path.cmp(&b.path));
     out.dedup();
     out
@@ -187,6 +188,65 @@ fn uv_members(root: &Path) -> Vec<Member> {
                 name: project.get("name")?.as_str()?.to_string(),
                 path: relative(root, &dir),
                 private,
+            })
+        })
+        .collect()
+}
+
+/// The modules a root `go.work` uses. A module is named by its directory,
+/// which is also its tag prefix; the module at the root by the last
+/// element of its module path. Go has no private flag.
+fn go_members(root: &Path) -> Vec<Member> {
+    let Ok(work) = fs::read_to_string(root.join("go.work")) else {
+        return Vec::new();
+    };
+    let mut dirs = Vec::new();
+    let mut in_block = false;
+    for line in work.lines() {
+        let line = line.split("//").next().unwrap_or_default().trim();
+        if in_block {
+            if line == ")" {
+                in_block = false;
+            } else if !line.is_empty() {
+                dirs.push(line.trim_matches('"').to_string());
+            }
+        } else if let Some(rest) = line.strip_prefix("use") {
+            match rest.trim() {
+                "(" => in_block = true,
+                dir if !dir.is_empty() && rest.starts_with([' ', '\t']) => {
+                    dirs.push(dir.trim_matches('"').to_string())
+                }
+                _ => {}
+            }
+        }
+    }
+    dirs.into_iter()
+        .filter_map(|dir| {
+            let path = match dir.trim_start_matches("./").trim_end_matches('/') {
+                "" | "." => ".".to_string(),
+                p => p.to_string(),
+            };
+            let (module, _) = crate::handler::go_module(
+                &fs::read_to_string(root.join(&path).join("go.mod")).ok()?,
+            )?;
+            let name = if path == "." {
+                let mut parts = module.rsplit('/');
+                let last = parts.next().unwrap_or_default();
+                let is_major =
+                    last.len() > 1 && last.starts_with('v') && last[1..].parse::<u64>().is_ok();
+                if is_major {
+                    parts.next().unwrap_or(last)
+                } else {
+                    last
+                }
+                .to_string()
+            } else {
+                path.clone()
+            };
+            Some(Member {
+                name,
+                path,
+                private: false,
             })
         })
         .collect()
@@ -507,5 +567,66 @@ mod tests {
             "[versioning]\nfiles = [\"package.json\"]\n[packages.rtc]\nrelease.draft = true\n"
         )
         .is_err());
+    }
+
+    #[test]
+    fn go_work_members_are_named_by_directory() {
+        let t = tmp("go-work");
+        write(
+            &t.0,
+            "go.work",
+            "go 1.24\n\nuse .\n\nuse (\n\t./sdk/auth // the auth module\n\t\"./sdk/core\"\n\t./missing\n)\n",
+        );
+        write(&t.0, "go.mod", "module github.com/acme/sdk/v2 // v2.1.0\n");
+        write(&t.0, "sdk/auth/go.mod", "module github.com/acme/sdk/auth\n");
+        write(&t.0, "sdk/core/go.mod", "module github.com/acme/sdk/core\n");
+        let v: Vec<(String, String)> = members(&t.0)
+            .into_iter()
+            .map(|m| (m.name, m.path))
+            .collect();
+        assert_eq!(
+            v,
+            [
+                ("sdk".into(), ".".into()),
+                ("sdk/auth".into(), "sdk/auth".into()),
+                ("sdk/core".into(), "sdk/core".into())
+            ]
+        );
+        // `members` takes them like any workspace, with the Go tag default.
+        write(
+            &t.0,
+            "verwalter.toml",
+            "[workspace]\nmembers = [\"sdk/*\"]\n[versioning]\nfiles = [\"go.mod\"]\n",
+        );
+        let c = Config::load(&t.0, &t.0.join("verwalter.toml")).unwrap();
+        assert_eq!(
+            c.packages.keys().collect::<Vec<_>>(),
+            ["sdk/auth", "sdk/core"]
+        );
+        let v: crate::Version = "1.2.0".parse().unwrap();
+        assert_eq!(c.tag_for("sdk/auth", &v), "sdk/auth/v1.2.0");
+        assert_eq!(c.dependency_key("sdk/core"), "github.com/acme/sdk/core");
+    }
+
+    #[test]
+    fn go_modules_in_major_version_directories_are_refused() {
+        let t = tmp("go-major-dir");
+        write(&t.0, "go.mod", "module github.com/acme/app // v1.0.0\n");
+        write(
+            &t.0,
+            "lib/v2/go.mod",
+            "module github.com/acme/lib/v2 // v2.0.0\n",
+        );
+        let load = |extra: &str| {
+            write(&t.0, "verwalter.toml", &format!("[versioning]\nfiles = [\"go.mod\"]\n[packages.app]\npath = \".\"\n[packages.lib]\npath = \"lib/v2\"\n{extra}"));
+            Config::load(&t.0, &t.0.join("verwalter.toml"))
+        };
+        assert!(load("")
+            .unwrap_err()
+            .to_string()
+            .contains("major-version directory"));
+        let c = load("release.tag = \"lib/v{version}\"\n").unwrap();
+        let v: crate::Version = "1.2.0".parse().unwrap();
+        assert_eq!(c.tag_for("app", &v), "v1.2.0", "the root module of several");
     }
 }
