@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.22.2
+
+### Patch Changes
+
+- An agent skill in `skills/verwalter` teaches a coding agent to operate verwalter and to adopt it in a repository that releases with changesets/action, knope, release-plz, a custom bump script or hand-pushed tags. - [#35](https://github.com/livekit/verwalter/pull/35) ([@lukasIO](https://github.com/lukasIO))
+
 ## 0.22.1
 
 ### Patch Changes
