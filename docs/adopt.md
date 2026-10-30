@@ -75,7 +75,7 @@ path = "."
 versioning.files = [{ path = "version.go", regex = 'Version = "(?<version>[^"]+)"' }]
 ```
 
-The defaults are listed at the end of
+Every default is marked `# default` in
 [configuration.md](configuration.md).
 
 Keys that are written when the repository needs them:
@@ -107,8 +107,7 @@ Keys that are written when the repository needs them:
 Dependencies between packages are read from the manifests, never
 configured. The changelog continues: an existing `CHANGELOG.md` is
 kept, new entries go on top. Every key is in
-[configuration.md](configuration.md), with the defaults in one table at
-its end.
+[configuration.md](configuration.md).
 
 ### Step 3. Validate locally before any workflow runs
 
@@ -206,7 +205,7 @@ plus the registry it publishes to.
 Every section ends in the same place: `verwalter plan` and
 `verwalter status` run clean, and the four workflows are in
 `.github/workflows`. Each example configuration is the smallest one for
-its case. The defaults it leaves out are at the end of
+its case. The defaults it leaves out are marked `# default` in
 [configuration.md](configuration.md). Publish commands per registry are
 in [examples/publish/README.md](../examples/publish/README.md).
 

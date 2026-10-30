@@ -12,22 +12,19 @@ the publish commands, dependencies first. Nothing is remembered between
 runs: every command reads the tags, releases and PRs and finishes what is
 missing, so a failed step is re-run, not repaired by hand.
 
-The documentation in the verwalter repository is the reference. This
-skill says how to use the tool and which document answers which
-question. Read the document before you guess.
+The documentation in the verwalter repository is the reference, and
+the "Going deeper" table of its
+[README](https://github.com/livekit/verwalter/blob/main/README.md) says
+what each document answers. Read the document before you guess. The
+ones this skill sends you to:
 
-| Document | Read it for |
-|---|---|
-| [README.md](https://github.com/livekit/verwalter/blob/main/README.md) | The quick start for a repository that releases nothing yet, and the feature list. |
-| [docs/commands.md](https://github.com/livekit/verwalter/blob/main/docs/commands.md) | Every command and flag. |
-| [docs/configuration.md](https://github.com/livekit/verwalter/blob/main/docs/configuration.md) | Every key of `verwalter.toml`, the versioned file formats and regex entries, and the defaults in one table at the end. |
-| [docs/action.md](https://github.com/livekit/verwalter/blob/main/docs/action.md) | The action inputs and outputs, the four workflows, repository settings, maintenance branches. |
-| [docs/features.md](https://github.com/livekit/verwalter/blob/main/docs/features.md) | What the tool catches, what to do when a step fails, what is not covered. |
-| [docs/adopt.md](https://github.com/livekit/verwalter/blob/main/docs/adopt.md) | Adopting verwalter in a repository that releases another way: the procedure, the mapping per tool, the traps. |
-| [examples/workflows](https://github.com/livekit/verwalter/tree/main/examples/workflows) | The four workflows to copy. |
-| [examples/publish/README.md](https://github.com/livekit/verwalter/blob/main/examples/publish/README.md) | Publish commands and existence checks per registry. |
-| [docs/api-check.md](https://github.com/livekit/verwalter/blob/main/docs/api-check.md) | Checking the changeset level with cargo-semver-checks, griffe or break-check. |
-| [docs/release-pitfalls.md](https://github.com/livekit/verwalter/blob/main/docs/release-pitfalls.md) | The release history of the LiveKit SDKs and how each pitfall maps to the tool. |
+- [docs/commands.md](https://github.com/livekit/verwalter/blob/main/docs/commands.md)
+- [docs/configuration.md](https://github.com/livekit/verwalter/blob/main/docs/configuration.md), with every default marked `# default`
+- [docs/action.md](https://github.com/livekit/verwalter/blob/main/docs/action.md)
+- [docs/features.md](https://github.com/livekit/verwalter/blob/main/docs/features.md)
+- [docs/adopt.md](https://github.com/livekit/verwalter/blob/main/docs/adopt.md)
+- [docs/api-check.md](https://github.com/livekit/verwalter/blob/main/docs/api-check.md)
+- [examples/workflows](https://github.com/livekit/verwalter/tree/main/examples/workflows) and [examples/publish/README.md](https://github.com/livekit/verwalter/blob/main/examples/publish/README.md)
 
 In a checkout of the verwalter repository, the files are under `docs/`
 and `examples/`. Elsewhere, fetch the raw file from GitHub.
