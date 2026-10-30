@@ -34,7 +34,7 @@ pub type Http<'a> = &'a (dyn Fn(&str) -> Result<u16, Error> + Sync);
 /// names itself.
 pub fn curl(url: &str) -> Result<u16, Error> {
     let agent = format!(
-        "verwalter/{} (https://github.com/lukasIO/verwalter)",
+        "verwalter/{} (https://github.com/livekit/verwalter)",
         env!("CARGO_PKG_VERSION")
     );
     let out = Command::new("curl")
