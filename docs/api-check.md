@@ -42,7 +42,7 @@ needs the baseline tag:
   with:
     fetch-depth: 0
 - uses: taiki-e/install-action@cargo-semver-checks
-- uses: lukasIO/verwalter@v0.19.0
+- uses: livekit/verwalter@v0.22.0
   with:
     command: check
 ```

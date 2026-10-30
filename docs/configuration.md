@@ -7,7 +7,7 @@ Even Better TOML extension for VS Code, Zed, Helix, Neovim), put this line
 first in the file:
 
 ```toml
-#:schema https://raw.githubusercontent.com/lukasIO/verwalter/main/schemas/v1.json
+#:schema https://raw.githubusercontent.com/livekit/verwalter/main/schemas/v1.json
 ```
 
 The schema is generated from the config types by a test, which fails when
