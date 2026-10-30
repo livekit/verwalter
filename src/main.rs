@@ -12,6 +12,7 @@ use verwalter::{
 
 /// Changeset-based versioning for single packages and monorepos.
 #[derive(Parser)]
+#[command(version)]
 struct Cli {
     /// The repository checkout
     #[arg(global = true, default_value = ".")]
