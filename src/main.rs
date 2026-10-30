@@ -76,7 +76,7 @@ enum Command {
         #[arg(long)]
         publish: bool,
         /// Delete this tag's GitHub release and the tag
-        #[arg(long, value_name = "TAG")]
+        #[arg(long, value_name = "TAG", conflicts_with_all = ["assets", "package", "publish"])]
         abandon: Option<String>,
     },
     /// Changeset and API check for a contributor PR, with comment
