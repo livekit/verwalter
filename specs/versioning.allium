@@ -19,6 +19,7 @@
 ------------------------------------------------------------
 
 external entity Repository {
+    -- config.git.base_branch.
     base_branch: String
 }
 
@@ -307,26 +308,30 @@ config {
     -- defaults for every package; their paths are relative to each
     -- package's own path. Keys that apply to the whole repository are
     -- not accepted on a package.
-    -- Directories of packages, `*` as a whole path component
+    -- The branch release PRs target and pre-releases start from.
+    git: { base_branch: String = "main" }
+    -- Which packages exist, and the files outside them. Every path here
+    -- is relative to the repository root, and no package overrides these
+    -- keys.
+    -- members: directories of packages, `*` as a whole path component
     -- (`packages/*`). Each publishable Cargo, pnpm or uv workspace member
     -- in them is a Package, named by its manifest; a private one is not.
     -- A directory that is no workspace member is a config error unless
     -- excluded. A configured package of the same name overrides the found
     -- one and needs no path. Empty: the configured packages are all.
-    members: Set<String> = {}
-    -- Workspace members that are no package, by name or path; a trailing
-    -- `*` matches a prefix (`examples/*`). members skips them, and the
-    -- consistency check does not report them.
-    exclude: Set<String> = {}
+    -- exclude: workspace members that are no package, by name or path; a
+    -- trailing `*` matches a prefix (`examples/*`). members skips them,
+    -- and the consistency check does not report them.
+    -- pin_files: files outside any package that pin every package's
+    -- version: a workspace Cargo.toml, Cargo.lock, package-lock.json.
+    -- Every release, pre-releases included, updates its own entry in each
+    -- of them, so the workspace still resolves.
+    workspace: { members: Set<String> = {}, exclude: Set<String> = {}, pin_files: Set<String> = {} }
     -- Contributor PRs. A PR carrying exempt_label needs no changeset. api
     -- is the default api_command, overridden per package.
     check: { exempt_label: String = "internal", api: String? }
     -- What a release changes. files and changelog are the defaults for
     -- Package.versioned_files and changelog_file.
-    -- pin_files: files outside any package that pin every package's
-    -- version: a workspace Cargo.toml, Cargo.lock, package-lock.json.
-    -- Every release, pre-releases included, updates its own entry in
-    -- each of them, so the workspace still resolves.
     -- fixed: groups of packages that always release at one shared
     -- version: the highest version in the group, bumped by the highest
     -- level any member needs. A member with no changeset of its own comes
@@ -340,7 +345,7 @@ config {
     -- prerelease_label: label of on-demand pre-releases: 1.6.0-rc.1.
     -- Spelling per file format is the handler's job (PEP 440 in
     -- pyproject.toml: 1.6.0rc1).
-    versioning: { files: Set<VersionedFile>?, changelog: String? = "CHANGELOG.md", pin_files: Set<String> = {}, fixed: Set<Set<Package>> = {}, dependent_bump_level: BumpLevel = patch, prerelease_label: String = "rc" }
+    versioning: { files: Set<VersionedFile>?, changelog: String? = "CHANGELOG.md", fixed: Set<Set<Package>> = {}, dependent_bump_level: BumpLevel = patch, prerelease_label: String = "rc" }
     -- The release PR, the tag and the GitHub release. Release PRs are
     -- recognisable by branch prefix and label so that repo workflows can
     -- gate them (approvals, registry checks). Gating itself is a workflow
@@ -370,12 +375,12 @@ config {
 -- The check fails on a mismatch, every other command warns, so a new
 -- package cannot escape versioning. is_configured(m): a configured
 -- Package has the member's name, compared normalised (PEP 503:
--- `play_py_ext` is `play-py-ext`). excluded(m) matches config.exclude
+-- `play_py_ext` is `play-py-ext`). excluded(m) matches config.workspace.exclude
 -- against the name or the path.
 rule WorkspaceConsistencyCheck {
     when: ContributorPullRequestUpdated(pr)
     let members = workspace_members(pr.repository)
-    requires: members.all(m => m.private or is_configured(m) or excluded(m, config.exclude))
+    requires: members.all(m => m.private or is_configured(m) or excluded(m, config.workspace.exclude))
     requires: filter(Packages, p => p.repository = pr.repository).all(p => package_present(p))
     ensures: WorkspaceConsistent(repository: pr.repository)
 }
@@ -504,7 +509,7 @@ rule CloseReleasePullRequestWithNothingPending {
 -- dependent never ships against a dependency whose change is only on
 -- the branch. Dependents without a changeset are not pre-released and
 -- not pinned to the rc. The rc branch bumps the carried packages' own
--- files, their entries in config.versioning.pin_files, the pins among them and
+-- files, their entries in config.workspace.pin_files, the pins among them and
 -- their changelogs.
 rule MaintainerRequestsPreRelease {
     when: MaintainerRequestsPreRelease(maintainer, repository, target_branch)

@@ -21,12 +21,21 @@ The keys are grouped in tables by concept. A key of `[versioning]` or
 `[release]` that a package can carry is the default for every package. A
 package overrides it with a dotted key of the same name, for example
 `release.draft = true`. Keys that apply to the whole repository, such as
-`pin_files` or `jobs`, are not accepted on a package.
+`fixed` or `jobs`, are not accepted on a package. A package overrides no
+key of `[git]` or `[workspace]`.
+
+Paths in `[workspace]` (`members`, `exclude`, `pin_files`) are relative to
+the repository root. Paths in `[versioning]` or a package (`files`,
+`changelog`) are relative to each package's `path`.
 
 ```toml
-base_branch = "main"            # default
-members = ["packages/*"]        # optional: every publishable workspace member there is a package
+[git]
+base_branch = "main"             # default
+
+[workspace]                      # which packages exist; paths relative to the root
+members = ["packages/*"]         # optional: every publishable workspace member there is a package
 exclude = ["examples/*", "packages/internal-tools"]  # by name or path: not a package, not reported
+pin_files = ["Cargo.toml", "Cargo.lock"]   # workspace manifest and lock files; each release updates its own entry
 
 [check]                          # contributor PRs, for `verwalter check`
 exempt_label = "internal"       # default: PRs with this label need no changeset
@@ -35,7 +44,6 @@ api = "cargo semver-checks --baseline-rev $VERWALTER_BASELINE_TAG 2>&1 | tee /de
 [versioning]                     # what a release changes
 files = ["Cargo.toml"]           # default for every package; relative to its path
 changelog = "CHANGELOG.md"       # default; relative to the package's path. `false` keeps no changelog
-pin_files = ["Cargo.toml", "Cargo.lock"]   # workspace manifest and lock files
 fixed = [["livekit-ffi", "livekit-ffi-node"]]  # groups that release at one shared version
 dependent_bump_level = "patch"   # default
 prerelease_label = "rc"          # 1.6.0-rc.1, written as 1.6.0rc1 in pyproject.toml

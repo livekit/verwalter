@@ -264,7 +264,10 @@ pub fn check(root: &Path, config: &Config) -> Vec<Finding> {
             .any(|k| normalise_py(k) == normalise_py(name))
     };
     for m in &members {
-        if !m.private && !configured(&m.name) && !excluded(&config.exclude, &m.name, &m.path) {
+        if !m.private
+            && !configured(&m.name)
+            && !excluded(&config.workspace.exclude, &m.name, &m.path)
+        {
             findings.push(Finding::Unmanaged {
                 name: m.name.clone(),
                 path: m.path.clone(),
@@ -439,7 +442,7 @@ mod tests {
             "[package]\nname = \"e\"\nversion = \"0.1.0\"\n",
         );
         let config = Config::parse(
-            "exclude = [\"examples/*\", \"b\"]\n[packages.a]\npath = \"crates/a\"\nversioning.files = [\"Cargo.toml\"]\nversioning.changelog = \"CHANGELOG.md\"\n[packages.c]\npath = \"crates/c\"\nversioning.files = [\"Cargo.toml\"]\nversioning.changelog = \"x\"\n[packages.gone]\npath = \"crates/gone\"\nversioning.files = [\"Cargo.toml\"]\nversioning.changelog = \"x\"\n",
+            "[workspace]\nexclude = [\"examples/*\", \"b\"]\n[packages.a]\npath = \"crates/a\"\nversioning.files = [\"Cargo.toml\"]\nversioning.changelog = \"CHANGELOG.md\"\n[packages.c]\npath = \"crates/c\"\nversioning.files = [\"Cargo.toml\"]\nversioning.changelog = \"x\"\n[packages.gone]\npath = \"crates/gone\"\nversioning.files = [\"Cargo.toml\"]\nversioning.changelog = \"x\"\n",
         )
         .unwrap();
         let f = check(&t.0, &config);
@@ -465,7 +468,7 @@ mod tests {
         assert_eq!(unmanaged, ["b", "e"]);
     }
 
-    // Spec: config.members and config.exclude.
+    // Spec: config.workspace.members and exclude.
     #[test]
     fn members_find_publishable_packages() {
         let t = tmp("members");
@@ -485,7 +488,7 @@ mod tests {
             r#"{"name": "x", "version": "1.0.0"}"#,
         );
         let load = |exclude: &str| {
-            write(&t.0, "verwalter.toml", &format!("members = [\"packages/*\"]\nexclude = {exclude}\n[versioning]\nfiles = [\"package.json\"]\n[packages.rtc]\nrelease.draft = true\n[packages.x]\npath = \"tools/x\"\n"));
+            write(&t.0, "verwalter.toml", &format!("[workspace]\nmembers = [\"packages/*\"]\nexclude = {exclude}\n[versioning]\nfiles = [\"package.json\"]\n[packages.rtc]\nrelease.draft = true\n[packages.x]\npath = \"tools/x\"\n"));
             Config::load(&t.0, &t.0.join("verwalter.toml"))
         };
         let e = load("[\"skip\"]").unwrap_err();

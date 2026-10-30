@@ -131,19 +131,12 @@ pub struct PackageCheck {
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 pub struct Config {
-    #[serde(default = "default_base_branch")]
-    pub base_branch: String,
-    /// Spec: config.members. Directories of packages, `*` as a whole path
-    /// component (`packages/*`). Each publishable Cargo, pnpm or uv
-    /// workspace member there is a package, named by its manifest. A
-    /// `[packages]` entry of that name overrides it and needs no `path`.
+    /// Spec: config.git.
     #[serde(default)]
-    pub members: Vec<String>,
-    /// Spec: config.exclude. Workspace members that are no package, by
-    /// name or path; a trailing `*` matches a prefix (`examples/*`).
-    /// `members` skips them, and the consistency check does not report them.
+    pub git: Git,
+    /// Spec: config.workspace.
     #[serde(default)]
-    pub exclude: Vec<String>,
+    pub workspace: Workspace,
     /// Spec: config.check.
     #[serde(default)]
     pub check: Check,
@@ -156,6 +149,45 @@ pub struct Config {
     pub publish: Publish,
     #[serde(default)]
     pub packages: BTreeMap<String, Package>,
+}
+
+/// Spec: config.git.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+#[serde(default, deny_unknown_fields)]
+pub struct Git {
+    /// Release PRs target this branch, and pre-releases start from it.
+    pub base_branch: String,
+}
+
+impl Default for Git {
+    fn default() -> Self {
+        Self {
+            base_branch: "main".into(),
+        }
+    }
+}
+
+/// Spec: config.workspace. Which packages exist, and the files outside
+/// them. Every path here is relative to the repository root, and no
+/// package overrides these keys.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Default)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+#[serde(default, deny_unknown_fields)]
+pub struct Workspace {
+    /// Directories of packages, `*` as a whole path component
+    /// (`packages/*`). Each publishable Cargo, pnpm or uv workspace member
+    /// there is a package, named by its manifest. A `[packages]` entry of
+    /// that name overrides it and needs no `path`.
+    pub members: Vec<String>,
+    /// Workspace members that are no package, by name or path; a trailing
+    /// `*` matches a prefix (`examples/*`). `members` skips them, and the
+    /// consistency check does not report them.
+    pub exclude: Vec<String>,
+    /// Files outside any package that pin every package's version: a
+    /// workspace Cargo.toml, Cargo.lock, package-lock.json. Each release
+    /// updates its own entry in each of them.
+    pub pin_files: Vec<String>,
 }
 
 /// Spec: config.check. Contributor PRs: the changeset check and the API
@@ -195,10 +227,6 @@ pub struct Versioning {
     /// no changelog. Default: `CHANGELOG.md`.
     #[serde(deserialize_with = "changelog_or_off")]
     pub changelog: Option<String>,
-    /// Files outside any package that pin every package's version: a
-    /// workspace Cargo.toml, Cargo.lock, package-lock.json. Each release
-    /// updates its own entry in each of them.
-    pub pin_files: Vec<String>,
     /// Groups of packages that always release at one shared version: the
     /// highest version in the group, bumped by the highest level any
     /// member needs. `fixed = [["play-core", "play-ffi"]]`.
@@ -214,7 +242,6 @@ impl Default for Versioning {
         Self {
             files: None,
             changelog: None,
-            pin_files: Vec::new(),
             fixed: Vec::new(),
             dependent_bump_level: BumpLevel::Patch,
             prerelease_label: "rc".into(),
@@ -340,15 +367,17 @@ fn inherit(table: &mut toml::Table) {
     }
 }
 
-/// Spec: config.members. Each publishable workspace member in a
-/// `members` directory gets a package entry, or the `path` of the entry
+/// Spec: config.workspace.members. Each publishable workspace member in
+/// a `members` directory gets a package entry, or the `path` of the entry
 /// of its name.
 fn discover(
     table: &mut toml::Table,
     root: &Path,
-    members: &[String],
-    exclude: &[String],
+    workspace: &Workspace,
 ) -> Result<(), crate::Error> {
+    let Workspace {
+        members, exclude, ..
+    } = workspace;
     if members.is_empty() {
         return Ok(());
     }
@@ -402,10 +431,6 @@ fn under(path: &str, file: &str) -> String {
     parts.join("/")
 }
 
-fn default_base_branch() -> String {
-    "main".into()
-}
-
 impl Config {
     /// Reads the config at `path` and finds the `members` packages under
     /// `root`.
@@ -424,7 +449,7 @@ impl Config {
         let written = toml::from_str::<Self>(text)?;
         let mut table: toml::Table = toml::from_str(text)?;
         if let Some(root) = root {
-            discover(&mut table, root, &written.members, &written.exclude)?;
+            discover(&mut table, root, &written.workspace)?;
         }
         inherit(&mut table);
         let mut config: Self = table.try_into()?;
@@ -581,7 +606,7 @@ mod tests {
     use super::*;
 
     const MONO: &str = r#"
-[versioning]
+[workspace]
 pin_files = ["Cargo.toml", "Cargo.lock"]
 
 [packages.livekit-protocol]
@@ -607,17 +632,17 @@ release.mode = "tag"
     #[test]
     fn config_defaults() {
         let c = Config::parse(MONO).unwrap();
-        assert_eq!(c.base_branch, "main");
+        assert_eq!(c.git.base_branch, "main");
         assert_eq!(c.check.exempt_label, "internal");
         assert_eq!(c.release.branch_prefix, "release/");
         assert_eq!(c.release.label, "release");
         assert_eq!(c.versioning.dependent_bump_level, BumpLevel::Patch);
         assert_eq!(c.versioning.prerelease_label, "rc");
-        assert_eq!(c.versioning.pin_files, vec!["Cargo.toml", "Cargo.lock"]);
+        assert_eq!(c.workspace.pin_files, vec!["Cargo.toml", "Cargo.lock"]);
         assert_eq!(c.publish.jobs, 4);
         assert!(Config::parse(SINGLE)
             .unwrap()
-            .versioning
+            .workspace
             .pin_files
             .is_empty());
     }
@@ -625,14 +650,10 @@ release.mode = "tag"
     #[test]
     fn config_overrides() {
         let c = Config::parse(&format!(
-            "base_branch = \"next\"\n{}",
-            MONO.replace(
-                "[versioning]\n",
-                "[versioning]\ndependent_bump_level = \"minor\"\n"
-            )
+            "{MONO}\n[git]\nbase_branch = \"next\"\n[versioning]\ndependent_bump_level = \"minor\"\n"
         ))
         .unwrap();
-        assert_eq!(c.base_branch, "next");
+        assert_eq!(c.git.base_branch, "next");
         assert_eq!(c.versioning.dependent_bump_level, BumpLevel::Minor);
     }
 
@@ -744,12 +765,7 @@ release.mode = "tag_and_release"
 
     #[test]
     fn fixed_groups_are_validated() {
-        let with = |fixed: &str| {
-            Config::parse(&MONO.replace(
-                "[versioning]\n",
-                &format!("[versioning]\nfixed = {fixed}\n"),
-            ))
-        };
+        let with = |fixed: &str| Config::parse(&format!("{MONO}\n[versioning]\nfixed = {fixed}\n"));
         let c = with("[[\"livekit-protocol\", \"livekit-ffi\"]]").unwrap();
         assert_eq!(c.fixed_with("livekit-ffi"), ["livekit-protocol"]);
         assert!(c.fixed_with("nobody").is_empty());
@@ -764,7 +780,8 @@ release.mode = "tag_and_release"
         assert!(Config::parse(&format!("{MONO}\npublsh = \"cargo publish\"\n")).is_err());
         assert!(Config::parse(&format!("[publish]\njob = 2\n{MONO}\n")).is_err());
         // A repo-wide key on a package, and a key of the old layout.
-        assert!(Config::parse(&format!("{MONO}\nversioning.pin_files = []\n")).is_err());
+        assert!(Config::parse(&format!("{MONO}\nversioning.fixed = []\n")).is_err());
+        assert!(Config::parse(&format!("{MONO}\nworkspace.pin_files = []\n")).is_err());
         assert!(Config::parse(&format!("{MONO}\nversioned_files = []\n")).is_err());
     }
 

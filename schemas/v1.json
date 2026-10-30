@@ -3,25 +3,13 @@
   "title": "Config",
   "type": "object",
   "properties": {
-    "base_branch": {
-      "type": "string",
-      "default": "main"
+    "git": {
+      "description": "Spec: config.git.",
+      "$ref": "#/$defs/Git"
     },
-    "members": {
-      "description": "Spec: config.members. Directories of packages, `*` as a whole path\ncomponent (`packages/*`). Each publishable Cargo, pnpm or uv\nworkspace member there is a package, named by its manifest. A\n`[packages]` entry of that name overrides it and needs no `path`.",
-      "type": "array",
-      "items": {
-        "type": "string"
-      },
-      "default": []
-    },
-    "exclude": {
-      "description": "Spec: config.exclude. Workspace members that are no package, by\nname or path; a trailing `*` matches a prefix (`examples/*`).\n`members` skips them, and the consistency check does not report them.",
-      "type": "array",
-      "items": {
-        "type": "string"
-      },
-      "default": []
+    "workspace": {
+      "description": "Spec: config.workspace.",
+      "$ref": "#/$defs/Workspace"
     },
     "check": {
       "description": "Spec: config.check.",
@@ -46,6 +34,49 @@
   },
   "additionalProperties": false,
   "$defs": {
+    "Git": {
+      "description": "Spec: config.git.",
+      "type": "object",
+      "properties": {
+        "base_branch": {
+          "description": "Release PRs target this branch, and pre-releases start from it.",
+          "type": "string",
+          "default": "main"
+        }
+      },
+      "additionalProperties": false
+    },
+    "Workspace": {
+      "description": "Spec: config.workspace. Which packages exist, and the files outside\nthem. Every path here is relative to the repository root, and no\npackage overrides these keys.",
+      "type": "object",
+      "properties": {
+        "members": {
+          "description": "Directories of packages, `*` as a whole path component\n(`packages/*`). Each publishable Cargo, pnpm or uv workspace member\nthere is a package, named by its manifest. A `[packages]` entry of\nthat name overrides it and needs no `path`.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "exclude": {
+          "description": "Workspace members that are no package, by name or path; a trailing\n`*` matches a prefix (`examples/*`). `members` skips them, and the\nconsistency check does not report them.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "pin_files": {
+          "description": "Files outside any package that pin every package's version: a\nworkspace Cargo.toml, Cargo.lock, package-lock.json. Each release\nupdates its own entry in each of them.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        }
+      },
+      "additionalProperties": false
+    },
     "Check": {
       "description": "Spec: config.check. Contributor PRs: the changeset check and the API\ncheck.",
       "type": "object",
@@ -87,14 +118,6 @@
             "null"
           ],
           "default": null
-        },
-        "pin_files": {
-          "description": "Files outside any package that pin every package's version: a\nworkspace Cargo.toml, Cargo.lock, package-lock.json. Each release\nupdates its own entry in each of them.",
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "default": []
         },
         "fixed": {
           "description": "Groups of packages that always release at one shared version: the\nhighest version in the group, bumped by the highest level any\nmember needs. `fixed = [[\"play-core\", \"play-ffi\"]]`.",

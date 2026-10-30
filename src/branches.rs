@@ -11,7 +11,7 @@ use crate::{apply, git, plan::PlannedRelease, repo::Repo, Error};
 pub fn branch_name(repo: &Repo) -> String {
     format!(
         "{}{}",
-        repo.config.release.branch_prefix, repo.config.base_branch
+        repo.config.release.branch_prefix, repo.config.git.base_branch
     )
 }
 

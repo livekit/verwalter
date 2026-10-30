@@ -147,11 +147,11 @@ fn run() -> Result<(), Error> {
     match command.as_str() {
         "changeset" => {
             let base = base.unwrap_or_else(|| {
-                let remote_base = format!("{remote}/{}", repo.config.base_branch);
+                let remote_base = format!("{remote}/{}", repo.config.git.base_branch);
                 if verwalter::git::ref_exists(&repo.root, &remote_base) {
                     remote_base
                 } else {
-                    repo.config.base_branch.clone()
+                    repo.config.git.base_branch.clone()
                 }
             });
             match check::write_changeset(
@@ -174,15 +174,15 @@ fn run() -> Result<(), Error> {
             Ok(())
         }
         "branches" => {
-            let base = base.unwrap_or_else(|| repo.config.base_branch.clone());
+            let base = base.unwrap_or_else(|| repo.config.git.base_branch.clone());
             match branches::create(&repo, &releases, &base)? {
-                Some(b) => println!("{b}  on {}", repo.config.base_branch),
+                Some(b) => println!("{b}  on {}", repo.config.git.base_branch),
                 None => println!("nothing to release"),
             }
             Ok(())
         }
         "pr" => {
-            let base = base.unwrap_or_else(|| format!("{remote}/{}", repo.config.base_branch));
+            let base = base.unwrap_or_else(|| format!("{remote}/{}", repo.config.git.base_branch));
             github::attribute(&mut repo, &mut gh(&root, &remote, dry_run));
             let branch = branches::create(&repo, &releases, &base)?;
             let mut gh = gh(&repo.root, &remote, dry_run);
@@ -235,7 +235,7 @@ fn run() -> Result<(), Error> {
             Ok(())
         }
         "pre-release" => {
-            let target = target.unwrap_or_else(|| repo.config.base_branch.clone());
+            let target = target.unwrap_or_else(|| repo.config.git.base_branch.clone());
             github::attribute(&mut repo, &mut gh(&root, &remote, dry_run));
             let mut gh = gh(&repo.root, &remote, dry_run);
             let (releases, pr) = prerelease::open(&repo, &target, &remote, dry_run, &mut gh)

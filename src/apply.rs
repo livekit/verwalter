@@ -68,7 +68,7 @@ pub fn apply(
         )?;
     }
     // Pins: repo-level pin files, then every dependent's manifests.
-    for file in &config.versioning.pin_files {
+    for file in &config.workspace.pin_files {
         rewrite(file, None, Some(name))?;
     }
     let dependents = packages.iter().filter(|p| {
@@ -192,7 +192,7 @@ mod tests {
     use crate::plan::plan;
 
     const CONFIG: &str = r#"
-[versioning]
+[workspace]
 pin_files = ["Cargo.toml", "Cargo.lock"]
 
 [packages.livekit-protocol]

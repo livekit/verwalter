@@ -49,7 +49,7 @@ fn fixture(name: &str) -> Repo_ {
         &root,
         "verwalter.toml",
         r#"
-[versioning]
+[workspace]
 pin_files = ["Cargo.toml", "Cargo.lock"]
 
 [packages.livekit-protocol]
@@ -620,10 +620,7 @@ fn prerelease_of_a_fixed_group_member_covers_the_group() {
     write(
         root,
         "verwalter.toml",
-        &cfg.replace(
-            "[versioning]\n",
-            "[versioning]\nfixed = [[\"livekit-protocol\", \"livekit-api\"]]\n",
-        ),
+        &format!("{cfg}\n[versioning]\nfixed = [[\"livekit-protocol\", \"livekit-api\"]]\n"),
     );
     write(
         root,

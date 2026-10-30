@@ -199,7 +199,7 @@ pub fn sync(
             gh,
             existing,
             branch,
-            &repo.config.base_branch,
+            &repo.config.git.base_branch,
             &branches::title(plan),
             &body(plan, repo),
             label,
