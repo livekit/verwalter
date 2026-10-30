@@ -54,19 +54,28 @@ runs:
         VERSION: ${{ inputs.version }}
       run: |
         set -euo pipefail
-        if [ -z "$VERSION" ]; then
-          VERSION=$(grep -m1 '^version' "$GITHUB_ACTION_PATH/Cargo.toml" | cut -d'"' -f2)
-        fi
+        CHECKOUT=$(grep -m1 '^version' "$GITHUB_ACTION_PATH/Cargo.toml" | cut -d'"' -f2)
+        VERSION=${VERSION:-$CHECKOUT}
         case "$(uname -s)-$(uname -m)" in
           Linux-x86_64)  TARGET=x86_64-unknown-linux-gnu ;;
           Linux-aarch64) TARGET=aarch64-unknown-linux-gnu ;;
           Darwin-arm64)  TARGET=aarch64-apple-darwin ;;
-          *) echo "::error::unsupported runner $(uname -s)-$(uname -m)"; exit 1 ;;
+          *) TARGET="" ;;
         esac
         DIR="$RUNNER_TEMP/verwalter-$VERSION"
         if [ ! -x "$DIR/verwalter" ]; then
           mkdir -p "$DIR"
-          gh release download "v$VERSION" --repo livekit/verwalter --pattern "verwalter-$TARGET.tar.gz" --output - | tar -xz -C "$DIR"
+          # No release binary to download: build from the action's own
+          # checkout instead.
+          if [ -z "$TARGET" ] || ! gh release download "v$VERSION" --repo livekit/verwalter --pattern "verwalter-$TARGET.tar.gz" --output - | tar -xz -C "$DIR"; then
+            if [ "$VERSION" != "$CHECKOUT" ]; then
+              echo "::error::cannot download verwalter v$VERSION, and the action checkout is v$CHECKOUT to build from"
+              exit 1
+            fi
+            echo "::notice::building verwalter v$VERSION from the action checkout"
+            cargo build --release --locked --quiet --manifest-path "$GITHUB_ACTION_PATH/Cargo.toml" --target-dir "$RUNNER_TEMP/verwalter-target"
+            cp "$RUNNER_TEMP/verwalter-target/release/verwalter" "$DIR/"
+          fi
         fi
         echo "$DIR" >> "$GITHUB_PATH"
 
