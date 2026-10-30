@@ -19,6 +19,9 @@ struct Cli {
     /// Config file [default: <checkout>/verwalter.toml]
     #[arg(long, global = true)]
     config: Option<PathBuf>,
+    /// Git remote
+    #[arg(long, global = true, default_value = "origin")]
+    remote: String,
     /// Print every write instead of running it
     #[arg(long, global = true)]
     dry_run: bool,
@@ -30,11 +33,7 @@ struct Cli {
 #[derive(clap::Subcommand)]
 enum Command {
     /// Per package: version, tag, GitHub release, pending changesets, open PRs, next step
-    Status {
-        /// Git remote
-        #[arg(long, default_value = "origin")]
-        remote: String,
-    },
+    Status,
     /// Print the release plan: next versions, dependencies first
     Plan,
     /// Create the release branch locally
@@ -48,9 +47,6 @@ enum Command {
         /// Ref to branch from [default: <remote>/<base branch>]
         #[arg(long)]
         base: Option<String>,
-        /// Git remote
-        #[arg(long, default_value = "origin")]
-        remote: String,
     },
     /// Write a changeset for the packages the branch changes and no pending changeset covers
     Changeset {
@@ -66,9 +62,6 @@ enum Command {
         /// Changeset summary [default: the last commit subject]
         #[arg(long, allow_hyphen_values = true)]
         summary: Option<String>,
-        /// Git remote
-        #[arg(long, default_value = "origin")]
-        remote: String,
     },
     /// Tag and create GitHub releases for every untagged version with a changelog entry
     Release {
@@ -84,18 +77,12 @@ enum Command {
         /// Delete this tag's GitHub release and the tag
         #[arg(long, value_name = "TAG")]
         abandon: Option<String>,
-        /// Git remote
-        #[arg(long, default_value = "origin")]
-        remote: String,
     },
     /// Changeset and API check for a contributor PR, with comment
     Check {
         /// Pull request number
         #[arg(long, value_name = "NUMBER")]
         pr: u64,
-        /// Git remote
-        #[arg(long, default_value = "origin")]
-        remote: String,
     },
     /// Run each package's publish command, dependencies first
     Publish {
@@ -111,9 +98,6 @@ enum Command {
         /// Branch to open the rc PR from [default: the base branch]
         #[arg(long, value_name = "BRANCH")]
         target: Option<String>,
-        /// Git remote
-        #[arg(long, default_value = "origin")]
-        remote: String,
     },
 }
 
@@ -153,6 +137,7 @@ fn run(cli: Cli) -> Result<(), Error> {
         command,
         checkout: root,
         config,
+        remote,
         dry_run,
     } = cli;
     // Commands run in package paths see VERWALTER_ROOT: it must be
@@ -164,13 +149,13 @@ fn run(cli: Cli) -> Result<(), Error> {
     // Spec: ChangesetCheckOnContributorPullRequest. `check` reads the
     // config only: a broken changeset on the PR is its finding, not a
     // reason to fail before it runs.
-    if let Command::Check { pr, remote } = &command {
+    if let Command::Check { pr } = &command {
         let config = verwalter::config::Config::load(&root, &config_path)?;
         let findings = workspace::check(&root, &config);
         if !findings.is_empty() {
             return Err(workspace_error(&findings));
         }
-        let mut gh = gh(&root, remote, dry_run);
+        let mut gh = gh(&root, &remote, dry_run);
         let c = check::run(&root, &config, *pr, &mut gh)?;
         println!(
             "{:?}: affected {:?}, covered {:?}",
@@ -217,7 +202,6 @@ fn run(cli: Cli) -> Result<(), Error> {
             packages,
             base,
             summary,
-            remote,
         } => {
             let base = base.unwrap_or_else(|| {
                 let remote_base = format!("{remote}/{}", repo.config.git.base_branch);
@@ -248,7 +232,7 @@ fn run(cli: Cli) -> Result<(), Error> {
             }
             Ok(())
         }
-        Command::Pr { base, remote } => {
+        Command::Pr { base } => {
             let base = base.unwrap_or_else(|| format!("{remote}/{}", repo.config.git.base_branch));
             github::attribute(&mut repo, &mut gh(&root, &remote, dry_run));
             let branch = branches::create(&repo, &releases, &base)?;
@@ -261,7 +245,7 @@ fn run(cli: Cli) -> Result<(), Error> {
             }
             Ok(())
         }
-        Command::Status { remote } => {
+        Command::Status => {
             let mut gh = gh(&repo.root, &remote, dry_run);
             let rows = status::status(&repo, &remote, &mut gh)?;
             let w = rows.iter().map(|r| r.package.len()).max().unwrap_or(0);
@@ -301,7 +285,7 @@ fn run(cli: Cli) -> Result<(), Error> {
             }
             Ok(())
         }
-        Command::PreRelease { target, remote } => {
+        Command::PreRelease { target } => {
             let target = target.unwrap_or_else(|| repo.config.git.base_branch.clone());
             github::attribute(&mut repo, &mut gh(&root, &remote, dry_run));
             let mut gh = gh(&repo.root, &remote, dry_run);
@@ -333,7 +317,6 @@ fn run(cli: Cli) -> Result<(), Error> {
             package,
             publish,
             abandon,
-            remote,
         } => {
             let mut gh = gh(&repo.root, &remote, dry_run);
             if let Some(tag) = abandon {
