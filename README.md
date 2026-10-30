@@ -102,11 +102,20 @@ missing.
 |---|---|
 | [docs/configuration.md](docs/configuration.md) | Every key of `verwalter.toml`: fixed groups, bump ceilings, drafts, publish commands, workspace publish, versioned files. |
 | [docs/action.md](docs/action.md) | Action inputs and outputs, the workflows, repository settings. |
+| [docs/adopt.md](docs/adopt.md) | Adopting verwalter in a repository that releases with changesets/action, knope, release-plz, a bump script or hand-pushed tags: the procedure, the mapping per tool, the traps. |
 | [docs/features.md](docs/features.md) | The full feature list, the mistakes the tool catches, what to do when a step fails, what is not covered. |
 | [docs/api-check.md](docs/api-check.md) | Verifying the changeset level with cargo-semver-checks, griffe or break-check. |
 | [docs/commands.md](docs/commands.md) | Every command and flag. |
 | [examples/publish/README.md](examples/publish/README.md) | Publish commands per registry. |
 | [docs/release-pitfalls.md](docs/release-pitfalls.md) | The release history of the LiveKit SDKs and how each pitfall maps to the tool. |
+
+## Agent skill
+
+[skills/verwalter](skills/verwalter/SKILL.md) teaches a coding agent to
+use verwalter and points it at the documents above, with
+[docs/adopt.md](docs/adopt.md) for a repository that releases another
+way today. Copy the directory into `.claude/skills/` of the repository,
+or install it with `npx skills add livekit/verwalter`.
 
 Install the binary from the
 [releases page](https://github.com/livekit/verwalter/releases) to run any

@@ -141,3 +141,24 @@ versioning.files = [
 ```
 
 The first file of a package is its version.
+
+## Defaults
+
+A key that repeats a default is noise. Write a key only when the
+repository differs from it.
+
+| Key | Default |
+|---|---|
+| `[git] base_branch` | `main` |
+| `[versioning] changelog` | `CHANGELOG.md` in the package. `false` for none. |
+| `[versioning] dependent_bump_level` | `patch` |
+| `[versioning] prerelease_label` | `rc` |
+| `[release] tag` | `v{version}` with one package, `{package}-v{version}` with several |
+| `[release] mode` | `tag_and_release`. `tag` or `none` for less. |
+| `[release] draft` | `false` |
+| `[release] branch_prefix`, `label` | `release/`, `release` |
+| `[check] exempt_label` | `internal` |
+| `[publish] registry` | `none`: no existence check, and no publish unless a command is set |
+| `[publish] jobs` | `4` |
+| `[publish] command` | The built-in command of the registry |
+| `[workspace] pin_files` | none |
