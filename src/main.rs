@@ -11,23 +11,17 @@ use verwalter::{
 };
 
 /// Changeset-based versioning for single packages and monorepos.
-// args_override_self: a repeated option takes its last value, as before clap.
-// allow_hyphen_values: `--summary -x` takes `-x` as the value, as before clap.
 #[derive(Parser)]
-#[command(args_override_self = true)]
 struct Cli {
     #[command(subcommand)]
     command: Command,
-    /// The repository checkout [default: .]
-    // A Vec, not one value: a repeated checkout takes the last, as before clap.
-    #[arg(global = true)]
-    checkout: Vec<PathBuf>,
+    /// The repository checkout
+    #[arg(global = true, default_value = ".")]
+    checkout: PathBuf,
     /// Config file [default: <checkout>/verwalter.toml]
-    #[arg(long, global = true, allow_hyphen_values = true)]
+    #[arg(long, global = true)]
     config: Option<PathBuf>,
     /// Print every write instead of running it
-    // Global although plan, branches and changeset ignore it: the action
-    // appends `--dry-run` to any command.
     #[arg(long, global = true)]
     dry_run: bool,
 }
@@ -37,7 +31,7 @@ enum Command {
     /// Per package: version, tag, GitHub release, pending changesets, open PRs, next step
     Status {
         /// Git remote
-        #[arg(long, default_value = "origin", allow_hyphen_values = true)]
+        #[arg(long, default_value = "origin")]
         remote: String,
     },
     /// Print the release plan: next versions, dependencies first
@@ -45,79 +39,79 @@ enum Command {
     /// Create the release branch locally
     Branches {
         /// Ref to branch from [default: the base branch]
-        #[arg(long, allow_hyphen_values = true)]
+        #[arg(long)]
         base: Option<String>,
     },
     /// Push the release branch and open or update the PR
     Pr {
         /// Ref to branch from [default: <remote>/<base branch>]
-        #[arg(long, allow_hyphen_values = true)]
+        #[arg(long)]
         base: Option<String>,
         /// Git remote
-        #[arg(long, default_value = "origin", allow_hyphen_values = true)]
+        #[arg(long, default_value = "origin")]
         remote: String,
     },
     /// Write a changeset for the packages the branch changes and no pending changeset covers
     Changeset {
         /// Bump level
-        #[arg(long, default_value_t = BumpLevel::Patch, allow_hyphen_values = true)]
+        #[arg(long, default_value_t = BumpLevel::Patch)]
         level: BumpLevel,
         /// Exactly these packages, not the changed ones
-        #[arg(long = "package", value_name = "NAME", allow_hyphen_values = true)]
+        #[arg(long = "package", value_name = "NAME")]
         packages: Vec<String>,
         /// Ref to diff against [default: <remote>/<base branch>, else the base branch]
-        #[arg(long, allow_hyphen_values = true)]
+        #[arg(long)]
         base: Option<String>,
         /// Changeset summary [default: the last commit subject]
         #[arg(long, allow_hyphen_values = true)]
         summary: Option<String>,
         /// Git remote
-        #[arg(long, default_value = "origin", allow_hyphen_values = true)]
+        #[arg(long, default_value = "origin")]
         remote: String,
     },
     /// Tag and create GitHub releases for every untagged version with a changelog entry
     Release {
         /// Asset to upload to drafts or the named package
-        #[arg(long = "asset", value_name = "FILE", allow_hyphen_values = true)]
+        #[arg(long = "asset", value_name = "FILE")]
         assets: Vec<String>,
         /// Release only this package
-        #[arg(long, value_name = "NAME", allow_hyphen_values = true)]
+        #[arg(long, value_name = "NAME")]
         package: Option<String>,
         /// Publish the draft release
         #[arg(long)]
         publish: bool,
         /// Delete this tag's GitHub release and the tag
-        #[arg(long, value_name = "TAG", allow_hyphen_values = true)]
+        #[arg(long, value_name = "TAG")]
         abandon: Option<String>,
         /// Git remote
-        #[arg(long, default_value = "origin", allow_hyphen_values = true)]
+        #[arg(long, default_value = "origin")]
         remote: String,
     },
     /// Changeset and API check for a contributor PR, with comment
     Check {
         /// Pull request number
-        #[arg(long, value_name = "NUMBER", allow_hyphen_values = true)]
+        #[arg(long, value_name = "NUMBER")]
         pr: u64,
         /// Git remote
-        #[arg(long, default_value = "origin", allow_hyphen_values = true)]
+        #[arg(long, default_value = "origin")]
         remote: String,
     },
     /// Run each package's publish command, dependencies first
     Publish {
         /// The `releases` output of `release`: only these packages [default: every tagged package]
-        #[arg(long, value_name = "JSON", value_parser = releases, allow_hyphen_values = true)]
+        #[arg(long, value_name = "JSON", value_parser = releases)]
         releases: Option<BTreeSet<String>>,
         /// Packages to publish at once
-        #[arg(long, value_name = "N", allow_hyphen_values = true)]
+        #[arg(long, value_name = "N")]
         jobs: Option<usize>,
     },
     /// Open an rc PR for every package with a pending changeset
     PreRelease {
         /// Branch to open the rc PR from [default: the base branch]
-        #[arg(long, value_name = "BRANCH", allow_hyphen_values = true)]
+        #[arg(long, value_name = "BRANCH")]
         target: Option<String>,
         /// Git remote
-        #[arg(long, default_value = "origin", allow_hyphen_values = true)]
+        #[arg(long, default_value = "origin")]
         remote: String,
     },
 }
@@ -156,14 +150,10 @@ fn main() -> ExitCode {
 fn run(cli: Cli) -> Result<(), Error> {
     let Cli {
         command,
-        checkout,
+        checkout: root,
         config,
         dry_run,
     } = cli;
-    let root = checkout
-        .last()
-        .cloned()
-        .unwrap_or_else(|| PathBuf::from("."));
     // Commands run in package paths see VERWALTER_ROOT: it must be
     // absolute, or `$VERWALTER_ROOT/dist` resolves inside the package.
     let root = root
