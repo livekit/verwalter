@@ -144,12 +144,7 @@ fn releases(text: &str) -> Result<BTreeSet<String>, serde_json::Error> {
 }
 
 fn main() -> ExitCode {
-    // A usage error exits 1, as before clap; clap's own default is 2.
-    let cli = Cli::try_parse().unwrap_or_else(|e| {
-        let _ = e.print();
-        std::process::exit(if e.use_stderr() { 1 } else { 0 })
-    });
-    match run(cli) {
+    match run(Cli::parse()) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("error: {e}");
