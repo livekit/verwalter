@@ -1786,3 +1786,76 @@ fn go_workspace_modules_release_and_publish_through_the_proxy() {
         "{out:?}"
     );
 }
+
+// Spec: WorkflowAttachesAssets. A matrix build downloads its artifacts
+// into one directory, and `--asset <dir>` attaches every file in it.
+#[test]
+fn asset_directory_attaches_every_file_in_it() {
+    let r = fixture("asset-dir");
+    let root = &r.0;
+    let _remote = remote(root, "asset-dir");
+    git(root, &["tag", "livekit-api-v0.4.3"]);
+    git(root, &["tag", "livekit-protocol-v0.3.1"]);
+    git(root, &["push", "-q", "origin", "--tags"]);
+    for f in [
+        "dist/sdk-linux.tar.gz",
+        "dist/sdk-windows.zip",
+        "dist/.DS_Store",
+        "dist/nested/x.zip",
+    ] {
+        write(root, f, "x");
+    }
+    fs::create_dir_all(root.join("empty")).unwrap();
+
+    let repo = Repo::load(root).unwrap();
+    let calls = std::cell::RefCell::new(Vec::<String>::new());
+    let mut gh = |args: &[&str]| -> Result<String, verwalter::Error> {
+        calls.borrow_mut().push(args.join(" "));
+        match args {
+            ["release", "view", ..] => Err("not found".into()),
+            _ => Ok(String::new()),
+        }
+    };
+    let options = |assets: &[&str]| verwalter::release::Options {
+        assets: assets.iter().map(|a| a.to_string()).collect(),
+        dry_run: true,
+        ..Default::default()
+    };
+    let err = verwalter::release::run(&repo, "origin", &options(&["empty"]), &mut gh).unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("--asset empty: the directory has no files"),
+        "{err}"
+    );
+
+    verwalter::release::run(&repo, "origin", &options(&["dist/", "notes.txt"]), &mut gh).unwrap();
+    let create = calls
+        .borrow()
+        .iter()
+        .find(|c| c.starts_with("release create livekit-v0.7.0"))
+        .cloned()
+        .unwrap();
+    assert!(
+        create.contains("--verify-tag dist/sdk-linux.tar.gz dist/sdk-windows.zip notes.txt"),
+        "{create}"
+    );
+
+    // A glob the shell expanded after `--asset` is refused with the fix.
+    let out = Command::new(env!("CARGO_BIN_EXE_verwalter"))
+        .current_dir(root)
+        .args([
+            "release",
+            "--asset",
+            "dist/sdk-linux.tar.gz",
+            "dist/sdk-windows.zip",
+            "--dry-run",
+        ])
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("pass `--asset dist`"),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}

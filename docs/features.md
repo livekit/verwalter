@@ -61,7 +61,7 @@ and finishes what is missing. Start with `verwalter status`. Add
 | Build or test job before the tag | Fix, merge, re-run the workflow (`workflow_dispatch`). Nothing was written. |
 | Tag push | `verwalter release --package <name>` tags and pushes. |
 | GitHub release creation | `verwalter release --package <name> [--asset <file>...]` creates it from the existing tag. |
-| Asset upload | `verwalter release --package <name> --asset <file>... [--publish]` uploads with `--clobber`. |
+| Asset upload | `verwalter release --package <name> --asset <file\|dir>... [--publish]` uploads with `--clobber`. A directory stands for every file directly in it. |
 | Draft never published | `verwalter release --package <name> --publish`. |
 | Registry publish | Re-run the publish job. The tag and release stay. The tool does not touch registries. The publish runs in dependency order and stops at the first failure, so dependents were not published. The re-run picks them up. Or dispatch the workflow with `package=<dependent>` once the dependency is on the registry. |
 | The commit itself is broken | `verwalter release --abandon <tag>` removes the release and the tag. Add a changeset and release the next version. |
