@@ -61,6 +61,9 @@ Repository settings the workflows need:
 - **Allow GitHub Actions to create and approve pull requests** (Settings →
   Actions → General), or a token of a GitHub App or PAT in `token`. That
   token also lets the release PR trigger CI. `github.token` cannot.
+- `pull-requests: write` for `check`, so it can comment on the PR. A PR from
+  a fork gets a read-only token: the check then shows its result in the
+  workflow log and the job summary only, and still passes or fails.
 - A label named `internal` (config: `[check].exempt_label`) for PRs that need no
   release.
 - "Automatically delete head branches" is fine. The next push regenerates

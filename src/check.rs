@@ -490,8 +490,8 @@ pub fn run(root: &Path, config: &Config, pr: u64, gh: Gh) -> Result<Check, Error
         "--paginate",
         "--jq",
         &format!(".[] | select(.body | contains(\"{MARKER}\")) | .id"),
-    ])?;
-    let existing = existing.lines().next().map(str::to_string);
+    ])
+    .map(|out| out.lines().next().map(str::to_string));
 
     // A changeset the tool cannot use is the contributor's finding too:
     // it goes into the comment, not only into the workflow log.
@@ -499,7 +499,8 @@ pub fn run(root: &Path, config: &Config, pr: u64, gh: Gh) -> Result<Check, Error
         Ok(c) => c,
         Err(e) => {
             let body = format!("{MARKER}\n### Changeset invalid\n\n{e}\n");
-            upsert_comment(gh, &n, existing.as_deref(), &body)?;
+            report(&body);
+            sync_comment(gh, &n, &existing, Some(&body));
             return Err(e);
         }
     };
@@ -520,16 +521,29 @@ pub fn run(root: &Path, config: &Config, pr: u64, gh: Gh) -> Result<Check, Error
             ".nameWithOwner",
         ])?;
         let body = comment(&check, config, &slug, &pr.head, &pr.title);
-        upsert_comment(gh, &n, existing.as_deref(), &body)?;
-    } else if let Some(id) = existing {
-        gh(&[
-            "api",
-            "-X",
-            "DELETE",
-            &format!("repos/{{owner}}/{{repo}}/issues/comments/{id}"),
-        ])?;
+        report(&body);
+        sync_comment(gh, &n, &existing, Some(&body));
+    } else {
+        sync_comment(gh, &n, &existing, None);
     }
     Ok(check)
+}
+
+/// The comment body in the workflow log and, under Actions, in the job
+/// summary: a PR from a fork gets a read-only token and no comment.
+fn report(body: &str) {
+    let body = body.trim_start_matches(MARKER).trim();
+    println!("{body}\n");
+    if let Ok(path) = std::env::var("GITHUB_STEP_SUMMARY") {
+        let written = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            .and_then(|mut f| std::io::Write::write_all(&mut f, format!("{body}\n").as_bytes()));
+        if let Err(e) = written {
+            eprintln!("warning: cannot write the job summary: {e}");
+        }
+    }
 }
 
 /// The PR's `.changeset/*.md` files, parsed and checked against the
@@ -554,19 +568,34 @@ fn read_changesets(
     Ok(out)
 }
 
-fn upsert_comment(gh: Gh, pr: &str, existing: Option<&str>, body: &str) -> Result<(), Error> {
-    match existing {
-        Some(id) => gh(&[
+/// Writes the comment (`body`) or deletes it (None). Best effort: the
+/// token of a PR from a fork cannot write, and the check passes or fails
+/// on its result, not on the comment.
+fn sync_comment(gh: Gh, pr: &str, existing: &Result<Option<String>, Error>, body: Option<&str>) {
+    let written = match (existing, body) {
+        (Err(e), _) => Err(e.to_string().into()),
+        (Ok(Some(id)), Some(body)) => gh(&[
             "api",
             "-X",
             "PATCH",
             &format!("repos/{{owner}}/{{repo}}/issues/comments/{id}"),
             "-f",
             &format!("body={body}"),
-        ])?,
-        None => gh(&["pr", "comment", pr, "--body", body])?,
+        ]),
+        (Ok(None), Some(body)) => gh(&["pr", "comment", pr, "--body", body]),
+        (Ok(Some(id)), None) => gh(&[
+            "api",
+            "-X",
+            "DELETE",
+            &format!("repos/{{owner}}/{{repo}}/issues/comments/{id}"),
+        ]),
+        (Ok(None), None) => return,
     };
-    Ok(())
+    if let Err(e) = written {
+        let e = e.to_string();
+        let first = e.lines().next().unwrap_or_default();
+        println!("::warning::PR comment not updated, the result is in the job summary: {first}");
+    }
 }
 
 #[cfg(test)]
@@ -645,6 +674,28 @@ versioning.changelog = "CHANGELOG.md"
             &[],
         );
         assert_eq!(c.status, Status::ReleasePullRequest);
+    }
+
+    // A PR from a fork has a read-only token: the comment write fails,
+    // and the check still returns its own result.
+    #[test]
+    fn run_returns_the_check_when_the_comment_cannot_be_written() {
+        let config = Config::parse(CONFIG).unwrap();
+        let mut writes = 0;
+        let mut gh = |args: &[&str]| -> Result<String, Error> {
+            match args {
+                ["pr", "view", ..] => Ok(r#"{"title":"t","headRefName":"feat","labels":[],"files":[{"path":"livekit-protocol/x.proto"}]}"#.into()),
+                ["repo", "view", ..] => Ok("o/r".into()),
+                ["api", path, ..] if path.ends_with("/comments") => Ok(String::new()),
+                _ => {
+                    writes += 1;
+                    Err("HTTP 403: Resource not accessible by integration".into())
+                }
+            }
+        };
+        let c = run(&std::env::temp_dir(), &config, 1, &mut gh).unwrap();
+        assert_eq!(c.status, Status::Failed);
+        assert_eq!(writes, 1);
     }
 
     // Spec: required_level. A change kind becomes the digit it moves.

@@ -231,6 +231,9 @@ entity Changeset {
 -- PR claims, the missing packages, a link that opens a prefilled
 -- changeset file on the PR branch, and the exemption label hint. The
 -- comment is removed when the PR is exempt or claims no bump and passes.
+-- The workflow log and the job summary show the same text. The comment
+-- is best effort: a PR from a fork has a read-only token, and the check
+-- passes or fails on its status alone.
 entity ChangesetCheck {
     pull_request: PullRequest
     affected_packages: Set<Package>
