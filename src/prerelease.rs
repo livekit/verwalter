@@ -130,24 +130,20 @@ pub fn open(
         return Err(format!("{start} does not exist; fetch it first").into());
     }
     // One version when the rc is one group, else "name version" each.
+    let prefix = "pre-release: ";
     let title = if releases.iter().all(|r| r.to == releases[0].to) {
-        format!(
-            "pre-release: {} {}",
-            releases
-                .iter()
-                .map(|r| r.package.as_str())
-                .collect::<Vec<_>>()
-                .join(", "),
-            releases[0].to
-        )
+        let version = releases[0].to.to_string();
+        let names: Vec<String> = releases.iter().map(|r| r.package.clone()).collect();
+        let max = branches::TITLE_MAX.saturating_sub(prefix.len() + 1 + version.len());
+        format!("{prefix}{} {version}", branches::join_capped(&names, max))
     } else {
+        let parts: Vec<String> = releases
+            .iter()
+            .map(|r| format!("{} {}", r.package, r.to))
+            .collect();
         format!(
-            "pre-release: {}",
-            releases
-                .iter()
-                .map(|r| format!("{} {}", r.package, r.to))
-                .collect::<Vec<_>>()
-                .join(", ")
+            "{prefix}{}",
+            branches::join_capped(&parts, branches::TITLE_MAX - prefix.len())
         )
     };
     branches::commit_branch(&repo.root, &start, &branch, &title, |worktree| {
