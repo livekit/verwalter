@@ -533,7 +533,7 @@ pub fn run(root: &Path, config: &Config, pr: u64, gh: Gh) -> Result<Check, Error
 /// summary: a PR from a fork gets a read-only token and no comment.
 fn report(body: &str) {
     let body = body.trim_start_matches(MARKER).trim();
-    println!("{body}\n");
+    println!("{}", log_text(body));
     if let Ok(path) = std::env::var("GITHUB_STEP_SUMMARY") {
         let written = fs::OpenOptions::new()
             .create(true)
@@ -566,6 +566,43 @@ fn read_changesets(
         out.push(Changeset::parse_known(f, &content, &known).map_err(|e| format!("`{f}`: {e}"))?);
     }
     Ok(out)
+}
+
+/// The comment as a workflow log: headings in bold (failures in red),
+/// the link as a bare URL on its own line, and the API output in a
+/// collapsed log group. Covers only the markdown that `comment` writes.
+fn log_text(body: &str) -> String {
+    let mut out = String::new();
+    let mut code = false;
+    for line in body.lines() {
+        let t = line.trim();
+        if t == "```" {
+            code = !code;
+            continue;
+        }
+        if code {
+            out.push_str(line.strip_prefix("  ").unwrap_or(line));
+        } else if let Some(h) = t.strip_prefix("### ") {
+            out.push_str(&format!("\x1b[1;31m{h}\x1b[0m"));
+        } else if let Some(h) = t.strip_prefix("**").and_then(|t| t.strip_suffix("**")) {
+            out.push_str(&format!("\x1b[1m{h}\x1b[0m"));
+        } else if let Some(s) = t
+            .strip_prefix("<details><summary>")
+            .and_then(|t| t.strip_suffix("</summary>"))
+        {
+            out.push_str(&format!("::group::{s}"));
+        } else if t == "</details>" {
+            out.push_str("::endgroup::");
+        } else if let Some((text, rest)) = t.strip_prefix("[").and_then(|t| t.split_once("](")) {
+            let (url, rest) = rest.split_once(')').unwrap_or((rest, ""));
+            let text = format!("{text}{rest}").replace(['`', '*'], "");
+            out.push_str(&format!("{text}\n{url}"));
+        } else {
+            out.push_str(&line.replace('`', ""));
+        }
+        out.push('\n');
+    }
+    out
 }
 
 /// Writes the comment (`body`) or deletes it (None). Best effort: the
@@ -749,6 +786,36 @@ versioning.changelog = "CHANGELOG.md"
         assert!(body.contains("`livekit-api`: the changeset declares `patch`, the API check requires `minor`. Run `verwalter changeset --level minor --package livekit-api`"));
         assert!(body.contains("  fn x now takes 1 parameters"));
         assert!(!body.contains("Changeset missing"));
+    }
+
+    // The log shows no raw markdown: the API output is a log group, and
+    // the prefilled link a bare URL on its own line.
+    #[test]
+    fn log_text_renders_the_comment_markdown() {
+        let config = Config::parse(CONFIG).unwrap();
+        let mut c = evaluate(
+            &config,
+            "feat/x",
+            &[],
+            &s(&["livekit-api/a", "livekit-protocol/b", ".changeset/x.md"]),
+            &[Changeset::parse(".changeset/x.md", "---\nlivekit-api: patch\n---\nx\n").unwrap()],
+        );
+        c.api.push(ApiFinding {
+            package: "livekit-api".into(),
+            claimed: BumpLevel::Patch,
+            required: Some(BumpLevel::Minor),
+            output: "fn x\n  now takes 1 parameters".into(),
+        });
+        let body = comment(&c, &config, "o/r", "feat/x", "t");
+        let log = log_text(body.trim_start_matches(MARKER));
+        for raw in ["###", "**", "`", "<details>", "</details>", "]("] {
+            assert!(!log.contains(raw), "{raw} in\n{log}");
+        }
+        assert!(log.contains("\x1b[1;31mChangeset missing\x1b[0m\n"));
+        assert!(log.contains(
+            "::group::API check output\n\nfn x\n  now takes 1 parameters\n::endgroup::\n"
+        ));
+        assert!(log.contains("\nhttps://github.com/o/r/new/feat/x?filename="));
     }
 
     // Spec: ChangesetCheck.bumps. A passing PR still gets the comment,
