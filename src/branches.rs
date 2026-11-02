@@ -15,13 +15,44 @@ pub fn branch_name(repo: &Repo) -> String {
     )
 }
 
+/// Longest title, prefix included, before the package list is cut short.
+pub const TITLE_MAX: usize = 72;
+
 /// `release: a 1.2.0, b 0.3.1`: the commit message and PR title.
 pub fn title(plan: &[PlannedRelease]) -> String {
     let parts: Vec<String> = plan
         .iter()
         .map(|r| format!("{} {}", r.package, r.to))
         .collect();
-    format!("release: {}", parts.join(", "))
+    let prefix = "release: ";
+    format!("{prefix}{}", join_capped(&parts, TITLE_MAX - prefix.len()))
+}
+
+/// `a, b and 3 more`: joins `parts` while the result fits in `max` chars,
+/// so a release of many dependent packages keeps a readable title. The
+/// first part always shows.
+pub fn join_capped(parts: &[String], max: usize) -> String {
+    let all = parts.join(", ");
+    if all.len() <= max {
+        return all;
+    }
+    let mut out = String::new();
+    for (i, part) in parts.iter().enumerate() {
+        let after = parts.len() - i - 1;
+        let suffix = if after > 0 {
+            format!(" and {after} more").len()
+        } else {
+            0
+        };
+        if i > 0 && out.len() + 2 + part.len() + suffix > max {
+            return format!("{out} and {} more", parts.len() - i);
+        }
+        if i > 0 {
+            out.push_str(", ");
+        }
+        out.push_str(part);
+    }
+    out
 }
 
 /// Create or reset the release branch from `base`, usually
@@ -90,4 +121,18 @@ pub fn commit_branch(
     })();
     let _ = git::run(root, &["worktree", "remove", "--force", wt]);
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::join_capped;
+
+    #[test]
+    fn join_capped_cuts_the_list_within_max() {
+        let parts: Vec<String> = ["aaaa", "bbbb", "cccc", "dddd"].map(String::from).into();
+        assert_eq!(join_capped(&parts, 100), "aaaa, bbbb, cccc, dddd");
+        assert_eq!(join_capped(&parts, 22), "aaaa, bbbb, cccc, dddd");
+        assert_eq!(join_capped(&parts, 21), "aaaa, bbbb and 2 more");
+        assert_eq!(join_capped(&parts, 1), "aaaa and 3 more");
+    }
 }
