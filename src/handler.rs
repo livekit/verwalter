@@ -122,6 +122,23 @@ fn is_pyproject(path: &str) -> bool {
     path.rsplit('/').next() == Some("pyproject.toml")
 }
 
+/// `dynamic = ["version"]`: the build backend computes the version, and
+/// the file holds none. Some(true) when the backend is maturin, which
+/// reads it from the Cargo.toml next to it.
+pub fn pyproject_dynamic_version(content: &str) -> Option<bool> {
+    let doc: toml::Table = content.parse().ok()?;
+    let dynamic = doc.get("project")?.get("dynamic")?.as_array()?;
+    if !dynamic.iter().any(|v| v.as_str() == Some("version")) {
+        return None;
+    }
+    Some(
+        doc.get("build-system")
+            .and_then(|b| b.get("build-backend"))
+            .and_then(|b| b.as_str())
+            == Some("maturin"),
+    )
+}
+
 /// PEP 440 pre-release spelling for pyproject.toml: `1.6.0-rc.1` is
 /// written as `1.6.0rc1`, `alpha`/`beta` as `a`/`b`. Other labels keep the
 /// semver form, which Python tools accept and normalise.
@@ -230,6 +247,16 @@ pub fn read_version(path: &str, regex: Option<&str>, content: &str) -> Result<Ve
         return version.ok_or_else(|| {
             format!("{path}: no `// vX.Y.Z` comment on the module line of {module}").into()
         });
+    }
+    if is_pyproject(path)
+        && let Some(maturin) = pyproject_dynamic_version(content)
+    {
+        let instead = if maturin {
+            "list the Cargo.toml next to it, where maturin reads it"
+        } else {
+            "list the file the build backend reads it from, with a regex"
+        };
+        return Err(format!("{path}: the version is dynamic: {instead}").into());
     }
     Ok(load(path, None, content)?.1.version()?)
 }
@@ -1044,5 +1071,18 @@ dev = ["livekit-test-utils~=0.3"]
             write_version("go.mod", None, GO_MOD, Some("github.com/x/y"), &v("9.9.9")).unwrap(),
             GO_MOD
         );
+    }
+
+    #[test]
+    fn dynamic_pyproject_version_names_where_it_lives() {
+        let maturin = "[build-system]\nbuild-backend = \"maturin\"\n\n[project]\nname = \"ext\"\ndynamic = [\"version\"]\n";
+        let e = read_version("py/pyproject.toml", None, maturin).unwrap_err();
+        assert!(
+            e.to_string().contains("list the Cargo.toml next to it"),
+            "{e}"
+        );
+        let hatch = maturin.replace("maturin", "hatchling.build");
+        let e = read_version("py/pyproject.toml", None, &hatch).unwrap_err();
+        assert!(e.to_string().contains("with a regex"), "{e}");
     }
 }

@@ -55,12 +55,18 @@ impl Repo {
         let mut warnings = Vec::new();
         for (name, package) in &config.packages {
             let mut version: Option<Version> = None;
+            // Why the first file carries no version, for the error below.
+            let mut unread: Option<String> = None;
             let mut dependencies = Vec::new();
             for file in &package.versioning.files {
                 let (file, regex) = (file.path(), file.regex());
                 let content =
                     fs::read_to_string(root.join(file)).map_err(|e| format!("{file}: {e}"))?;
-                match (&version, handler::read_version(file, regex, &content).ok()) {
+                let read = handler::read_version(file, regex, &content);
+                if let (None, Err(e)) = (&unread, &read) {
+                    unread = Some(e.to_string());
+                }
+                match (&version, read.ok()) {
                     (None, found) => version = found,
                     (Some(first), Some(other)) if *first != other => warnings.push(format!(
                         "{name}: {file} says {other}, {} says {first}; the next release aligns them",
@@ -89,8 +95,10 @@ impl Repo {
             if version.is_none() && config.is_go(name) {
                 version = Some(go_tag_version(root, config, name));
             }
-            let version =
-                version.ok_or_else(|| format!("{name}: no versioned file carries a version"))?;
+            let version = version.ok_or_else(|| match &unread {
+                Some(e) => format!("{name}: no versioned file carries a version ({e})"),
+                None => format!("{name}: no versioned file carries a version"),
+            })?;
             packages.push(PackageState {
                 name: name.clone(),
                 version,
