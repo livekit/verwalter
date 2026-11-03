@@ -20,6 +20,9 @@ pub struct Member {
     pub path: String,
     /// `publish = false`, `"private": true`, `Private :: Do Not Upload`.
     pub private: bool,
+    /// Cargo `version.workspace = true`: the version is the root
+    /// manifest's `[workspace.package].version`.
+    pub inherits_version: bool,
 }
 
 /// Every package the workspace manifests declare.
@@ -95,6 +98,11 @@ fn cargo_members(root: &Path) -> Vec<Member> {
                 name: package.get("name")?.as_str()?.to_string(),
                 path: relative(root, &dir),
                 private,
+                inherits_version: package
+                    .get("version")
+                    .and_then(|v| v.get("workspace"))
+                    .and_then(|w| w.as_bool())
+                    == Some(true),
             })
         })
         .collect()
@@ -135,6 +143,7 @@ fn pnpm_members(root: &Path) -> Vec<Member> {
                     .get("private")
                     .and_then(|p| p.as_bool())
                     .unwrap_or(false),
+                inherits_version: false,
             })
         })
         .collect()
@@ -188,6 +197,7 @@ fn uv_members(root: &Path) -> Vec<Member> {
                 name: project.get("name")?.as_str()?.to_string(),
                 path: relative(root, &dir),
                 private,
+                inherits_version: false,
             })
         })
         .collect()
@@ -247,6 +257,7 @@ fn go_members(root: &Path) -> Vec<Member> {
                 name,
                 path,
                 private: false,
+                inherits_version: false,
             })
         })
         .collect()
@@ -254,6 +265,29 @@ fn go_members(root: &Path) -> Vec<Member> {
 
 /// Directories matching a workspace glob such as `packages/*` or `crates/a`.
 /// Only `*` as a whole path component is supported.
+/// Spec: Package.versioned_files, the Cargo.lock case. The crates whose Cargo.lock entry moves
+/// with the root Cargo.toml's version: those with `version.workspace =
+/// true`, private ones included. None when the root manifest's own
+/// `[package].version` is the version a bump writes.
+pub fn cargo_version_inheritors(root: &Path) -> Vec<String> {
+    let own_version = fs::read_to_string(root.join("Cargo.toml"))
+        .ok()
+        .and_then(|s| s.parse::<toml::Table>().ok())
+        .is_some_and(|doc| {
+            doc.get("package")
+                .and_then(|p| p.get("version"))
+                .is_some_and(|v| v.is_str())
+        });
+    if own_version {
+        return Vec::new();
+    }
+    cargo_members(root)
+        .into_iter()
+        .filter(|m| m.inherits_version)
+        .map(|m| m.name)
+        .collect()
+}
+
 pub(crate) fn expand(root: &Path, pattern: &str) -> Vec<PathBuf> {
     let mut dirs = vec![root.to_path_buf()];
     for component in pattern.trim_matches('/').split('/') {

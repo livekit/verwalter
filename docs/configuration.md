@@ -146,6 +146,17 @@ versioning.files = [
 
 The first file of a package is its version.
 
+A package can version `[workspace.package].version` in the root
+`Cargo.toml`, for example one product made of several `publish = false`
+crates. Then `Cargo.lock` needs no regex. Each release also updates the
+`Cargo.lock` entry of every crate with `version.workspace = true`:
+
+```toml
+[packages.my-product]
+path = "."
+versioning.files = ["Cargo.toml", "Cargo.lock"]
+```
+
 **Go modules.** With `go.mod` as the first file, the version is the
 `// vX.Y.Z` comment on the module line. The first release writes it.
 Until then, the latest tag of the module is the version, else 0.0.0. The
