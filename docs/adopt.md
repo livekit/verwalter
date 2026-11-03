@@ -87,8 +87,9 @@ Keys that are written when the repository needs them:
   pre-bumped version is set to the released version in the migration PR.
   Any text file takes a regex with a `version` capture group.
 - **`[workspace] pin_files`** for a root `Cargo.toml` with
-  `[workspace.dependencies]`, `Cargo.lock` or `uv.lock`, so that the
-  pins of in-repo dependencies move with each release.
+  `[workspace.dependencies]`, so that the pins of in-repo dependencies
+  move with each release. Root lock files (`Cargo.lock`,
+  `package-lock.json`, `uv.lock`) need no entry.
 - **`[versioning] fixed`** for packages that always share a version.
 - **`publish.registry`** per package on another registry, and
   `publish.command` only when the built-in command does not fit.
@@ -291,7 +292,7 @@ the merge. Tags are `<name>/v<version>`.
 | `knope.toml` | `verwalter.toml` |
 |---|---|
 | `[packages.<name>] versioned_files = ["pkg/Cargo.toml"]` | `[packages.<name>] path = "pkg"`, and `[versioning] files = ["Cargo.toml"]` once for all. Paths are relative to the package. |
-| `{ path = "Cargo.toml", dependency = "x" }` and `"Cargo.lock"` on every package | `[workspace] pin_files = ["Cargo.toml", "Cargo.lock"]` once. Each release updates its own entry. |
+| `{ path = "Cargo.toml", dependency = "x" }` and `"Cargo.lock"` on every package | `[workspace] pin_files = ["Cargo.toml"]` once. Each release updates its own entry there and in `Cargo.lock`. |
 | `changelog = "pkg/CHANGELOG.md"` | Default. Leave it out. |
 | `scopes` | Dropped. Conventional commits are not read. |
 | `[github]` | Read from the `origin` remote. |
@@ -301,7 +302,7 @@ the merge. Tags are `<name>/v<version>`.
 ```toml
 [workspace]
 members = ["crates/*"]              # `*` matches one whole path component; crates at the root are listed under [packages] with a path
-pin_files = ["Cargo.toml", "Cargo.lock"]
+pin_files = ["Cargo.toml"]
 
 [versioning]
 files = ["Cargo.toml"]
@@ -391,7 +392,6 @@ script or an LLM. Plugins that pin a floor on the core package.
 ```toml
 [workspace]
 members = ["packages/*"]            # `*` matches one whole path component; members at the root are listed under [packages] with a path
-pin_files = ["uv.lock"]
 
 [versioning]
 files = ["pyproject.toml"]
