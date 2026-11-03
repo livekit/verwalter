@@ -483,14 +483,12 @@ impl Config {
             p.versioning.changelog = p.versioning.changelog.as_deref().map(|c| under(&p.path, c));
             if let (Some(root), Some(VersionedFile::Path(file))) =
                 (root, p.versioning.files.first())
-            {
-                if file.rsplit('/').next() == Some("go.mod") {
+                && file.rsplit('/').next() == Some("go.mod") {
                     p.go_module = std::fs::read_to_string(root.join(file))
                         .ok()
                         .and_then(|c| crate::handler::go_module(&c))
                         .map(|(module, _)| module);
                 }
-            }
             if p.publish.registry.unwrap_or(config.publish.registry)
                 == crate::registry::Registry::Goproxy
                 && root.is_some()
@@ -588,11 +586,10 @@ impl Config {
             return Some(c.clone());
         }
         let registry = self.registry_of(package);
-        if p.registry.is_none_or(|r| r == self.publish.registry) {
-            if let Some(c) = &self.publish.command {
+        if p.registry.is_none_or(|r| r == self.publish.registry)
+            && let Some(c) = &self.publish.command {
                 return Some(c.clone());
             }
-        }
         let tag = npm_tag.map(|t| format!(" --tag {t}")).unwrap_or_default();
         Some(match registry {
             Registry::Crates => "cargo publish".into(),

@@ -145,8 +145,8 @@ pub fn to_pep440(version: &Version) -> String {
 /// The inverse, for reading: `1.6.0rc1` back to `1.6.0-rc.1`.
 fn from_pep440(s: &str) -> String {
     for label in ["rc", "a", "b"] {
-        if let Some((stable, n)) = s.split_once(label) {
-            if !n.is_empty()
+        if let Some((stable, n)) = s.split_once(label)
+            && !n.is_empty()
                 && n.bytes().all(|b| b.is_ascii_digit())
                 && stable
                     .split('.')
@@ -159,7 +159,6 @@ fn from_pep440(s: &str) -> String {
                 };
                 return format!("{stable}-{semver_label}.{n}");
             }
-        }
     }
     s.to_string()
 }
@@ -171,15 +170,14 @@ fn normalise_pyproject(content: &str) -> String {
         .lines()
         .map(|line| {
             let trimmed = line.trim_start();
-            if let Some(rest) = trimmed.strip_prefix("version") {
-                if let Some(value) = rest.trim_start().strip_prefix('=') {
+            if let Some(rest) = trimmed.strip_prefix("version")
+                && let Some(value) = rest.trim_start().strip_prefix('=') {
                     let value = value.trim();
                     if let Some(inner) = value.strip_prefix('"').and_then(|v| v.strip_suffix('"')) {
                         let indent = &line[..line.len() - trimmed.len()];
                         return format!("{indent}version = \"{}\"", from_pep440(inner));
                     }
                 }
-            }
             line.to_string()
         })
         .collect::<Vec<_>>()
