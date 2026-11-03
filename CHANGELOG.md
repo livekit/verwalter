@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.24.0
+
+### Minor Changes
+
+- Use Clap for CLI argument parsing & documentation - [#44](https://github.com/livekit/verwalter/pull/44) ([@ladvoc](https://github.com/ladvoc))
+
+### Patch Changes
+
+- `check` builds the link to create a missing changeset from the PR's head repository, so on a PR from a fork it opens the new-file page on the fork, where the branch lives, instead of a 404 on the base repo. - [#48](https://github.com/livekit/verwalter/pull/48) ([@MaxHeimbrock](https://github.com/MaxHeimbrock))
+- Upgrade to 2024 edition - [#47](https://github.com/livekit/verwalter/pull/47) ([@ladvoc](https://github.com/ladvoc))
+
 ## 0.23.0
 
 ### Minor Changes
