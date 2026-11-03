@@ -122,7 +122,10 @@ entity Package {
     -- May mix formats (livekit-ffi lists Cargo.toml and package.json files).
     -- Each file goes to the VersionedFileHandler for its format. Lock files
     -- (Cargo.lock, uv.lock) are versioned files too, edited directly by a
-    -- handler; the tool never runs a package manager. The first file is
+    -- handler; the tool never runs a package manager. When the package
+    -- versions [workspace.package] in the root Cargo.toml, the root
+    -- Cargo.lock entry of every crate with `version.workspace = true` moves
+    -- too, private crates included. The first file is
     -- the version; files that disagree are a warning (VersionedFilesAgree).
     -- Paths are relative to the package's path; `..` reaches a sibling.
     -- Default: config.versioning.files. A package with neither is a

@@ -54,18 +54,38 @@ pub fn apply(
             let after = handler::write_version(rel, regex, &before, dependency, &release.to)?;
             if after != before {
                 fs::write(&path, after)?;
-                written.push(path);
+                if !written.contains(&path) {
+                    written.push(path);
+                }
             }
             Ok(())
         };
 
     // Own version. A lock file holds it under the package's own entry.
+    // A package that versions [workspace.package] in the root Cargo.toml
+    // also moves the Cargo.lock entry of every crate that inherits it,
+    // private ones included: none of them need be named like the package.
+    let inheritors = if package
+        .versioning
+        .files
+        .iter()
+        .any(|f| f.path() == "Cargo.toml" && f.regex().is_none())
+    {
+        crate::workspace::cargo_version_inheritors(root)
+    } else {
+        Vec::new()
+    };
     for file in &package.versioning.files {
-        rewrite(
-            file.path(),
-            file.regex(),
-            (is_lock_file(file.path()) && file.regex().is_none()).then_some(name),
-        )?;
+        if !is_lock_file(file.path()) || file.regex().is_some() {
+            rewrite(file.path(), file.regex(), None)?;
+            continue;
+        }
+        rewrite(file.path(), None, Some(name))?;
+        if file.path() == "Cargo.lock" {
+            for crate_name in inheritors.iter().filter(|c| *c != name) {
+                rewrite(file.path(), None, Some(crate_name))?;
+            }
+        }
     }
     // Pins: repo-level pin files, then every dependent's manifests.
     let key = config.dependency_key(name);
@@ -339,6 +359,66 @@ versioning.changelog = "CHANGELOG.md"
         assert_eq!(
             insert_entry("## 0.9.0\n", "## 1.0.0\n"),
             "## 1.0.0\n\n## 0.9.0\n"
+        );
+    }
+
+    #[test]
+    fn workspace_package_version_moves_inheriting_crates_in_the_lock() {
+        // plugin-krisp-viva-internal: one product named like no crate,
+        // two private crates on [workspace.package], one crate of its own.
+        let root = std::env::temp_dir().join(format!(
+            "verwalter-{}-workspace-package",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        let repo = Repo(root);
+        for (rel, content) in [
+            (
+                "Cargo.toml",
+                "[workspace]\nmembers = [\"crates/*\"]\n\n[workspace.package]\nversion = \"0.2.3\"\npublish = false\n",
+            ),
+            (
+                "Cargo.lock",
+                "version = 4\n\n[[package]]\nname = \"krisp-sys\"\nversion = \"1.2.0\"\n\n[[package]]\nname = \"plugins-krisp\"\nversion = \"0.2.3\"\n\n[[package]]\nname = \"plugins-krisp-uniffi\"\nversion = \"0.2.3\"\n",
+            ),
+            (
+                "crates/sys/Cargo.toml",
+                "[package]\nname = \"krisp-sys\"\nversion = \"1.2.0\"\npublish = false\n",
+            ),
+            (
+                "crates/plugin/Cargo.toml",
+                "[package]\nname = \"plugins-krisp\"\nversion.workspace = true\npublish.workspace = true\n",
+            ),
+            (
+                "crates/uniffi/Cargo.toml",
+                "[package]\nname = \"plugins-krisp-uniffi\"\nversion.workspace = true\npublish.workspace = true\n",
+            ),
+        ] {
+            let p = repo.0.join(rel);
+            fs::create_dir_all(p.parent().unwrap()).unwrap();
+            fs::write(p, content).unwrap();
+        }
+        let config = Config::parse(
+            "[packages.krisp]\npath = \".\"\nversioning.files = [\"Cargo.toml\", \"Cargo.lock\"]\n",
+        )
+        .unwrap();
+        let state = vec![PackageState::new("krisp", "0.2.3".parse().unwrap(), vec![])];
+        let changesets = [Changeset::parse("a.md", "---\nkrisp: patch\n---\nx\n").unwrap()];
+        let p = plan(&state, &changesets, BumpLevel::Patch);
+
+        let written = apply(&repo.0, &config, &state, &changesets, &p, &p[0]).unwrap();
+        let names: Vec<String> = written
+            .iter()
+            .map(|w| w.strip_prefix(&repo.0).unwrap().display().to_string())
+            .collect();
+        assert_eq!(names, ["Cargo.toml", "Cargo.lock", "CHANGELOG.md"]);
+        assert!(repo.read("Cargo.toml").contains("version = \"0.2.4\""));
+        let lock = repo.read("Cargo.lock");
+        assert!(lock.contains("name = \"plugins-krisp\"\nversion = \"0.2.4\""));
+        assert!(lock.contains("name = \"plugins-krisp-uniffi\"\nversion = \"0.2.4\""));
+        assert!(
+            lock.contains("name = \"krisp-sys\"\nversion = \"1.2.0\""),
+            "a crate with its own version stays"
         );
     }
 }
