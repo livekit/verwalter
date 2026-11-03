@@ -1929,3 +1929,77 @@ fn asset_directory_attaches_every_file_in_it() {
         String::from_utf8_lossy(&out.stderr)
     );
 }
+
+// Spec: config.versioning.fixed, the [workspace.package] group. Crates
+// with `version.workspace = true` take the root Cargo.toml as their first
+// file and release together; the pins on them move in their dependents.
+#[test]
+fn crates_on_the_workspace_version_release_together() {
+    let root = std::env::temp_dir().join(format!(
+        "verwalter-it-{}-workspace-version",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let r = Repo_(root);
+    let root = &r.0;
+    git(root, &["init", "-q", "-b", "main"]);
+    write(
+        root,
+        "verwalter.toml",
+        "[workspace]\nmembers = [\"crates/*\"]\n\n[versioning]\nfiles = [\"Cargo.toml\"]\n",
+    );
+    write(
+        root,
+        "Cargo.toml",
+        "[workspace]\nmembers = [\"crates/*\"]\n\n[workspace.package]\nversion = \"1.0.0\"\n",
+    );
+    write(
+        root,
+        "Cargo.lock",
+        "version = 4\n\n[[package]]\nname = \"x\"\nversion = \"1.0.0\"\n\n[[package]]\nname = \"y\"\nversion = \"1.0.0\"\n\n[[package]]\nname = \"z\"\nversion = \"0.3.0\"\n",
+    );
+    write(
+        root,
+        "crates/x/Cargo.toml",
+        "[package]\nname = \"x\"\nversion.workspace = true\n",
+    );
+    write(
+        root,
+        "crates/y/Cargo.toml",
+        "[package]\nname = \"y\"\nversion.workspace = true\n\n[dependencies]\nx = { path = \"../x\", version = \"1.0.0\" }\n",
+    );
+    write(
+        root,
+        "crates/z/Cargo.toml",
+        "[package]\nname = \"z\"\nversion = \"0.3.0\"\n\n[dependencies]\nx = { path = \"../x\", version = \"1.0.0\" }\n",
+    );
+    write(root, ".changeset/a.md", "---\nx: major\n---\nBreaking\n");
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-q", "-m", "init"]);
+
+    let repo = Repo::load(root).unwrap();
+    assert_eq!(repo.config.fixed_with("x"), ["y"]);
+    let plan = plan(
+        &repo.packages,
+        &repo.changesets,
+        repo.config.versioning.dependent_bump_level,
+    );
+    let planned: Vec<String> = plan
+        .iter()
+        .map(|r| format!("{} {}", r.package, r.to))
+        .collect();
+    assert_eq!(planned, ["x 2.0.0", "y 2.0.0", "z 0.3.1"]);
+
+    branches::create(&repo, &plan, "main").unwrap();
+    let show = |file: &str| git(root, &["show", &format!("release/main:{file}")]);
+    assert!(show("Cargo.toml").contains("version = \"2.0.0\""));
+    assert!(show("crates/y/Cargo.toml").contains("x = { path = \"../x\", version = \"2.0.0\" }"));
+    let z = show("crates/z/Cargo.toml");
+    assert!(z.contains("version = \"0.3.1\""));
+    assert!(z.contains("x = { path = \"../x\", version = \"2.0.0\" }"));
+    let lock = show("Cargo.lock");
+    assert!(lock.contains("name = \"x\"\nversion = \"2.0.0\""));
+    assert!(lock.contains("name = \"y\"\nversion = \"2.0.0\""));
+    assert!(lock.contains("name = \"z\"\nversion = \"0.3.1\""));
+}

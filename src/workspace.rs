@@ -269,7 +269,7 @@ fn go_members(root: &Path) -> Vec<Member> {
 /// with the root Cargo.toml's version: those with `version.workspace =
 /// true`, private ones included. None when the root manifest's own
 /// `[package].version` is the version a bump writes.
-pub fn cargo_version_inheritors(root: &Path) -> Vec<String> {
+pub fn cargo_version_inheritors(root: &Path) -> Vec<Member> {
     let own_version = fs::read_to_string(root.join("Cargo.toml"))
         .ok()
         .and_then(|s| s.parse::<toml::Table>().ok())
@@ -284,7 +284,6 @@ pub fn cargo_version_inheritors(root: &Path) -> Vec<String> {
     cargo_members(root)
         .into_iter()
         .filter(|m| m.inherits_version)
-        .map(|m| m.name)
         .collect()
 }
 
