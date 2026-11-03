@@ -374,7 +374,8 @@ fn inherit(table: &mut toml::Table) {
 
 /// Spec: config.workspace.members. Each publishable workspace member in
 /// a `members` directory gets a package entry, or the `path` of the entry
-/// of its name.
+/// of its name. Without `[versioning].files`, its versioned file is the
+/// manifest it was found by.
 fn discover(
     table: &mut toml::Table,
     root: &Path,
@@ -387,6 +388,10 @@ fn discover(
         return Ok(());
     }
     let known = crate::workspace::members(root);
+    let default_files = table
+        .get("versioning")
+        .and_then(|v| v.get("files"))
+        .is_some();
     let packages = table
         .entry("packages")
         .or_insert_with(|| toml::Table::new().into())
@@ -415,6 +420,16 @@ fn discover(
             .as_table_mut()
         {
             entry.entry("path").or_insert_with(|| path.into());
+            if !default_files
+                && let Some(versioning) = entry
+                    .entry("versioning")
+                    .or_insert_with(|| toml::Table::new().into())
+                    .as_table_mut()
+            {
+                versioning
+                    .entry("files")
+                    .or_insert_with(|| vec![toml::Value::from(m.manifest)].into());
+            }
         }
     }
     Ok(())
