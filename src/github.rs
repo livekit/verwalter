@@ -31,7 +31,7 @@ pub fn repo_slug(url: &str) -> Option<String> {
 pub fn gh_cli<'a>(
     root: &'a Path,
     remote: &str,
-) -> impl FnMut(&[&str]) -> Result<String, Error> + 'a {
+) -> impl FnMut(&[&str]) -> Result<String, Error> + 'a + use<'a> {
     let slug = crate::git::run(root, &["remote", "get-url", remote])
         .ok()
         .and_then(|u| repo_slug(&u));
