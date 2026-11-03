@@ -51,13 +51,13 @@ prerelease_label = "rc"          # 1.6.0-rc.1, written as 1.6.0rc1 in pyproject.
 [release]                        # the release PR, the tag and the GitHub release
 branch_prefix = "release/"       # default
 label = "release"                # default
-tag = "{package}/v{version}"     # default: v{version} with one package, {package}-v{version} otherwise
+tag = "{package}/v{version}"     # default: v{version} with one package, {package}-v{version} otherwise, <path>/v{version} for a go.mod
 mode = "tag_and_release"         # default. none | tag | tag_and_release
 draft = false                    # default
 
 [publish]                        # for `verwalter publish`
 jobs = 4                         # default: independent packages published at once
-registry = "crates"              # none (default) | crates | npm | pypi | pubdev | custom
+registry = "crates"              # none (default) | crates | npm | pypi | pubdev | goproxy | custom
 command = "cargo publish --no-verify"   # for packages on that registry, run in their path
 workspace = "cargo publish --workspace" # or: one command from the root for all of them (pnpm -r publish)
 exists_url = "https://r/{name}/{version}"  # for custom: 200 when the version exists, 404 when not
@@ -79,8 +79,10 @@ check.api = "griffe check pkg -a $VERWALTER_BASELINE_TAG >/dev/null || echo majo
 ```
 
 `members` takes directories, with `*` as a whole path component. Each
-publishable member of a Cargo, pnpm or uv workspace in them is a package,
-named by its manifest. A private member is left out: list it under
+publishable member of a Cargo, pnpm, uv or Go workspace in them is a
+package, named by its manifest. A module in a `go.work` is named by its
+directory, and the module at the root by the last element of its module
+path. A private member is left out: list it under
 `[packages]` to release it. A directory that is no workspace member is an
 error unless `exclude` lists it. A `[packages.<name>]` entry for a found
 package overrides its keys and needs no `path`. Without `members`, the
@@ -101,7 +103,9 @@ The publish command for a package is its own `publish.command`, else
 `[publish].command` when the package is on the default registry, else the
 built-in command for its registry: `cargo publish`,
 `npm publish --provenance --access public`, `python -m twine upload dist/*`,
-`dart pub publish --force`. The built-in npm command adds `--tag next` for
+`dart pub publish --force`. On `goproxy`, the registry request is the
+publish: verwalter asks the Go module proxy for the version, which makes
+the proxy fetch the tag, and no command runs. The built-in npm command adds `--tag next` for
 a pre-release and `--tag latest-1` for a maintenance release, a final
 version below one already tagged (`latest-0.4` for 0.4.x). A package with
 none fails `publish` before
@@ -141,3 +145,29 @@ versioning.files = [
 ```
 
 The first file of a package is its version.
+
+**Go modules.** With `go.mod` as the first file, the version is the
+`// vX.Y.Z` comment on the module line. The first release writes it.
+Until then, the latest tag of the module is the version, else 0.0.0. The
+`require` lines that name other packages are the dependencies, and each
+release moves them. `go.sum` is not edited: a build of a dependent with
+`GOWORK=off` fails until the new tag exists and `go mod tidy` runs. The
+default tag is `<path>/v{version}`, or `v{version}` at the root, which is
+the format Go reads.
+
+Go finds v2 and later only under a module path that ends in `/vN`.
+`plan` and the release branch refuse a major release without it. Change
+the module path and every import in the PR that adds the major
+changeset. A module in a major-version directory, such as `lib/v2`, is
+not supported.
+
+```toml
+[workspace]
+members = ["sdk/*"]              # the modules that go.work uses
+
+[versioning]
+files = ["go.mod"]
+
+[publish]
+registry = "goproxy"             # public modules only; a private module stays on none
+```

@@ -15,7 +15,7 @@ use verwalter::{
 #[command(version)]
 struct Cli {
     /// The repository checkout
-    #[arg(global = true, default_value = ".")]
+    #[arg(global = true, default_value = ".", value_parser = checkout)]
     checkout: PathBuf,
     /// Config file [default: <checkout>/verwalter.toml]
     #[arg(long, global = true)]
@@ -66,8 +66,8 @@ enum Command {
     },
     /// Tag and create GitHub releases for every untagged version with a changelog entry
     Release {
-        /// Asset to upload to drafts or the named package
-        #[arg(long = "asset", value_name = "FILE")]
+        /// Asset to upload to drafts or the named package: a file, or every file in a directory
+        #[arg(long = "asset", value_name = "FILE|DIR")]
         assets: Vec<String>,
         /// Release only this package
         #[arg(long, value_name = "NAME")]
@@ -100,6 +100,15 @@ enum Command {
         #[arg(long, value_name = "BRANCH")]
         target: Option<String>,
     },
+}
+
+/// A file as the checkout is most often a glob that the shell expanded
+/// after `--asset`: say so instead of reading the file as the checkout.
+fn checkout(arg: &str) -> Result<PathBuf, String> {
+    if Path::new(arg).is_file() {
+        return Err("the <checkout> is one directory. `--asset` takes one file or one directory, and a glob such as `--asset dist/*` expands to several arguments: pass `--asset dist`".into());
+    }
+    Ok(PathBuf::from(arg))
 }
 
 /// A JSON list of objects with a `package`, or of names. Empty means
@@ -223,6 +232,18 @@ fn run(cli: Cli) -> Result<(), Error> {
         }
         Command::Plan => {
             print_plan(&repo, &releases);
+            // Spec: GoMajorVersion. `branches` fails on it when it writes
+            // the go.mod; the plan says so first.
+            let go: Vec<String> = releases
+                .iter()
+                .filter_map(|r| {
+                    let module = repo.config.packages[&r.package].go_module.as_deref()?;
+                    verwalter::handler::go_major_error(module, &r.to)
+                })
+                .collect();
+            if !go.is_empty() {
+                return Err(go.join("\n").into());
+            }
             Ok(())
         }
         Command::Branches { base } => {

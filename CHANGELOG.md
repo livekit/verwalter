@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.23.0
+
+### Minor Changes
+
+- Go modules: `go.mod` carries the version in a module-line comment, `go.work` members are packages named by directory, `require` lines move with each release, tags default to `<path>/vX.Y.Z`, and `publish.registry = "goproxy"` publishes through the Go module proxy. - [#39](https://github.com/livekit/verwalter/pull/39) ([@lukasIO](https://github.com/lukasIO))
+
+### Patch Changes
+
+- `--asset` takes a directory and attaches every file in it. An extra argument, such as a glob that the shell expanded after `--asset`, now fails with the fix instead of being read as the checkout. - [#41](https://github.com/livekit/verwalter/pull/41) ([@lukasIO](https://github.com/lukasIO))
+- `check` prints its result to the workflow log and the job summary. A PR from a fork, whose token cannot comment, now passes or fails on the check alone instead of failing on the comment write. - [#42](https://github.com/livekit/verwalter/pull/42) ([@lukasIO](https://github.com/lukasIO))
+- Cap release and pre-release PR titles at 72 characters: a long package list ends in `and N more`. - [#43](https://github.com/livekit/verwalter/pull/43) ([@lukasIO](https://github.com/lukasIO))
+
 ## 0.22.2
 
 ### Patch Changes

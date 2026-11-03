@@ -21,6 +21,10 @@ pub enum Registry {
     Npm,
     Pypi,
     Pubdev,
+    /// The Go module proxy, proxy.golang.org. Asking it for a version makes
+    /// it fetch the tag, so the check is the publish: no command runs.
+    /// Public modules only.
+    Goproxy,
     /// `exists_url` with `{name}` and `{version}` placeholders: Maven, a
     /// private npm registry, anything with a URL that answers 200 or 404.
     Custom,
@@ -73,6 +77,7 @@ pub fn version_url(config: &Config, name: &str, version: &Version) -> Option<Str
         Registry::Npm => format!("https://registry.npmjs.org/{name}/{v}"),
         Registry::Pypi => format!("https://pypi.org/pypi/{name}/{}/json", to_pep440(version)),
         Registry::Pubdev => format!("https://pub.dev/api/packages/{name}/versions/{v}"),
+        Registry::Goproxy => format!("{}/@v/v{v}.info", goproxy_module_url(config, name)?),
         Registry::Custom => config
             .exists_url_of(name)?
             .replace("{name}", name)
@@ -89,7 +94,28 @@ pub fn package_url(config: &Config, name: &str) -> Option<String> {
         Registry::Npm => format!("https://registry.npmjs.org/{name}"),
         Registry::Pypi => format!("https://pypi.org/pypi/{name}/json"),
         Registry::Pubdev => format!("https://pub.dev/api/packages/{name}"),
+        Registry::Goproxy => format!("{}/@v/list", goproxy_module_url(config, name)?),
     })
+}
+
+const GOPROXY: &str = "https://proxy.golang.org";
+
+/// The proxy's URL for the package's module. The proxy protocol writes an
+/// upper-case letter as `!` and the lower-case letter. None without a
+/// go.mod, which the config load reports on a goproxy package.
+fn goproxy_module_url(config: &Config, name: &str) -> Option<String> {
+    let module = config.packages[name].go_module.as_deref()?;
+    let escaped: String = module
+        .chars()
+        .flat_map(|c| {
+            if c.is_ascii_uppercase() {
+                vec!['!', c.to_ascii_lowercase()]
+            } else {
+                vec![c]
+            }
+        })
+        .collect();
+    Some(format!("{GOPROXY}/{escaped}"))
 }
 
 /// Some(true) on 200, Some(false) on 404, None without a registry, an
@@ -102,6 +128,8 @@ pub fn exists(url: Option<String>, http: Http) -> Result<Option<bool>, Error> {
     match http(&url)? {
         200 => Ok(Some(true)),
         404 => Ok(Some(false)),
+        // The Go proxy protocol answers "not found" with 404 or 410.
+        410 if url.starts_with(GOPROXY) => Ok(Some(false)),
         code => Err(format!("{url}: HTTP {code}").into()),
     }
 }
@@ -223,5 +251,22 @@ mod tests {
         assert_eq!(exists(Some("u".into()), &missing).unwrap(), Some(false));
         assert!(exists(Some("u".into()), &down).is_err());
         assert_eq!(exists(None, &down).unwrap(), None);
+    }
+
+    #[test]
+    fn goproxy_urls_use_the_escaped_module_path() {
+        let mut c = config("", "publish.registry = \"goproxy\"");
+        let v: Version = "1.2.0-rc.1".parse().unwrap();
+        assert_eq!(version_url(&c, "x", &v), None, "no go.mod, no URL");
+        c.packages.get_mut("x").unwrap().go_module = Some("github.com/BurntSushi/toml/v2".into());
+        assert_eq!(
+            version_url(&c, "x", &v).unwrap(),
+            "https://proxy.golang.org/github.com/!burnt!sushi/toml/v2/@v/v1.2.0-rc.1.info"
+        );
+        assert_eq!(
+            package_url(&c, "x").unwrap(),
+            "https://proxy.golang.org/github.com/!burnt!sushi/toml/v2/@v/list"
+        );
+        assert_eq!(c.publish_command("x", false, None), None);
     }
 }

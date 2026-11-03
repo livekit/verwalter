@@ -65,6 +65,10 @@ pub struct Package {
     /// Overrides `[check]`.
     #[serde(default)]
     pub check: PackageCheck,
+    /// The module path when the first versioned file is a go.mod: Go
+    /// names dependencies and proxy entries by it. Set by `Config::load`.
+    #[serde(skip)]
+    pub go_module: Option<String>,
 }
 
 /// The package keys of `[versioning]`. `Config::parse` fills in the
@@ -98,7 +102,8 @@ impl Default for PackageVersioning {
 #[serde(default, deny_unknown_fields)]
 pub struct PackageRelease {
     /// Tag name with `{package}` and `{version}`. Default: "v{version}"
-    /// with one package, "{package}-v{version}" otherwise.
+    /// with one package, "{package}-v{version}" otherwise, and the Go
+    /// module tag "<path>/v{version}" when the first file is a go.mod.
     pub tag: Option<String>,
     pub mode: ReleaseMode,
     pub draft: bool,
@@ -397,7 +402,7 @@ fn discover(
                 continue;
             }
             return Err(format!(
-                "members: {path} is no Cargo, pnpm or uv workspace member: add it to the workspace, or to exclude"
+                "members: {path} is no Cargo, pnpm, uv or Go workspace member: add it to the workspace, or to exclude"
             )
             .into());
         };
@@ -476,6 +481,43 @@ impl Config {
                 }
             }
             p.versioning.changelog = p.versioning.changelog.as_deref().map(|c| under(&p.path, c));
+            if let (Some(root), Some(VersionedFile::Path(file))) =
+                (root, p.versioning.files.first())
+            {
+                if file.rsplit('/').next() == Some("go.mod") {
+                    p.go_module = std::fs::read_to_string(root.join(file))
+                        .ok()
+                        .and_then(|c| crate::handler::go_module(&c))
+                        .map(|(module, _)| module);
+                }
+            }
+            if p.publish.registry.unwrap_or(config.publish.registry)
+                == crate::registry::Registry::Goproxy
+                && root.is_some()
+                && p.go_module.is_none()
+            {
+                return Err(format!(
+                    "{name}: publish.registry = \"goproxy\" needs go.mod as the first versioned file"
+                )
+                .into());
+            }
+            // A module in `sdk/v2/` is tagged `sdk/v2.x.y`, which the
+            // `<path>/v{version}` default cannot express.
+            if let Some(module) = &p.go_module {
+                let last = p.path.rsplit('/').next().unwrap_or_default();
+                if p.release.tag.is_none()
+                    && last.len() > 1
+                    && last.starts_with('v')
+                    && last[1..].parse::<u64>().is_ok()
+                    && module.ends_with(&format!("/{last}"))
+                {
+                    return Err(format!(
+                        "{name}: {module} is in a major-version directory ({}), which is not supported: keep the module in its directory and change the module path instead",
+                        p.path
+                    )
+                    .into());
+                }
+            }
         }
         let mut seen = std::collections::BTreeSet::new();
         for group in &config.versioning.fixed {
@@ -560,7 +602,7 @@ impl Config {
             Registry::Npm => format!("npm publish --provenance --access public{tag}"),
             Registry::Pypi => "python -m twine upload dist/*".into(),
             Registry::Pubdev => "dart pub publish --force".into(),
-            Registry::None | Registry::Custom => return None,
+            Registry::None | Registry::Custom | Registry::Goproxy => return None,
         })
     }
 
@@ -576,11 +618,31 @@ impl Config {
 
     /// Spec: Package.tag_template default.
     pub fn tag_template(&self, package: &str) -> String {
-        match self.packages[package].release.tag.clone() {
+        let p = &self.packages[package];
+        match p.release.tag.clone() {
             Some(t) => t,
-            None if self.packages.len() == 1 => "v{version}".into(),
+            // Go reads `<dir>/vX.Y.Z` for a module in a subdirectory.
+            None if self.is_go(package) && p.path != "." => format!("{}/v{{version}}", p.path),
+            None if self.is_go(package) || self.packages.len() == 1 => "v{version}".into(),
             None => "{package}-v{version}".into(),
         }
+    }
+
+    /// Whether the package's version lives in a go.mod.
+    pub fn is_go(&self, package: &str) -> bool {
+        matches!(
+            self.packages[package].versioning.files.first(),
+            Some(VersionedFile::Path(f)) if f.rsplit('/').next() == Some("go.mod")
+        )
+    }
+
+    /// The name dependents use for `package`: its Go module path, else its
+    /// name.
+    pub fn dependency_key<'a>(&'a self, package: &'a str) -> &'a str {
+        self.packages[package]
+            .go_module
+            .as_deref()
+            .unwrap_or(package)
     }
 
     /// Spec: black box tag_for.
