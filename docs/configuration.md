@@ -144,7 +144,9 @@ versioning.files = [
 ]
 ```
 
-The first file of a package is its version.
+The first file of a package is its version. A `pyproject.toml` with
+`dynamic = ["version"]` holds no version. List the file that holds it
+instead, for example the `Cargo.toml` next to it for maturin.
 
 **Lock files.** Each release also updates its own entry in the root lock
 file of its manifest format: `Cargo.lock` for `Cargo.toml`,
