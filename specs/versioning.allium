@@ -345,7 +345,11 @@ config {
     -- its module path.
     -- A directory that is no workspace member is a config error unless
     -- excluded. A configured package of the same name overrides the found
-    -- one and needs no path. Empty: the configured packages are all.
+    -- one and needs no path. Without versioning.files, a found package's
+    -- versioned file is the manifest it was found by (Cargo.toml,
+    -- package.json, pyproject.toml, go.mod), or the Cargo.toml next to a
+    -- maturin pyproject.toml with a dynamic version. Empty: the
+    -- configured packages are all.
     -- exclude: workspace members that are no package, by name or path; a
     -- trailing `*` matches a prefix (`examples/*`). members skips them,
     -- and the consistency check does not report them.

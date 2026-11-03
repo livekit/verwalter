@@ -42,7 +42,7 @@ exempt_label = "internal"       # default: PRs with this label need no changeset
 api = "cargo semver-checks --baseline-rev $VERWALTER_BASELINE_TAG 2>&1 | tee /dev/stderr | sed -n 's/.*requires new \\([a-z]*\\) version.*/\\1/p'"
 
 [versioning]                     # what a release changes
-files = ["Cargo.toml"]           # default for every package; relative to its path
+files = ["Cargo.toml"]           # default for every package; relative to its path. Unset: a found member takes its own manifest
 changelog = "CHANGELOG.md"       # default; relative to the package's path. `false` keeps no changelog
 fixed = [["livekit-ffi", "livekit-ffi-node"]]  # groups that release at one shared version
 dependent_bump_level = "patch"   # default

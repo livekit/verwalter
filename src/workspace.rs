@@ -23,6 +23,9 @@ pub struct Member {
     /// Cargo `version.workspace = true`: the version is the root
     /// manifest's `[workspace.package].version`.
     pub inherits_version: bool,
+    /// The file that holds the version, relative to `path`: the manifest
+    /// the member was found by, or the Cargo.toml maturin reads.
+    pub manifest: &'static str,
 }
 
 /// Every package the workspace manifests declare.
@@ -103,6 +106,7 @@ fn cargo_members(root: &Path) -> Vec<Member> {
                     .and_then(|v| v.get("workspace"))
                     .and_then(|w| w.as_bool())
                     == Some(true),
+                manifest: "Cargo.toml",
             })
         })
         .collect()
@@ -144,6 +148,7 @@ fn pnpm_members(root: &Path) -> Vec<Member> {
                     .and_then(|p| p.as_bool())
                     .unwrap_or(false),
                 inherits_version: false,
+                manifest: "package.json",
             })
         })
         .collect()
@@ -173,10 +178,8 @@ fn uv_members(root: &Path) -> Vec<Member> {
     }
     dirs.into_iter()
         .filter_map(|dir| {
-            let manifest = fs::read_to_string(dir.join("pyproject.toml"))
-                .ok()?
-                .parse::<toml::Table>()
-                .ok()?;
+            let text = fs::read_to_string(dir.join("pyproject.toml")).ok()?;
+            let manifest = text.parse::<toml::Table>().ok()?;
             let project = manifest.get("project")?;
             // `Private :: Do Not Upload` is refused by PyPI; `[tool.uv]
             // package = false` marks a uv workspace root that is no package.
@@ -198,6 +201,13 @@ fn uv_members(root: &Path) -> Vec<Member> {
                 path: relative(root, &dir),
                 private,
                 inherits_version: false,
+                manifest: if crate::handler::pyproject_dynamic_version(&text) == Some(true)
+                    && dir.join("Cargo.toml").exists()
+                {
+                    "Cargo.toml"
+                } else {
+                    "pyproject.toml"
+                },
             })
         })
         .collect()
@@ -258,6 +268,7 @@ fn go_members(root: &Path) -> Vec<Member> {
                 path,
                 private: false,
                 inherits_version: false,
+                manifest: "go.mod",
             })
         })
         .collect()
@@ -576,6 +587,79 @@ mod tests {
     }
 
     // Spec: config.workspace.members and exclude.
+    #[test]
+    fn members_default_to_the_manifest_they_were_found_by() {
+        let t = tmp("member-manifests");
+        write(
+            &t.0,
+            "Cargo.toml",
+            "[workspace]\nmembers = [\"crates/*\"]\n",
+        );
+        write(
+            &t.0,
+            "crates/core/Cargo.toml",
+            "[package]\nname = \"core\"\nversion = \"0.1.0\"\n",
+        );
+        write(&t.0, "pnpm-workspace.yaml", "packages:\n  - 'js/*'\n");
+        write(
+            &t.0,
+            "js/sdk/package.json",
+            r#"{"name": "sdk", "version": "1.0.0"}"#,
+        );
+        write(
+            &t.0,
+            "pyproject.toml",
+            "[tool.uv.workspace]\nmembers = [\"py/*\"]\n",
+        );
+        write(
+            &t.0,
+            "py/ext/pyproject.toml",
+            "[build-system]\nbuild-backend = \"maturin\"\n\n[project]\nname = \"ext\"\ndynamic = [\"version\"]\n",
+        );
+        write(
+            &t.0,
+            "py/ext/Cargo.toml",
+            "[package]\nname = \"ext\"\nversion = \"0.3.0\"\n",
+        );
+        write(
+            &t.0,
+            "py/plain/pyproject.toml",
+            "[project]\nname = \"plain\"\nversion = \"2.0.0\"\n",
+        );
+        let load = |extra: &str| {
+            write(
+                &t.0,
+                "verwalter.toml",
+                &format!("[workspace]\nmembers = [\"crates/*\", \"js/*\", \"py/*\"]\n{extra}"),
+            );
+            Config::load(&t.0, &t.0.join("verwalter.toml")).unwrap()
+        };
+        let files = |c: &Config, name: &str| -> Vec<String> {
+            c.packages[name]
+                .versioning
+                .files
+                .iter()
+                .map(|f| f.path().to_string())
+                .collect()
+        };
+        let c = load("[packages.plain]\nversioning.files = [\"VERSION\"]\n");
+        assert_eq!(files(&c, "core"), ["crates/core/Cargo.toml"]);
+        assert_eq!(files(&c, "sdk"), ["js/sdk/package.json"]);
+        assert_eq!(
+            files(&c, "ext"),
+            ["py/ext/Cargo.toml"],
+            "maturin reads Cargo.toml"
+        );
+        assert_eq!(
+            files(&c, "plain"),
+            ["py/plain/VERSION"],
+            "a package's own list wins"
+        );
+        // `[versioning].files` wins over the manifest.
+        let c = load("[versioning]\nfiles = [\"VERSION\"]\n");
+        assert_eq!(files(&c, "sdk"), ["js/sdk/VERSION"]);
+    }
+
     #[test]
     fn members_find_publishable_packages() {
         let t = tmp("members");
