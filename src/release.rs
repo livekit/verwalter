@@ -8,7 +8,7 @@ use std::{fs, path::Path};
 
 use serde::Serialize;
 
-use crate::{config::ReleaseMode, git, github::Gh, repo::Repo, Error};
+use crate::{Error, config::ReleaseMode, git, github::Gh, repo::Repo};
 
 /// One line of the handoff to the publish workflow.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

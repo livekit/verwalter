@@ -7,8 +7,8 @@ use std::{collections::BTreeSet, fs, path::Path};
 use std::process::Command;
 
 use crate::{
-    changeset::Changeset, config::Config, github::Gh, repo::CHANGESET_DIR, version::BumpLevel,
-    Error, Version,
+    Error, Version, changeset::Changeset, config::Config, github::Gh, repo::CHANGESET_DIR,
+    version::BumpLevel,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -785,14 +785,19 @@ versioning.changelog = "CHANGELOG.md"
         );
         assert_eq!(c.status, Status::Passed);
         let body = comment(&c, &config, "o/r", "feat", "t");
-        assert_eq!(body, format!("{MARKER}\n**This PR bumps**\n\n- `livekit-api`: major\n- `livekit-protocol`: minor\n\n"));
+        assert_eq!(
+            body,
+            format!(
+                "{MARKER}\n**This PR bumps**\n\n- `livekit-api`: major\n- `livekit-protocol`: minor\n\n"
+            )
+        );
     }
 
     // Spec: ChangesetCheck.also_released. A dependent and a fixed-group
     // member ride along, named with the reason and without a level.
     #[test]
     fn also_released_names_dependents_and_group_members() {
-        use crate::plan::{plan, PackageState};
+        use crate::plan::{PackageState, plan};
         let v = |s: &str| -> Version { s.parse().unwrap() };
         let mut packages = vec![
             PackageState::new("core", v("1.0.0"), vec![]),

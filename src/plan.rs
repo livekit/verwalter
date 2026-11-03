@@ -5,9 +5,9 @@
 use std::collections::BTreeMap;
 
 use crate::{
-    changeset::Changeset,
-    version::{next_version, BumpLevel},
     Version,
+    changeset::Changeset,
+    version::{BumpLevel, next_version},
 };
 
 /// What the caller knows about one package before planning.

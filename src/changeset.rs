@@ -146,9 +146,10 @@ Add RPC round-trip latency metric.
     #[test]
     fn unknown_packages_are_listed() {
         let u = Changeset::parse("b.md", UNQUOTED).unwrap();
-        assert!(u
-            .unknown_packages(&["livekit-protocol", "livekit-api"])
-            .is_empty());
+        assert!(
+            u.unknown_packages(&["livekit-protocol", "livekit-api"])
+                .is_empty()
+        );
         assert_eq!(u.unknown_packages(&["livekit-api"]), ["livekit-protocol"]);
     }
 

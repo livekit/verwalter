@@ -4,8 +4,8 @@
 //! Functions take content, not paths, so they stay pure.
 
 use knope_versioning::{
-    package::Name, release_notes::ReleaseNotes, versioned_file::cargo, Action, GoVersioning,
-    Package, VersionedFile, VersionedFileConfig,
+    Action, GoVersioning, Package, VersionedFile, VersionedFileConfig, package::Name,
+    release_notes::ReleaseNotes, versioned_file::cargo,
 };
 use relative_path::RelativePathBuf;
 use toml_edit::DocumentMut;
@@ -51,7 +51,9 @@ pub fn go_major_error(module: &str, version: &Version) -> Option<String> {
         return None;
     }
     Some(if major >= 2 {
-        format!("{module}: {version} needs the module path {module}/v{major}. Change it and every import in the PR that adds the major changeset")
+        format!(
+            "{module}: {version} needs the module path {module}/v{major}. Change it and every import in the PR that adds the major changeset"
+        )
     } else {
         format!("{module}: {version} is below v2, but the module path ends in a major version")
     })
@@ -143,8 +145,8 @@ pub fn to_pep440(version: &Version) -> String {
 /// The inverse, for reading: `1.6.0rc1` back to `1.6.0-rc.1`.
 fn from_pep440(s: &str) -> String {
     for label in ["rc", "a", "b"] {
-        if let Some((stable, n)) = s.split_once(label) {
-            if !n.is_empty()
+        if let Some((stable, n)) = s.split_once(label)
+            && !n.is_empty()
                 && n.bytes().all(|b| b.is_ascii_digit())
                 && stable
                     .split('.')
@@ -157,7 +159,6 @@ fn from_pep440(s: &str) -> String {
                 };
                 return format!("{stable}-{semver_label}.{n}");
             }
-        }
     }
     s.to_string()
 }
@@ -169,15 +170,14 @@ fn normalise_pyproject(content: &str) -> String {
         .lines()
         .map(|line| {
             let trimmed = line.trim_start();
-            if let Some(rest) = trimmed.strip_prefix("version") {
-                if let Some(value) = rest.trim_start().strip_prefix('=') {
+            if let Some(rest) = trimmed.strip_prefix("version")
+                && let Some(value) = rest.trim_start().strip_prefix('=') {
                     let value = value.trim();
                     if let Some(inner) = value.strip_prefix('"').and_then(|v| v.strip_suffix('"')) {
                         let indent = &line[..line.len() - trimmed.len()];
                         return format!("{indent}version = \"{}\"", from_pep440(inner));
                     }
                 }
-            }
             line.to_string()
         })
         .collect::<Vec<_>>()
@@ -899,15 +899,20 @@ dev = ["livekit-test-utils~=0.3"]
             v("0.2.2")
         );
         let out = write_version("Cargo.lock", Some(re), lock, None, &v("0.3.0")).unwrap();
-        assert_eq!(out, "[[package]]\nname = \"a\"\nversion = \"0.3.0\"\n\n[[package]]\nname = \"a-uniffi\"\nversion = \"0.2.2\"\n");
-        assert!(write_version(
-            "Cargo.lock",
-            Some("name = \"zzz\""),
-            lock,
-            None,
-            &v("1.0.0")
-        )
-        .is_err());
+        assert_eq!(
+            out,
+            "[[package]]\nname = \"a\"\nversion = \"0.3.0\"\n\n[[package]]\nname = \"a-uniffi\"\nversion = \"0.2.2\"\n"
+        );
+        assert!(
+            write_version(
+                "Cargo.lock",
+                Some("name = \"zzz\""),
+                lock,
+                None,
+                &v("1.0.0")
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -968,10 +973,12 @@ dev = ["livekit-test-utils~=0.3"]
     #[test]
     fn go_major_versions_need_the_module_path_suffix() {
         let bare = "module github.com/acme/greeter // v1.9.0\n";
-        assert!(write_version("go.mod", None, bare, None, &v("2.0.0"))
-            .unwrap_err()
-            .to_string()
-            .contains("github.com/acme/greeter/v2"));
+        assert!(
+            write_version("go.mod", None, bare, None, &v("2.0.0"))
+                .unwrap_err()
+                .to_string()
+                .contains("github.com/acme/greeter/v2")
+        );
         let v2 = "module github.com/acme/greeter/v2 // v1.9.0\n";
         assert_eq!(
             write_version("go.mod", None, v2, None, &v("2.0.0")).unwrap(),

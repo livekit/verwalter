@@ -5,13 +5,13 @@
 use std::collections::BTreeSet;
 
 use crate::{
+    Error,
     config::ReleaseMode,
     git,
     github::{Gh, PullRequest},
     plan::plan,
     prerelease, release,
     repo::Repo,
-    Error,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -121,14 +121,20 @@ pub fn status(repo: &Repo, remote: &str, gh: Gh) -> Result<Vec<PackageStatus>, E
                 p.version, p.name
             )
         } else if tag_state == "local" {
-            format!("tag {tag} is not on {remote}: git push {remote} {tag}, then verwalter release --package {}", p.name)
+            format!(
+                "tag {tag} is not on {remote}: git push {remote} {tag}, then verwalter release --package {}",
+                p.name
+            )
         } else if release_state == "none" {
             format!(
                 "tagged, no GitHub release: verwalter release --package {} [--asset <file>...]",
                 p.name
             )
         } else if release_state == "draft" {
-            format!("draft release waits for assets: verwalter release --package {} --asset <file>... --publish", p.name)
+            format!(
+                "draft release waits for assets: verwalter release --package {} --asset <file>... --publish",
+                p.name
+            )
         } else if let Some(n) = release_pr {
             format!(
                 "merge release PR #{n} for {}",

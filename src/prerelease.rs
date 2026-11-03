@@ -8,12 +8,11 @@
 //! merge, `verwalter release` tags each as a pre-release.
 
 use crate::{
-    apply, branches, git,
-    github::{open_pr, section, upsert_pr, Gh, PullRequest, MARKER},
+    Error, Version, apply, branches, git,
+    github::{Gh, MARKER, PullRequest, open_pr, section, upsert_pr},
     plan::PlannedRelease,
     repo::Repo,
-    version::{next_prerelease_version, BumpLevel},
-    Error, Version,
+    version::{BumpLevel, next_prerelease_version},
 };
 
 /// The rc branch, named after the target like the release PR: `release/main-rc`.
