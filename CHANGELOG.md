@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.25.0
+
+### Minor Changes
+
+- A package that versions `[workspace.package].version` in the root `Cargo.toml` also moves the `Cargo.lock` entry of every crate with `version.workspace = true`, private crates included. A product named like no crate, such as one version for several `publish = false` crates, no longer needs a `Cargo.lock` regex. - [#49](https://github.com/livekit/verwalter/pull/49) ([@lukasIO](https://github.com/lukasIO))
+
 ## 0.24.0
 
 ### Minor Changes
