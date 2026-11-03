@@ -367,7 +367,12 @@ config {
     -- level any member needs. A member with no changeset of its own comes
     -- along. A pre-release of a member takes the whole group. Members
     -- whose committed versions differ are warned about until a release
-    -- aligns them. A package is in at most one group.
+    -- aligns them. A package is in at most one group. Packages whose
+    -- first versioned file is the root Cargo.toml share its version, so
+    -- they form a group without configuration, joined to a configured
+    -- group that holds any of them. A crate with `version.workspace =
+    -- true` takes the root Cargo.toml as its first file, before its own
+    -- manifest, which has no version to write.
     -- dependent_bump_level: the bump level the tool applies itself to a
     -- package whose internal dependency was bumped. A changeset never has
     -- to name dependents; the changeset check only looks at packages

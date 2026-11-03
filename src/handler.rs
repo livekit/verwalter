@@ -171,13 +171,14 @@ fn normalise_pyproject(content: &str) -> String {
         .map(|line| {
             let trimmed = line.trim_start();
             if let Some(rest) = trimmed.strip_prefix("version")
-                && let Some(value) = rest.trim_start().strip_prefix('=') {
-                    let value = value.trim();
-                    if let Some(inner) = value.strip_prefix('"').and_then(|v| v.strip_suffix('"')) {
-                        let indent = &line[..line.len() - trimmed.len()];
-                        return format!("{indent}version = \"{}\"", from_pep440(inner));
-                    }
+                && let Some(value) = rest.trim_start().strip_prefix('=')
+            {
+                let value = value.trim();
+                if let Some(inner) = value.strip_prefix('"').and_then(|v| v.strip_suffix('"')) {
+                    let indent = &line[..line.len() - trimmed.len()];
+                    return format!("{indent}version = \"{}\"", from_pep440(inner));
                 }
+            }
             line.to_string()
         })
         .collect::<Vec<_>>()
@@ -278,6 +279,20 @@ pub fn write_version(
             return Ok(content.to_string());
         }
         return regex_write(path, re, content, version);
+    }
+    if path.rsplit('/').next() == Some("Cargo.toml") && dependency.is_none() {
+        // `version.workspace = true`: the root Cargo.toml holds the
+        // version, and the crate's manifest has none to write.
+        let doc: DocumentMut = content.parse()?;
+        if doc
+            .get("package")
+            .and_then(|p| p.get("version"))
+            .and_then(|v| v.get("workspace"))
+            .and_then(|w| w.as_bool())
+            == Some(true)
+        {
+            return Ok(content.to_string());
+        }
     }
     if let (true, Some(dep)) = (path.rsplit('/').next() == Some("Cargo.toml"), dependency) {
         // A `workspace = true` dependency takes its version from the root

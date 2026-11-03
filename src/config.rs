@@ -461,6 +461,9 @@ impl Config {
         if config.packages.is_empty() {
             return Err("no packages: add [packages.<name>] or members".into());
         }
+        let inheritors = root
+            .map(crate::workspace::cargo_version_inheritors)
+            .unwrap_or_default();
         // Spec: Package.versioned_files and changelog_file are relative to
         // the package's path. Everything after this sees repo-relative paths.
         for (name, p) in &mut config.packages {
@@ -481,6 +484,18 @@ impl Config {
                 }
             }
             p.versioning.changelog = p.versioning.changelog.as_deref().map(|c| under(&p.path, c));
+            // A crate with `version.workspace = true` has no version of its
+            // own: the root Cargo.toml's [workspace.package] has it, so that
+            // is the crate's first file. Its own manifest stays, for the
+            // pins on its dependencies.
+            if let Some(VersionedFile::Path(file)) = p.versioning.files.first()
+                && *file == under(&p.path, "Cargo.toml")
+                && inheritors.iter().any(|m| m.path == p.path)
+            {
+                p.versioning
+                    .files
+                    .insert(0, VersionedFile::Path("Cargo.toml".into()));
+            }
             if let (Some(root), Some(VersionedFile::Path(file))) =
                 (root, p.versioning.files.first())
                 && file.rsplit('/').next() == Some("go.mod") {
@@ -515,6 +530,34 @@ impl Config {
                     )
                     .into());
                 }
+            }
+        }
+        // Spec: config.versioning.fixed. Packages whose version is the
+        // root Cargo.toml's cannot differ: they form one group, joined to
+        // a configured group that holds any of them.
+        let shared: Vec<String> = config
+            .packages
+            .iter()
+            .filter(|(_, p)| {
+                matches!(p.versioning.files.first(), Some(VersionedFile::Path(f)) if f == "Cargo.toml")
+            })
+            .map(|(name, _)| name.clone())
+            .collect();
+        if shared.len() > 1 {
+            let fixed = &mut config.versioning.fixed;
+            match fixed
+                .iter_mut()
+                .find(|g| g.iter().any(|n| shared.contains(n)))
+            {
+                Some(group) => {
+                    let missing: Vec<String> = shared
+                        .iter()
+                        .filter(|n| !group.contains(n))
+                        .cloned()
+                        .collect();
+                    group.extend(missing);
+                }
+                None => fixed.push(shared),
             }
         }
         let mut seen = std::collections::BTreeSet::new();

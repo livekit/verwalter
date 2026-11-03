@@ -164,6 +164,25 @@ path = "."
 versioning.files = ["Cargo.toml", "Cargo.lock"]
 ```
 
+Such a package answers to its own name only. Another package that
+depends on one of its crates is not a dependent of it and gets no bump.
+To release them together, make the crates packages of their own (below),
+or list both packages in `fixed`.
+
+A publishable crate with `version.workspace = true` can also be a package
+of its own. Its version is in the root `Cargo.toml`, so verwalter reads and
+writes it there, and the crate's own `Cargo.toml` keeps the pins on its
+dependencies. All packages on `[workspace.package].version` release
+together as one fixed group, with no `fixed` entry:
+
+```toml
+[workspace]
+members = ["crates/*"]
+
+[versioning]
+files = ["Cargo.toml"]
+```
+
 **Go modules.** With `go.mod` as the first file, the version is the
 `// vX.Y.Z` comment on the module line. The first release writes it.
 Until then, the latest tag of the module is the version, else 0.0.0. The

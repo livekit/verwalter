@@ -115,8 +115,8 @@ pub fn apply(
     {
         rewrite(file, None, Some(key))?;
         if file == "Cargo.lock" {
-            for crate_name in &inheritors {
-                rewrite(file, None, Some(crate_name))?;
+            for member in &inheritors {
+                rewrite(file, None, Some(&member.name))?;
             }
         }
     }
