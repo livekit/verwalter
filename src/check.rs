@@ -468,8 +468,20 @@ pub fn run(root: &Path, config: &Config, pr: u64, gh: Gh) -> Result<Check, Error
         title: String,
         #[serde(rename = "headRefName")]
         head: String,
+        #[serde(rename = "headRepositoryOwner")]
+        head_owner: Owner,
+        #[serde(rename = "headRepository")]
+        head_repo: Repo,
         labels: Vec<Label>,
         files: Vec<File>,
+    }
+    #[derive(serde::Deserialize)]
+    struct Owner {
+        login: String,
+    }
+    #[derive(serde::Deserialize)]
+    struct Repo {
+        name: String,
     }
     #[derive(serde::Deserialize)]
     struct Label {
@@ -485,7 +497,7 @@ pub fn run(root: &Path, config: &Config, pr: u64, gh: Gh) -> Result<Check, Error
         "view",
         &n,
         "--json",
-        "title,headRefName,labels,files",
+        "title,headRefName,headRepositoryOwner,headRepository,labels,files",
     ])?)?;
     let labels: Vec<String> = pr.labels.into_iter().map(|l| l.name).collect();
     let changed: Vec<String> = pr.files.into_iter().map(|f| f.path).collect();
@@ -518,14 +530,10 @@ pub fn run(root: &Path, config: &Config, pr: u64, gh: Gh) -> Result<Check, Error
     // the bumps the PR claims, as a sanity check for the reviewer.
     if check.status == Status::Failed || (check.status == Status::Passed && !check.bumps.is_empty())
     {
-        let slug = gh(&[
-            "repo",
-            "view",
-            "--json",
-            "nameWithOwner",
-            "--jq",
-            ".nameWithOwner",
-        ])?;
+        // The PR branch lives in the head repository: on a fork PR that is
+        // the fork, where the contributor can push and the base repo's
+        // new-file page would 404.
+        let slug = format!("{}/{}", pr.head_owner.login, pr.head_repo.name);
         let body = comment(&check, config, &slug, &pr.head, &pr.title);
         report(&body);
         let missing = check.missing();
@@ -689,18 +697,20 @@ versioning.changelog = "CHANGELOG.md"
     }
 
     // A PR from a fork has a read-only token: the comment write fails,
-    // and the check still returns its own result.
+    // and the check still returns its own result. The changeset link
+    // points at the fork, where the PR branch lives.
     #[test]
     fn run_returns_the_check_when_the_comment_cannot_be_written() {
         let config = Config::parse(CONFIG).unwrap();
         let mut writes = 0;
+        let mut body = String::new();
         let mut gh = |args: &[&str]| -> Result<String, Error> {
             match args {
-                ["pr", "view", ..] => Ok(r#"{"title":"t","headRefName":"feat","labels":[],"files":[{"path":"livekit-protocol/x.proto"}]}"#.into()),
-                ["repo", "view", ..] => Ok("o/r".into()),
+                ["pr", "view", ..] => Ok(r#"{"title":"t","headRefName":"feat","headRepositoryOwner":{"login":"o"},"headRepository":{"name":"r"},"labels":[],"files":[{"path":"livekit-protocol/x.proto"}]}"#.into()),
                 ["api", path, ..] if path.ends_with("/comments") => Ok(String::new()),
                 _ => {
                     writes += 1;
+                    body = args.last().unwrap_or(&"").to_string();
                     Err("HTTP 403: Resource not accessible by integration".into())
                 }
             }
@@ -708,6 +718,10 @@ versioning.changelog = "CHANGELOG.md"
         let c = run(&std::env::temp_dir(), &config, 1, &mut gh).unwrap();
         assert_eq!(c.status, Status::Failed);
         assert_eq!(writes, 1);
+        assert!(
+            body.contains("https://github.com/o/r/new/feat?"),
+            "link should open the new-file page on the PR head repo: {body}"
+        );
     }
 
     // Spec: required_level. A change kind becomes the digit it moves.
