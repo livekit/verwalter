@@ -352,7 +352,10 @@ config {
     -- pin_files: files outside any package that pin every package's
     -- version: a workspace Cargo.toml, Cargo.lock, package-lock.json.
     -- Every release, pre-releases included, updates its own entry in each
-    -- of them, so the workspace still resolves.
+    -- of them, so the workspace still resolves. The root lock file of the
+    -- package's manifest format (Cargo.lock, package-lock.json, uv.lock)
+    -- is one of them without being listed. Lock files of other formats
+    -- are not: an entry of the same name there can be another package.
     workspace: { members: Set<String> = {}, exclude: Set<String> = {}, pin_files: Set<String> = {} }
     -- Contributor PRs. A PR carrying exempt_label needs no changeset. api
     -- is the default api_command, overridden per package.

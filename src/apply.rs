@@ -19,6 +19,14 @@ use crate::{
 
 const LOCK_FILES: &[&str] = &["Cargo.lock", "package-lock.json", "deno.lock", "uv.lock"];
 
+/// The root lock file of each manifest format. A package with that
+/// manifest has an entry there whether or not it lists the lock.
+const ROOT_LOCKS: &[(&str, &str)] = &[
+    ("Cargo.toml", "Cargo.lock"),
+    ("package.json", "package-lock.json"),
+    ("pyproject.toml", "uv.lock"),
+];
+
 fn is_lock_file(path: &str) -> bool {
     LOCK_FILES.contains(&path.rsplit('/').next().unwrap_or(path))
 }
@@ -62,6 +70,29 @@ pub fn apply(
         };
 
     // Own version. A lock file holds it under the package's own entry.
+    for file in &package.versioning.files {
+        rewrite(
+            file.path(),
+            file.regex(),
+            (is_lock_file(file.path()) && file.regex().is_none()).then_some(name),
+        )?;
+    }
+    // Pins: repo-level pin files, then every dependent's manifests. The
+    // root lock file of the package's own manifest format is a pin file
+    // without being listed. Only its own format: a Python package can be
+    // named like a crate from crates.io, whose lock entry is not ours.
+    let key = config.dependency_key(name);
+    let manifests: Vec<&str> = package
+        .versioning
+        .files
+        .iter()
+        .filter(|f| f.regex().is_none())
+        .filter_map(|f| f.path().rsplit('/').next())
+        .collect();
+    let locks = ROOT_LOCKS
+        .iter()
+        .filter(|(manifest, _)| manifests.contains(manifest))
+        .map(|(_, lock)| *lock);
     // A package that versions [workspace.package] in the root Cargo.toml
     // also moves the Cargo.lock entry of every crate that inherits it,
     // private ones included: none of them need be named like the package.
@@ -75,22 +106,19 @@ pub fn apply(
     } else {
         Vec::new()
     };
-    for file in &package.versioning.files {
-        if !is_lock_file(file.path()) || file.regex().is_some() {
-            rewrite(file.path(), file.regex(), None)?;
-            continue;
-        }
-        rewrite(file.path(), None, Some(name))?;
-        if file.path() == "Cargo.lock" {
-            for crate_name in inheritors.iter().filter(|c| *c != name) {
-                rewrite(file.path(), None, Some(crate_name))?;
+    for file in config
+        .workspace
+        .pin_files
+        .iter()
+        .map(String::as_str)
+        .chain(locks)
+    {
+        rewrite(file, None, Some(key))?;
+        if file == "Cargo.lock" {
+            for crate_name in &inheritors {
+                rewrite(file, None, Some(crate_name))?;
             }
         }
-    }
-    // Pins: repo-level pin files, then every dependent's manifests.
-    let key = config.dependency_key(name);
-    for file in &config.workspace.pin_files {
-        rewrite(file, None, Some(key))?;
     }
     let dependents = packages.iter().filter(|p| {
         p.dependencies.iter().any(|d| d == name) && plan.iter().any(|r| r.package == p.name)
@@ -329,6 +357,42 @@ versioning.changelog = "CHANGELOG.md"
         assert_eq!(
             repo.read("livekit-protocol/CHANGELOG.md"),
             "# Changelog\n\n## 0.4.0\n\n### Minor Changes\n\n- Negotiated data channels\n  with details\n\n## 0.3.1\n\n### Patch Changes\n\n- old fix\n"
+        );
+    }
+
+    #[test]
+    fn root_lock_of_the_own_format_moves_without_being_listed() {
+        let repo = Repo::new("root-lock");
+        // livekit-api is a Python package here, named like the crate
+        // entry in Cargo.lock that is not its own.
+        fs::write(
+            repo.0.join("livekit-api/pyproject.toml"),
+            "[project]\nname = \"livekit-api\"\nversion = \"0.4.3\"\n",
+        )
+        .unwrap();
+        let config = Config::parse(
+            "[packages.livekit-protocol]\npath = \"livekit-protocol\"\nversioning.files = [\"Cargo.toml\"]\n\n[packages.livekit-api]\npath = \"livekit-api\"\nversioning.files = [\"pyproject.toml\"]\n",
+        )
+        .unwrap();
+        let state = vec![
+            PackageState::new("livekit-protocol", "0.3.1".parse().unwrap(), vec![]),
+            PackageState::new("livekit-api", "0.4.3".parse().unwrap(), vec![]),
+        ];
+        let changesets = [Changeset::parse(
+            "a.md",
+            "---\nlivekit-protocol: minor\nlivekit-api: minor\n---\nx\n",
+        )
+        .unwrap()];
+        let p = plan(&state, &changesets, BumpLevel::Patch);
+        for release in &p {
+            apply(&repo.0, &config, &state, &changesets, &p, release).unwrap();
+        }
+
+        let lock = repo.read("Cargo.lock");
+        assert!(lock.contains("name = \"livekit-protocol\"\nversion = \"0.4.0\""));
+        assert!(
+            lock.contains("name = \"livekit-api\"\nversion = \"0.4.3\""),
+            "the Python release leaves the crate entry alone"
         );
     }
 

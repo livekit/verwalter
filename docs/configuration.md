@@ -35,7 +35,7 @@ base_branch = "main"             # default
 [workspace]                      # which packages exist; paths relative to the root
 members = ["packages/*"]         # optional: every publishable workspace member there is a package
 exclude = ["examples/*", "packages/internal-tools"]  # by name or path: not a package, not reported
-pin_files = ["Cargo.toml", "Cargo.lock"]   # workspace manifest and lock files; each release updates its own entry
+pin_files = ["Cargo.toml"]       # workspace manifests; each release updates its own entry. Root lock files need no entry
 
 [check]                          # contributor PRs, for `verwalter check`
 exempt_label = "internal"       # default: PRs with this label need no changeset
@@ -145,6 +145,13 @@ versioning.files = [
 ```
 
 The first file of a package is its version.
+
+**Lock files.** Each release also updates its own entry in the root lock
+file of its manifest format: `Cargo.lock` for `Cargo.toml`,
+`package-lock.json` for `package.json`, and `uv.lock` for
+`pyproject.toml`. No configuration lists them. A lock file of another
+format stays as it is, because a Python package can have the name of a
+crate from crates.io.
 
 A package can version `[workspace.package].version` in the root
 `Cargo.toml`, for example one product made of several `publish = false`
