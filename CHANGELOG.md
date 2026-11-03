@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.26.0
+
+### Minor Changes
+
+- A package that `members` finds takes the manifest it was found by as its versioned file when `[versioning].files` is not set: `Cargo.toml`, `package.json`, `pyproject.toml` or `go.mod`, and the `Cargo.toml` next to a maturin `pyproject.toml` with a dynamic version. Before, it failed with "no versioning.files". A mixed Cargo, pnpm and uv repository now needs no `[versioning]` table. - [#54](https://github.com/livekit/verwalter/pull/54) ([@lukasIO](https://github.com/lukasIO))
+- Each release updates its own entry in the root lock file of its manifest format (`Cargo.lock`, `package-lock.json`, `uv.lock`) without a `pin_files` entry. Before, a lock file that no package and no `pin_files` listed stayed at the old version, and `cargo build --locked` failed on the release PR. - [#51](https://github.com/livekit/verwalter/pull/51) ([@lukasIO](https://github.com/lukasIO))
+- A crate with `version.workspace = true` can be a package of its own. Its version is read from and written to the root `Cargo.toml`, the pins on its dependencies still move in its own manifest, and all packages on `[workspace.package].version` release together as one fixed group. Before, such a crate failed with "no versioned file carries a version", and the workaround (the root `Cargo.toml` as its only file) left the pins in dependent crates at the old version. - [#52](https://github.com/livekit/verwalter/pull/52) ([@lukasIO](https://github.com/lukasIO))
+
+### Patch Changes
+
+- A package whose `pyproject.toml` has `dynamic = ["version"]` fails with the cause and the file to list instead: the `Cargo.toml` next to it for maturin. Before, the error only said "no versioned file carries a version". - [#53](https://github.com/livekit/verwalter/pull/53) ([@lukasIO](https://github.com/lukasIO))
+
 ## 0.25.0
 
 ### Minor Changes
