@@ -8,7 +8,7 @@ use std::process::Command;
 
 use serde::Deserialize;
 
-use crate::{config::Config, handler::to_pep440, Error, Version};
+use crate::{Error, Version, config::Config, handler::to_pep440};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]

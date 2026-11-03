@@ -287,11 +287,7 @@ pub(crate) fn relative(root: &Path, dir: &Path) -> String {
         .unwrap_or(dir)
         .to_string_lossy()
         .replace('\\', "/");
-    if rel.is_empty() {
-        ".".to_string()
-    } else {
-        rel
-    }
+    if rel.is_empty() { ".".to_string() } else { rel }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -305,8 +301,14 @@ pub enum Finding {
 impl std::fmt::Display for Finding {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Unmanaged { name, path } => write!(f, "{name} ({path}) is publishable but not in verwalter.toml: add [packages.{name}], match it with `members`, or list it in `exclude`"),
-            Self::Missing { name, path } => write!(f, "{name} is in verwalter.toml but {path} has none of its versioned files: remove it or fix `path`"),
+            Self::Unmanaged { name, path } => write!(
+                f,
+                "{name} ({path}) is publishable but not in verwalter.toml: add [packages.{name}], match it with `members`, or list it in `exclude`"
+            ),
+            Self::Missing { name, path } => write!(
+                f,
+                "{name} is in verwalter.toml but {path} has none of its versioned files: remove it or fix `path`"
+            ),
         }
     }
 }
@@ -392,7 +394,11 @@ mod tests {
     #[test]
     fn cargo_workspace_members_and_publish_flag() {
         let t = tmp("cargo");
-        write(&t.0, "Cargo.toml", "[workspace]\nmembers = [\"crates/*\", \"tools/bench\"]\nexclude = [\"crates/skipped\"]\n\n[workspace.package]\npublish = false\n");
+        write(
+            &t.0,
+            "Cargo.toml",
+            "[workspace]\nmembers = [\"crates/*\", \"tools/bench\"]\nexclude = [\"crates/skipped\"]\n\n[workspace.package]\npublish = false\n",
+        );
         write(
             &t.0,
             "crates/inherits/Cargo.toml",
@@ -452,13 +458,21 @@ mod tests {
             "examples/demo/package.json",
             r#"{"name": "demo", "private": true}"#,
         );
-        write(&t.0, "pyproject.toml", "[project]\nname = \"root\"\nversion = \"0\"\n[tool.uv]\npackage = false\n[tool.uv.workspace]\nmembers = [\"py/*\"]\n");
+        write(
+            &t.0,
+            "pyproject.toml",
+            "[project]\nname = \"root\"\nversion = \"0\"\n[tool.uv]\npackage = false\n[tool.uv.workspace]\nmembers = [\"py/*\"]\n",
+        );
         write(
             &t.0,
             "py/lib/pyproject.toml",
             "[project]\nname = \"lib\"\nversion = \"1.0.0\"\n",
         );
-        write(&t.0, "py/internal/pyproject.toml", "[project]\nname = \"internal\"\nversion = \"1.0.0\"\nclassifiers = [\"Private :: Do Not Upload\"]\n");
+        write(
+            &t.0,
+            "py/internal/pyproject.toml",
+            "[project]\nname = \"internal\"\nversion = \"1.0.0\"\nclassifiers = [\"Private :: Do Not Upload\"]\n",
+        );
         let m = members(&t.0);
         let v: Vec<(&str, bool)> = m.iter().map(|m| (m.name.as_str(), m.private)).collect();
         assert_eq!(
@@ -548,7 +562,13 @@ mod tests {
             r#"{"name": "x", "version": "1.0.0"}"#,
         );
         let load = |exclude: &str| {
-            write(&t.0, "verwalter.toml", &format!("[workspace]\nmembers = [\"packages/*\"]\nexclude = {exclude}\n[versioning]\nfiles = [\"package.json\"]\n[packages.rtc]\nrelease.draft = true\n[packages.x]\npath = \"tools/x\"\n"));
+            write(
+                &t.0,
+                "verwalter.toml",
+                &format!(
+                    "[workspace]\nmembers = [\"packages/*\"]\nexclude = {exclude}\n[versioning]\nfiles = [\"package.json\"]\n[packages.rtc]\nrelease.draft = true\n[packages.x]\npath = \"tools/x\"\n"
+                ),
+            );
             Config::load(&t.0, &t.0.join("verwalter.toml"))
         };
         let e = load("[\"skip\"]").unwrap_err();
@@ -563,10 +583,12 @@ mod tests {
         );
         assert!(check(&t.0, &c).is_empty());
         // Without a checkout, an entry without a path is an error.
-        assert!(Config::parse(
-            "[versioning]\nfiles = [\"package.json\"]\n[packages.rtc]\nrelease.draft = true\n"
-        )
-        .is_err());
+        assert!(
+            Config::parse(
+                "[versioning]\nfiles = [\"package.json\"]\n[packages.rtc]\nrelease.draft = true\n"
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -618,13 +640,21 @@ mod tests {
             "module github.com/acme/lib/v2 // v2.0.0\n",
         );
         let load = |extra: &str| {
-            write(&t.0, "verwalter.toml", &format!("[versioning]\nfiles = [\"go.mod\"]\n[packages.app]\npath = \".\"\n[packages.lib]\npath = \"lib/v2\"\n{extra}"));
+            write(
+                &t.0,
+                "verwalter.toml",
+                &format!(
+                    "[versioning]\nfiles = [\"go.mod\"]\n[packages.app]\npath = \".\"\n[packages.lib]\npath = \"lib/v2\"\n{extra}"
+                ),
+            );
             Config::load(&t.0, &t.0.join("verwalter.toml"))
         };
-        assert!(load("")
-            .unwrap_err()
-            .to_string()
-            .contains("major-version directory"));
+        assert!(
+            load("")
+                .unwrap_err()
+                .to_string()
+                .contains("major-version directory")
+        );
         let c = load("release.tag = \"lib/v{version}\"\n").unwrap();
         let v: crate::Version = "1.2.0".parse().unwrap();
         assert_eq!(c.tag_for("app", &v), "v1.2.0", "the root module of several");

@@ -68,15 +68,31 @@ versioning.files = ["Cargo.toml"]
 versioning.changelog = "CHANGELOG.md"
 "#,
     );
-    write(&root, "Cargo.toml", "[workspace]\nmembers = [\"livekit-protocol\", \"livekit-api\", \"livekit\"]\n\n[workspace.dependencies]\nlivekit-protocol = { version = \"0.3.1\", path = \"livekit-protocol\" }\nlivekit-api = { version = \"0.4.3\", path = \"livekit-api\" }\n");
-    write(&root, "Cargo.lock", "version = 4\n\n[[package]]\nname = \"livekit\"\nversion = \"0.7.0\"\n\n[[package]]\nname = \"livekit-api\"\nversion = \"0.4.3\"\n\n[[package]]\nname = \"livekit-protocol\"\nversion = \"0.3.1\"\n");
+    write(
+        &root,
+        "Cargo.toml",
+        "[workspace]\nmembers = [\"livekit-protocol\", \"livekit-api\", \"livekit\"]\n\n[workspace.dependencies]\nlivekit-protocol = { version = \"0.3.1\", path = \"livekit-protocol\" }\nlivekit-api = { version = \"0.4.3\", path = \"livekit-api\" }\n",
+    );
+    write(
+        &root,
+        "Cargo.lock",
+        "version = 4\n\n[[package]]\nname = \"livekit\"\nversion = \"0.7.0\"\n\n[[package]]\nname = \"livekit-api\"\nversion = \"0.4.3\"\n\n[[package]]\nname = \"livekit-protocol\"\nversion = \"0.3.1\"\n",
+    );
     write(
         &root,
         "livekit-protocol/Cargo.toml",
         "[package]\nname = \"livekit-protocol\"\nversion = \"0.3.1\"\n",
     );
-    write(&root, "livekit-api/Cargo.toml", "[package]\nname = \"livekit-api\"\nversion = \"0.4.3\"\n\n[dependencies]\nlivekit-protocol = { workspace = true }\n");
-    write(&root, "livekit/Cargo.toml", "[package]\nname = \"livekit\"\nversion = \"0.7.0\"\n\n[dependencies]\nlivekit-protocol = { workspace = true }\n");
+    write(
+        &root,
+        "livekit-api/Cargo.toml",
+        "[package]\nname = \"livekit-api\"\nversion = \"0.4.3\"\n\n[dependencies]\nlivekit-protocol = { workspace = true }\n",
+    );
+    write(
+        &root,
+        "livekit/Cargo.toml",
+        "[package]\nname = \"livekit\"\nversion = \"0.7.0\"\n\n[dependencies]\nlivekit-protocol = { workspace = true }\n",
+    );
     // The release branch always writes the entry; a version without one
     // was edited by hand and is not released.
     write(
@@ -149,14 +165,20 @@ fn one_branch_from_one_changeset() {
 
     // Every package in the one commit: own version, workspace pin, changelog.
     assert!(git(root, &["show", "release/main:livekit-protocol/Cargo.toml"]).contains("0.4.0"));
-    assert!(git(root, &["show", "release/main:Cargo.toml"])
-        .contains("livekit-protocol = { version = \"0.4.0\""));
-    assert!(git(
-        root,
-        &["show", "release/main:livekit-protocol/CHANGELOG.md"]
-    )
-    .contains("## 0.4.0"));
-    assert!(git(root, &["show", "release/main:livekit/Cargo.toml"]).contains("version = \"0.8.0\""));
+    assert!(
+        git(root, &["show", "release/main:Cargo.toml"])
+            .contains("livekit-protocol = { version = \"0.4.0\"")
+    );
+    assert!(
+        git(
+            root,
+            &["show", "release/main:livekit-protocol/CHANGELOG.md"]
+        )
+        .contains("## 0.4.0")
+    );
+    assert!(
+        git(root, &["show", "release/main:livekit/Cargo.toml"]).contains("version = \"0.8.0\"")
+    );
     // api only got a dependent patch.
     assert!(
         git(root, &["show", "release/main:livekit-api/Cargo.toml"]).contains("version = \"0.4.4\"")
@@ -166,11 +188,13 @@ fn one_branch_from_one_changeset() {
             .contains("Updated dependencies: livekit-protocol@0.4.0")
     );
     // The changeset is consumed.
-    assert!(git(
-        root,
-        &["ls-tree", "--name-only", "release/main", ".changeset/"]
-    )
-    .is_empty());
+    assert!(
+        git(
+            root,
+            &["ls-tree", "--name-only", "release/main", ".changeset/"]
+        )
+        .is_empty()
+    );
 
     // Re-running regenerates the branch without error; nothing planned, no branch.
     assert!(branches::create(&repo, &plan, "main").unwrap().is_some());
@@ -216,12 +240,14 @@ fn merged_release_consumes_the_changesets() {
 
     let repo = Repo::load(root).unwrap();
     assert!(git(root, &["ls-tree", "--name-only", "HEAD", ".changeset/"]).is_empty());
-    assert!(plan(
-        &repo.packages,
-        &repo.changesets,
-        repo.config.versioning.dependent_bump_level
-    )
-    .is_empty());
+    assert!(
+        plan(
+            &repo.packages,
+            &repo.changesets,
+            repo.config.versioning.dependent_bump_level
+        )
+        .is_empty()
+    );
 }
 
 #[test]
@@ -332,8 +358,16 @@ fn release_tags_and_creates_github_releases_resumably() {
     git(root, &["tag", "livekit-protocol-v0.3.1"]);
     git(root, &["tag", "livekit-api-v0.4.3"]);
     git(root, &["push", "-q", "origin", "--tags"]);
-    write(root, "livekit/Cargo.toml", "[package]\nname = \"livekit\"\nversion = \"0.8.0\"\n\n[dependencies]\nlivekit-protocol = { workspace = true }\n");
-    write(root, "livekit/CHANGELOG.md", "# Changelog\n\n## 0.8.0\n\n### Minor Changes\n\n- Negotiated data channels\n\n## 0.7.0\n\n- init\n");
+    write(
+        root,
+        "livekit/Cargo.toml",
+        "[package]\nname = \"livekit\"\nversion = \"0.8.0\"\n\n[dependencies]\nlivekit-protocol = { workspace = true }\n",
+    );
+    write(
+        root,
+        "livekit/CHANGELOG.md",
+        "# Changelog\n\n## 0.8.0\n\n### Minor Changes\n\n- Negotiated data channels\n\n## 0.7.0\n\n- init\n",
+    );
     let cfg = fs::read_to_string(root.join("verwalter.toml"))
         .unwrap()
         .replace(
@@ -401,9 +435,11 @@ fn release_tags_and_creates_github_releases_resumably() {
         })
     };
     let again = verwalter::release::run(&repo, "origin", &Default::default(), &mut gh2).unwrap();
-    assert!(!calls[before..]
-        .iter()
-        .any(|c| c.starts_with("release create")));
+    assert!(
+        !calls[before..]
+            .iter()
+            .any(|c| c.starts_with("release create"))
+    );
     assert_eq!(
         again.len(),
         1,
@@ -424,7 +460,11 @@ fn maintenance_release_is_not_marked_latest() {
     git(root, &["tag", "livekit-v0.7.0"]);
     git(root, &["tag", "livekit-v1.0.0"]);
     git(root, &["push", "-q", "origin", "--tags"]);
-    write(root, "livekit/Cargo.toml", "[package]\nname = \"livekit\"\nversion = \"0.7.1\"\n\n[dependencies]\nlivekit-protocol = { workspace = true }\n");
+    write(
+        root,
+        "livekit/Cargo.toml",
+        "[package]\nname = \"livekit\"\nversion = \"0.7.1\"\n\n[dependencies]\nlivekit-protocol = { workspace = true }\n",
+    );
     write(
         root,
         "livekit/CHANGELOG.md",
@@ -478,12 +518,16 @@ fn release_resumes_a_tag_without_github_release() {
         (released[0].package.as_str(), released[0].status),
         ("livekit", "published")
     );
-    assert!(calls
-        .iter()
-        .any(|c| c.starts_with("release create livekit-v0.7.0")));
-    assert!(!calls
-        .iter()
-        .any(|c| c.starts_with("release create livekit-api")));
+    assert!(
+        calls
+            .iter()
+            .any(|c| c.starts_with("release create livekit-v0.7.0"))
+    );
+    assert!(
+        !calls
+            .iter()
+            .any(|c| c.starts_with("release create livekit-api"))
+    );
 }
 
 #[test]
@@ -544,10 +588,12 @@ fn release_with_assets_then_abandon() {
             "local tag livekit-v0.7.0"
         ]
     );
-    assert!(calls
-        .borrow()
-        .iter()
-        .any(|c| c == "release delete livekit-v0.7.0 --yes"));
+    assert!(
+        calls
+            .borrow()
+            .iter()
+            .any(|c| c == "release delete livekit-v0.7.0 --yes")
+    );
     assert!(!git(root, &["ls-remote", "--tags", "origin"]).contains("livekit-v0.7.0"));
     assert!(git(root, &["tag", "--list", "livekit-v0.7.0"]).is_empty());
 
@@ -605,18 +651,24 @@ fn prerelease_opens_an_rc_pr_without_consuming_changesets() {
     assert!(calls.iter().any(|c| c.starts_with("pr create --head release/main-rc --base main --title pre-release: livekit-protocol 0.4.0-rc.1, livekit 0.8.0-rc.1")), "{calls:?}");
 
     // Branch content: own version and lock, changelog; no pin in api, changeset kept.
-    assert!(git(
-        root,
-        &["show", "release/main-rc:livekit-protocol/Cargo.toml"]
-    )
-    .contains("0.4.0-rc.1"));
-    assert!(git(root, &["show", "release/main-rc:Cargo.lock"])
-        .contains("name = \"livekit-protocol\"\nversion = \"0.4.0-rc.1\""));
-    assert!(git(
-        root,
-        &["show", "release/main-rc:livekit-protocol/CHANGELOG.md"]
-    )
-    .contains("## 0.4.0-rc.1"));
+    assert!(
+        git(
+            root,
+            &["show", "release/main-rc:livekit-protocol/Cargo.toml"]
+        )
+        .contains("0.4.0-rc.1")
+    );
+    assert!(
+        git(root, &["show", "release/main-rc:Cargo.lock"])
+            .contains("name = \"livekit-protocol\"\nversion = \"0.4.0-rc.1\"")
+    );
+    assert!(
+        git(
+            root,
+            &["show", "release/main-rc:livekit-protocol/CHANGELOG.md"]
+        )
+        .contains("## 0.4.0-rc.1")
+    );
     assert!(
         git(root, &["show", "release/main-rc:livekit-api/Cargo.toml"]).contains("workspace = true")
     );
@@ -707,16 +759,18 @@ fn prerelease_of_a_fixed_group_member_covers_the_group() {
         ]
     );
     assert_eq!(pr.head, "release/main-rc");
-    assert!(git(
-        root,
-        &["show", "release/main-rc:livekit-protocol/Cargo.toml"]
-    )
-    .contains("0.5.0-rc.1"));
-    assert!(git(
-        root,
-        &["show", "release/main-rc:livekit-api/CHANGELOG.md"]
-    )
-    .contains("- Updated dependencies: livekit-protocol@0.5.0-rc.1"), "api depends on protocol, so the dependency line wins over the group line, as in a release plan");
+    assert!(
+        git(
+            root,
+            &["show", "release/main-rc:livekit-protocol/Cargo.toml"]
+        )
+        .contains("0.5.0-rc.1")
+    );
+    assert!(
+        git(root, &["show", "release/main-rc:livekit-api/CHANGELOG.md"])
+            .contains("- Updated dependencies: livekit-protocol@0.5.0-rc.1"),
+        "api depends on protocol, so the dependency line wins over the group line, as in a release plan"
+    );
 
     // The final release plan aligns the group the same way.
     let plan = plan(
@@ -842,9 +896,11 @@ fn release_finishes_a_partial_release_for_one_package() {
             .any(|c| c == "release upload livekit-v0.7.0 --clobber dist/a.tar.gz"),
         "{calls:?}"
     );
-    assert!(calls
-        .iter()
-        .any(|c| c == "release edit livekit-v0.7.0 --draft=false"));
+    assert!(
+        calls
+            .iter()
+            .any(|c| c == "release edit livekit-v0.7.0 --draft=false")
+    );
     assert!(
         !calls.iter().any(|c| c.contains("livekit-api")),
         "other packages untouched"
@@ -1103,15 +1159,17 @@ fn changeset_command_covers_the_changed_packages() {
     );
     // Now covered: nothing to write. A second summary gets its own file.
     let repo = Repo::load(root).unwrap();
-    assert!(verwalter::check::write_changeset(
-        &repo,
-        "main",
-        verwalter::version::BumpLevel::Patch,
-        None,
-        &[]
-    )
-    .unwrap()
-    .is_none());
+    assert!(
+        verwalter::check::write_changeset(
+            &repo,
+            "main",
+            verwalter::version::BumpLevel::Patch,
+            None,
+            &[]
+        )
+        .unwrap()
+        .is_none()
+    );
     // Named packages win over the detection and over coverage.
     let named = verwalter::check::write_changeset(
         &repo,
@@ -1127,14 +1185,16 @@ fn changeset_command_covers_the_changed_packages() {
         "---\nlivekit-api: major\n---\n\nOnly api\n"
     );
     fs::remove_file(&named).unwrap();
-    assert!(verwalter::check::write_changeset(
-        &repo,
-        "main",
-        verwalter::version::BumpLevel::Patch,
-        None,
-        &["nope".to_string()]
-    )
-    .is_err());
+    assert!(
+        verwalter::check::write_changeset(
+            &repo,
+            "main",
+            verwalter::version::BumpLevel::Patch,
+            None,
+            &["nope".to_string()]
+        )
+        .is_err()
+    );
     write(root, "livekit/more.rs", "w");
     fs::remove_file(&path).unwrap();
     let repo = Repo::load(root).unwrap();
@@ -1148,9 +1208,11 @@ fn changeset_command_covers_the_changed_packages() {
     .unwrap()
     .unwrap();
     assert!(again.ends_with("fix_it.md"));
-    assert!(fs::read_to_string(&again)
-        .unwrap()
-        .starts_with("---\nlivekit: patch\nlivekit-api: patch\nlivekit-protocol: patch\n---"));
+    assert!(
+        fs::read_to_string(&again)
+            .unwrap()
+            .starts_with("---\nlivekit: patch\nlivekit-api: patch\nlivekit-protocol: patch\n---")
+    );
 }
 
 // Spec: WorkflowPublishesInDependencyOrder. protocol first; api and
@@ -1236,7 +1298,9 @@ fn publish_runs_dependencies_first_and_blocks_dependents_of_a_failure() {
     assert!(err.to_string().contains("no publish command"), "{err}");
 
     // Everything succeeds: the order file shows protocol before the others.
-    let repo = with_command("echo $VERWALTER_PACKAGE $VERWALTER_VERSION $VERWALTER_TAG $VERWALTER_REGISTRY first=$VERWALTER_FIRST_RELEASE $(pwd | xargs basename) >> $VERWALTER_ROOT/order");
+    let repo = with_command(
+        "echo $VERWALTER_PACKAGE $VERWALTER_VERSION $VERWALTER_TAG $VERWALTER_REGISTRY first=$VERWALTER_FIRST_RELEASE $(pwd | xargs basename) >> $VERWALTER_ROOT/order",
+    );
     let outcomes = verwalter::publish::run(&repo, &opts, &no_registry).unwrap();
     assert!(
         outcomes.iter().all(|o| o.status == "published"),
@@ -1351,9 +1415,11 @@ fn publish_runs_dependencies_first_and_blocks_dependents_of_a_failure() {
         .collect();
     assert_eq!(by["livekit-protocol"], "exists");
     assert_eq!(by["livekit-api"], "published");
-    assert!(!fs::read_to_string(root.join("order"))
-        .unwrap()
-        .contains("protocol"));
+    assert!(
+        !fs::read_to_string(root.join("order"))
+            .unwrap()
+            .contains("protocol")
+    );
     let down = |_: &str| -> Result<u16, verwalter::Error> { Ok(503) };
     assert!(verwalter::publish::run(&repo, &opts, &down).is_err());
 }
@@ -1691,7 +1757,11 @@ fn go_workspace_modules_release_and_publish_through_the_proxy() {
         "sdk/core/go.mod",
         "module github.com/acme/sdk/core\n\ngo 1.24\n",
     );
-    write(root, "sdk/auth/go.mod", "module github.com/acme/sdk/auth // v0.3.0\n\ngo 1.24\n\nrequire github.com/acme/sdk/core v1.2.0\n");
+    write(
+        root,
+        "sdk/auth/go.mod",
+        "module github.com/acme/sdk/auth // v0.3.0\n\ngo 1.24\n\nrequire github.com/acme/sdk/core v1.2.0\n",
+    );
     git(root, &["add", "-A"]);
     git(root, &["commit", "-q", "-m", "init"]);
     git(root, &["tag", "sdk/core/v1.2.0"]);

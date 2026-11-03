@@ -4,7 +4,7 @@
 
 use std::{fs, path::Path};
 
-use crate::{apply, git, plan::PlannedRelease, repo::Repo, Error};
+use crate::{Error, apply, git, plan::PlannedRelease, repo::Repo};
 
 /// `release/main`: the prefix plus the base branch, so it never collides
 /// with the rc branches (`release/<package>-rc`) under the same prefix.

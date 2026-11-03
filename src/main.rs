@@ -6,8 +6,8 @@ use std::{
 
 use clap::Parser;
 use verwalter::{
-    branches, check, github, plan::plan, prerelease, release, repo::Repo, status,
-    version::BumpLevel, workspace, Error,
+    Error, branches, check, github, plan::plan, prerelease, release, repo::Repo, status,
+    version::BumpLevel, workspace,
 };
 
 /// Changeset-based versioning for single packages and monorepos.

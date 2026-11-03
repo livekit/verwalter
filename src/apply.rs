@@ -9,12 +9,12 @@ use std::{
 };
 
 use crate::{
+    Error,
     changeset::Changeset,
     config::Config,
     handler,
     plan::{PackageState, PlannedRelease},
     version::BumpLevel,
-    Error,
 };
 
 const LOCK_FILES: &[&str] = &["Cargo.lock", "package-lock.json", "deno.lock", "uv.lock"];
@@ -215,11 +215,26 @@ versioning.changelog = "CHANGELOG.md"
                 std::env::temp_dir().join(format!("verwalter-{}-{test}", std::process::id()));
             let _ = fs::remove_dir_all(&root);
             let files = [
-                ("Cargo.toml", "[workspace]\nmembers = [\"livekit-protocol\", \"livekit-api\"]\n\n[workspace.dependencies]\nlivekit-protocol = { version = \"0.3.1\", path = \"livekit-protocol\" }\n"),
-                ("Cargo.lock", "version = 4\n\n[[package]]\nname = \"livekit-api\"\nversion = \"0.4.3\"\n\n[[package]]\nname = \"livekit-protocol\"\nversion = \"0.3.1\"\n"),
-                ("livekit-protocol/Cargo.toml", "[package]\nname = \"livekit-protocol\"\nversion = \"0.3.1\"\n"),
-                ("livekit-protocol/CHANGELOG.md", "# Changelog\n\n## 0.3.1\n\n### Patch Changes\n\n- old fix\n"),
-                ("livekit-api/Cargo.toml", "[package]\nname = \"livekit-api\"\nversion = \"0.4.3\"\n\n[dependencies]\nlivekit-protocol = { workspace = true }\nlivekit-protocol-direct = { version = \"0.3.1\" }\n"),
+                (
+                    "Cargo.toml",
+                    "[workspace]\nmembers = [\"livekit-protocol\", \"livekit-api\"]\n\n[workspace.dependencies]\nlivekit-protocol = { version = \"0.3.1\", path = \"livekit-protocol\" }\n",
+                ),
+                (
+                    "Cargo.lock",
+                    "version = 4\n\n[[package]]\nname = \"livekit-api\"\nversion = \"0.4.3\"\n\n[[package]]\nname = \"livekit-protocol\"\nversion = \"0.3.1\"\n",
+                ),
+                (
+                    "livekit-protocol/Cargo.toml",
+                    "[package]\nname = \"livekit-protocol\"\nversion = \"0.3.1\"\n",
+                ),
+                (
+                    "livekit-protocol/CHANGELOG.md",
+                    "# Changelog\n\n## 0.3.1\n\n### Patch Changes\n\n- old fix\n",
+                ),
+                (
+                    "livekit-api/Cargo.toml",
+                    "[package]\nname = \"livekit-api\"\nversion = \"0.4.3\"\n\n[dependencies]\nlivekit-protocol = { workspace = true }\nlivekit-protocol-direct = { version = \"0.3.1\" }\n",
+                ),
             ];
             for (rel, content) in files {
                 let p = root.join(rel);
@@ -277,12 +292,14 @@ versioning.changelog = "CHANGELOG.md"
             ]
         );
 
-        assert!(repo
-            .read("livekit-protocol/Cargo.toml")
-            .contains("version = \"0.4.0\""));
-        assert!(repo
-            .read("Cargo.toml")
-            .contains("livekit-protocol = { version = \"0.4.0\""));
+        assert!(
+            repo.read("livekit-protocol/Cargo.toml")
+                .contains("version = \"0.4.0\"")
+        );
+        assert!(
+            repo.read("Cargo.toml")
+                .contains("livekit-protocol = { version = \"0.4.0\"")
+        );
         let lock = repo.read("Cargo.lock");
         assert!(lock.contains("name = \"livekit-protocol\"\nversion = \"0.4.0\""));
         assert!(
@@ -305,9 +322,10 @@ versioning.changelog = "CHANGELOG.md"
         let api = p.iter().find(|r| r.package == "livekit-api").unwrap();
 
         apply(&repo.0, &config, &state(), &changesets, &p, api).unwrap();
-        assert!(repo
-            .read("livekit-api/Cargo.toml")
-            .contains("version = \"0.4.4\""));
+        assert!(
+            repo.read("livekit-api/Cargo.toml")
+                .contains("version = \"0.4.4\"")
+        );
         // Created from scratch: no changelog existed.
         assert_eq!(
             repo.read("livekit-api/CHANGELOG.md"),

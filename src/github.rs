@@ -9,7 +9,7 @@ use std::{path::Path, process::Command};
 
 use serde::Deserialize;
 
-use crate::{apply::render_entry, branches, git, plan::PlannedRelease, repo::Repo, Error};
+use crate::{Error, apply::render_entry, branches, git, plan::PlannedRelease, repo::Repo};
 
 /// Runs `gh` with the given arguments and returns stdout. Injected so
 /// tests can fake GitHub.
@@ -364,11 +364,9 @@ mod tests {
                 PackageState::new("a", "1.0.0".parse().unwrap(), vec![]),
                 PackageState::new("b", "2.0.0".parse().unwrap(), vec!["a".into()]),
             ],
-            changesets: vec![Changeset::parse(
-                "x.md",
-                "---\na: minor\n---\nAdd thing\nmore detail\n",
-            )
-            .unwrap()],
+            changesets: vec![
+                Changeset::parse("x.md", "---\na: minor\n---\nAdd thing\nmore detail\n").unwrap(),
+            ],
             warnings: Vec::new(),
         }
     }

@@ -14,11 +14,11 @@ use std::{
 use serde::Serialize;
 
 use crate::{
+    Error,
     config::ReleaseMode,
     git,
     registry::{self, Http},
     repo::Repo,
-    Error,
 };
 
 #[derive(Debug, Clone, Default)]

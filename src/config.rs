@@ -699,11 +699,13 @@ release.mode = "tag"
         assert_eq!(c.versioning.prerelease_label, "rc");
         assert_eq!(c.workspace.pin_files, vec!["Cargo.toml", "Cargo.lock"]);
         assert_eq!(c.publish.jobs, 4);
-        assert!(Config::parse(SINGLE)
-            .unwrap()
-            .workspace
-            .pin_files
-            .is_empty());
+        assert!(
+            Config::parse(SINGLE)
+                .unwrap()
+                .workspace
+                .pin_files
+                .is_empty()
+        );
     }
 
     #[test]
