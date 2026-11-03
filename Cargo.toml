@@ -12,6 +12,7 @@ categories = ["development-tools", "command-line-utilities"]
 publish = false
 
 [dependencies]
+clap = { version = "4.6", features = ["derive"] }
 # Versioned file formats (Cargo.toml, Cargo.lock, package.json, pyproject.toml,
 # pubspec.yaml, go.mod, ...), format-preserving edits, semver with pre-releases.
 knope-versioning = "0.8"

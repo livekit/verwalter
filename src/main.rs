@@ -1,17 +1,139 @@
 use std::{
+    collections::BTreeSet,
     path::{Path, PathBuf},
     process::ExitCode,
 };
 
+use clap::Parser;
 use verwalter::{
     branches, check, github, plan::plan, prerelease, release, repo::Repo, status,
     version::BumpLevel, workspace, Error,
 };
 
-const USAGE: &str = "usage: verwalter <status|plan|branches|pr> [--config <file>] [--base <ref>] [--remote <name>] [--dry-run] [<checkout>]\n       verwalter changeset [--level major|minor|patch] [--package <name>]... [--base <ref>] [--summary <text>] [<checkout>]\n       verwalter release [--asset <file|dir>]... [--package <name>] [--publish] [--abandon <tag>] [--remote <name>] [--dry-run] [<checkout>]\n       verwalter check --pr <number> [--config <file>] [--dry-run] [<checkout>]\n       verwalter publish [--releases <json>] [--jobs <n>] [--dry-run] [<checkout>]\n       verwalter pre-release [--target <branch>] [--remote <name>] [--dry-run] [<checkout>]";
+/// Changeset-based versioning for single packages and monorepos.
+#[derive(Parser)]
+#[command(version)]
+struct Cli {
+    /// The repository checkout
+    #[arg(global = true, default_value = ".", value_parser = checkout)]
+    checkout: PathBuf,
+    /// Config file [default: <checkout>/verwalter.toml]
+    #[arg(long, global = true)]
+    config: Option<PathBuf>,
+    /// Git remote
+    #[arg(long, global = true, default_value = "origin")]
+    remote: String,
+    /// Print every write instead of running it
+    #[arg(long, global = true)]
+    dry_run: bool,
+
+    #[command(subcommand)]
+    command: Command,
+}
+
+#[derive(clap::Subcommand)]
+enum Command {
+    /// Per package: version, tag, GitHub release, pending changesets, open PRs, next step
+    Status,
+    /// Print the release plan: next versions, dependencies first
+    Plan,
+    /// Create the release branch locally
+    Branches {
+        /// Ref to branch from [default: the base branch]
+        #[arg(long)]
+        base: Option<String>,
+    },
+    /// Push the release branch and open or update the PR
+    Pr {
+        /// Ref to branch from [default: <remote>/<base branch>]
+        #[arg(long)]
+        base: Option<String>,
+    },
+    /// Write a changeset for the packages the branch changes and no pending changeset covers
+    Changeset {
+        /// Bump level
+        #[arg(long, default_value_t = BumpLevel::Patch)]
+        level: BumpLevel,
+        /// Exactly these packages, not the changed ones
+        #[arg(long = "package", value_name = "NAME")]
+        packages: Vec<String>,
+        /// Ref to diff against [default: <remote>/<base branch>, else the base branch]
+        #[arg(long)]
+        base: Option<String>,
+        /// Changeset summary [default: the last commit subject]
+        #[arg(long, allow_hyphen_values = true)]
+        summary: Option<String>,
+    },
+    /// Tag and create GitHub releases for every untagged version with a changelog entry
+    Release {
+        /// Asset to upload to drafts or the named package: a file, or every file in a directory
+        #[arg(long = "asset", value_name = "FILE|DIR")]
+        assets: Vec<String>,
+        /// Release only this package
+        #[arg(long, value_name = "NAME")]
+        package: Option<String>,
+        /// Publish the draft release
+        #[arg(long)]
+        publish: bool,
+        /// Delete this tag's GitHub release and the tag
+        #[arg(long, value_name = "TAG", conflicts_with_all = ["assets", "package", "publish"])]
+        abandon: Option<String>,
+    },
+    /// Changeset and API check for a contributor PR, with comment
+    Check {
+        /// Pull request number
+        #[arg(long, value_name = "NUMBER")]
+        pr: u64,
+    },
+    /// Run each package's publish command, dependencies first
+    Publish {
+        /// The `releases` output of `release`: only these packages [default: every tagged package]
+        #[arg(long, value_name = "JSON", value_parser = releases)]
+        releases: Option<BTreeSet<String>>,
+        /// Packages to publish at once
+        #[arg(long, value_name = "N")]
+        jobs: Option<usize>,
+    },
+    /// Open an rc PR for every package with a pending changeset
+    PreRelease {
+        /// Branch to open the rc PR from [default: the base branch]
+        #[arg(long, value_name = "BRANCH")]
+        target: Option<String>,
+    },
+}
+
+/// A file as the checkout is most often a glob that the shell expanded
+/// after `--asset`: say so instead of reading the file as the checkout.
+fn checkout(arg: &str) -> Result<PathBuf, String> {
+    if Path::new(arg).is_file() {
+        return Err("the <checkout> is one directory. `--asset` takes one file or one directory, and a glob such as `--asset dist/*` expands to several arguments: pass `--asset dist`".into());
+    }
+    Ok(PathBuf::from(arg))
+}
+
+/// A JSON list of objects with a `package`, or of names. Empty means
+/// nothing to publish.
+fn releases(text: &str) -> Result<BTreeSet<String>, serde_json::Error> {
+    #[derive(serde::Deserialize)]
+    #[serde(untagged)]
+    enum Item {
+        Named { package: String },
+        Name(String),
+    }
+    if text.trim().is_empty() {
+        return Ok(BTreeSet::new());
+    }
+    let items: Vec<Item> = serde_json::from_str(text)?;
+    Ok(items
+        .into_iter()
+        .map(|i| match i {
+            Item::Named { package } | Item::Name(package) => package,
+        })
+        .collect())
+}
 
 fn main() -> ExitCode {
-    match run() {
+    match run(Cli::parse()) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("error: {e}");
@@ -20,87 +142,14 @@ fn main() -> ExitCode {
     }
 }
 
-fn run() -> Result<(), Error> {
-    let mut args = std::env::args().skip(1).peekable();
-    let Some(command) = args.next() else {
-        return Err(USAGE.into());
-    };
-    let mut config = None;
-    let mut base = None;
-    let mut remote = String::from("origin");
-    let mut pr: Option<u64> = None;
-    let mut assets: Vec<String> = Vec::new();
-    let mut abandon: Option<String> = None;
-    let mut target: Option<String> = None;
-    let mut summary: Option<String> = None;
-    let mut packages: Vec<String> = Vec::new();
-    let mut jobs: Option<usize> = None;
-    let mut releases_only: Option<std::collections::BTreeSet<String>> = None;
-    let mut level: Option<BumpLevel> = None;
-    let mut dry_run = false;
-    let mut only: Option<String> = None;
-    let mut publish = false;
-    let mut root = PathBuf::from(".");
-    let mut root_given = false;
-    while let Some(arg) = args.next() {
-        match arg.as_str() {
-            "--config" => config = Some(PathBuf::from(args.next().ok_or(USAGE)?)),
-            "--base" => base = Some(args.next().ok_or(USAGE)?),
-            "--remote" => remote = args.next().ok_or(USAGE)?,
-            "--pr" => pr = Some(args.next().ok_or(USAGE)?.parse()?),
-            "--asset" => assets.push(args.next().ok_or(USAGE)?),
-            "--abandon" => abandon = Some(args.next().ok_or(USAGE)?),
-            "--target" => target = Some(args.next().ok_or(USAGE)?),
-            "--summary" => summary = Some(args.next().ok_or(USAGE)?),
-            "--jobs" => jobs = Some(args.next().ok_or(USAGE)?.parse()?),
-            // The `releases` output of `release`: a JSON list of objects
-            // with a `package`, or of names. Empty means nothing to publish.
-            "--releases" => {
-                #[derive(serde::Deserialize)]
-                #[serde(untagged)]
-                enum Item {
-                    Named { package: String },
-                    Name(String),
-                }
-                let text = args.next().ok_or(USAGE)?;
-                let items: Vec<Item> = if text.trim().is_empty() {
-                    Vec::new()
-                } else {
-                    serde_json::from_str(&text)?
-                };
-                releases_only = Some(
-                    items
-                        .into_iter()
-                        .map(|i| match i {
-                            Item::Named { package } | Item::Name(package) => package,
-                        })
-                        .collect(),
-                );
-            }
-            "--dry-run" => dry_run = true,
-            "--package" => {
-                let p = args.next().ok_or(USAGE)?;
-                only = Some(p.clone());
-                packages.push(p);
-            }
-            "--publish" => publish = true,
-            "--level" => level = Some(args.next().ok_or(USAGE)?.parse().map_err(|()| USAGE)?),
-            _ if arg.starts_with("--") => return Err(format!("unknown flag {arg}\n{USAGE}").into()),
-            // A file, or a second positional argument, is most often a glob
-            // that the shell expanded after `--asset`: say so instead of
-            // reading the last file as the checkout.
-            _ if root_given || Path::new(&arg).is_file() => {
-                return Err(format!(
-                    "unexpected argument {arg}: the <checkout> is one directory. `--asset` takes one file or one directory, and a glob such as `--asset dist/*` expands to several arguments: pass `--asset dist`"
-                )
-                .into())
-            }
-            _ => {
-                root = PathBuf::from(arg);
-                root_given = true;
-            }
-        }
-    }
+fn run(cli: Cli) -> Result<(), Error> {
+    let Cli {
+        command,
+        checkout: root,
+        config,
+        remote,
+        dry_run,
+    } = cli;
     // Commands run in package paths see VERWALTER_ROOT: it must be
     // absolute, or `$VERWALTER_ROOT/dist` resolves inside the package.
     let root = root
@@ -110,15 +159,14 @@ fn run() -> Result<(), Error> {
     // Spec: ChangesetCheckOnContributorPullRequest. `check` reads the
     // config only: a broken changeset on the PR is its finding, not a
     // reason to fail before it runs.
-    if command == "check" {
+    if let Command::Check { pr } = &command {
         let config = verwalter::config::Config::load(&root, &config_path)?;
         let findings = workspace::check(&root, &config);
         if !findings.is_empty() {
             return Err(workspace_error(&findings));
         }
-        let pr = pr.ok_or(USAGE)?;
         let mut gh = gh(&root, &remote, dry_run);
-        let c = check::run(&root, &config, pr, &mut gh)?;
+        let c = check::run(&root, &config, *pr, &mut gh)?;
         println!(
             "{:?}: affected {:?}, covered {:?}",
             c.status, c.affected, c.covered
@@ -158,8 +206,13 @@ fn run() -> Result<(), Error> {
     {
         eprintln!("warning: {w}");
     }
-    match command.as_str() {
-        "changeset" => {
+    match command {
+        Command::Changeset {
+            level,
+            packages,
+            base,
+            summary,
+        } => {
             let base = base.unwrap_or_else(|| {
                 let remote_base = format!("{remote}/{}", repo.config.git.base_branch);
                 if verwalter::git::ref_exists(&repo.root, &remote_base) {
@@ -168,13 +221,7 @@ fn run() -> Result<(), Error> {
                     repo.config.git.base_branch.clone()
                 }
             });
-            match check::write_changeset(
-                &repo,
-                &base,
-                level.unwrap_or(BumpLevel::Patch),
-                summary.as_deref(),
-                &packages,
-            )? {
+            match check::write_changeset(&repo, &base, level, summary.as_deref(), &packages)? {
                 Some(path) => println!(
                     "{}",
                     path.strip_prefix(&repo.root).unwrap_or(&path).display()
@@ -183,7 +230,7 @@ fn run() -> Result<(), Error> {
             }
             Ok(())
         }
-        "plan" => {
+        Command::Plan => {
             print_plan(&repo, &releases);
             // Spec: GoMajorVersion. `branches` fails on it when it writes
             // the go.mod; the plan says so first.
@@ -199,7 +246,7 @@ fn run() -> Result<(), Error> {
             }
             Ok(())
         }
-        "branches" => {
+        Command::Branches { base } => {
             let base = base.unwrap_or_else(|| repo.config.git.base_branch.clone());
             match branches::create(&repo, &releases, &base)? {
                 Some(b) => println!("{b}  on {}", repo.config.git.base_branch),
@@ -207,7 +254,7 @@ fn run() -> Result<(), Error> {
             }
             Ok(())
         }
-        "pr" => {
+        Command::Pr { base } => {
             let base = base.unwrap_or_else(|| format!("{remote}/{}", repo.config.git.base_branch));
             github::attribute(&mut repo, &mut gh(&root, &remote, dry_run));
             let branch = branches::create(&repo, &releases, &base)?;
@@ -220,7 +267,7 @@ fn run() -> Result<(), Error> {
             }
             Ok(())
         }
-        "status" => {
+        Command::Status => {
             let mut gh = gh(&repo.root, &remote, dry_run);
             let rows = status::status(&repo, &remote, &mut gh)?;
             let w = rows.iter().map(|r| r.package.len()).max().unwrap_or(0);
@@ -260,7 +307,7 @@ fn run() -> Result<(), Error> {
             }
             Ok(())
         }
-        "pre-release" => {
+        Command::PreRelease { target } => {
             let target = target.unwrap_or_else(|| repo.config.git.base_branch.clone());
             github::attribute(&mut repo, &mut gh(&root, &remote, dry_run));
             let mut gh = gh(&repo.root, &remote, dry_run);
@@ -274,11 +321,11 @@ fn run() -> Result<(), Error> {
             }
             Ok(())
         }
-        "publish" => {
+        Command::Publish { releases, jobs } => {
             let options = verwalter::publish::Options {
                 jobs,
                 dry_run,
-                only: releases_only,
+                only: releases,
             };
             let outcomes = verwalter::publish::run(&repo, &options, &verwalter::registry::curl)?;
             println!("{}", verwalter::publish::write_outputs(&outcomes)?);
@@ -287,7 +334,12 @@ fn run() -> Result<(), Error> {
             }
             Ok(())
         }
-        "release" => {
+        Command::Release {
+            assets,
+            package,
+            publish,
+            abandon,
+        } => {
             let mut gh = gh(&repo.root, &remote, dry_run);
             if let Some(tag) = abandon {
                 for r in release::abandon(&repo, &remote, &tag, dry_run, &mut gh)? {
@@ -297,7 +349,7 @@ fn run() -> Result<(), Error> {
             }
             let options = release::Options {
                 assets,
-                package: only,
+                package,
                 publish,
                 dry_run,
             };
@@ -308,7 +360,7 @@ fn run() -> Result<(), Error> {
             println!("{}", release::write_outputs(&released)?);
             Ok(())
         }
-        _ => Err(USAGE.into()),
+        Command::Check { .. } => unreachable!("check returned above"),
     }
 }
 
@@ -364,5 +416,16 @@ fn print_plan(repo: &Repo, releases: &[verwalter::plan::PlannedRelease]) {
             r.to,
             r.level.to_string()
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::CommandFactory;
+
+    #[test]
+    fn cli_definition() {
+        Cli::command().debug_assert();
     }
 }
