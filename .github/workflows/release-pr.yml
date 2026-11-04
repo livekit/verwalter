@@ -4,9 +4,9 @@ on:
   push:
     branches: [main]
 
+# The verwalter-release App token does the writes.
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 concurrency:
   group: release-pr
@@ -16,13 +16,21 @@ jobs:
   pr:
     runs-on: ubuntu-latest
     steps:
+      # Pushes and PRs made with github.token start no workflows, so the
+      # release PR would get no CI. The App token does not have this limit.
+      - uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        id: app
+        with:
+          client-id: ${{ secrets.VERWALTER_RELEASE_CLIENT_ID }}
+          private-key: ${{ secrets.VERWALTER_RELEASE_APP_KEY }}
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          token: ${{ steps.app.outputs.token }} # git push uses it
       - uses: actions-rust-lang/setup-rust-toolchain@a188e68d0fd2bd36ad51dccb2b07ba6e75105f30 # v2.0.1
       - run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           cargo run --quiet -- pr
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.app.outputs.token }}
