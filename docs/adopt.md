@@ -166,8 +166,9 @@ Then:
   `--frozen-lockfile` fails in CI. Keep the `.changeset/*.md` files:
   the format is the same and pending ones carry over.
 - If another workflow triggers on the tag or on `release: published`,
-  it will not fire from `github.token`. Give the action a PAT or App
-  token in `token`, or move that job into `release.yml`.
+  it will not fire from `github.token`. Give the action a GitHub App
+  ([action.md](action.md#a-github-app-token)), or move that job into
+  `release.yml`.
 
 ### Step 5. Settings and the handoff
 
@@ -175,7 +176,8 @@ The migration PR cannot do these. List them in its description for the
 maintainer:
 
 - Settings, Actions, General: allow GitHub Actions to create and approve
-  pull requests. Or provide a token in `RELEASE_TOKEN`.
+  pull requests. Or set up a GitHub App
+  ([action.md](action.md#a-github-app-token)).
 - Create the `internal` label.
 - Trusted publishing on npm, PyPI or crates.io for the workflow, if the
   old flow used a token secret. Keep the secret until the first release
@@ -471,9 +473,9 @@ out drifts on the next release.
    its matrix: each job uploads `dist-<target>`, and the release job
    downloads them with `pattern: dist-*` and `merge-multiple: true` into
    `dist`, then passes `--asset dist`.
-2. Keep the tag-triggered workflow and give the action a PAT or App
-   token in `token`, because a tag pushed with `github.token` fires no
-   `push` event. Then `release.mode = "tag"` when the old workflow
+2. Keep the tag-triggered workflow and give the `release` step a GitHub
+   App ([action.md](action.md#a-github-app-token)), because a tag pushed
+   with `github.token` fires no `push` event. Then `release.mode = "tag"` when the old workflow
    creates the GitHub release itself.
 
 goreleaser creates the GitHub release on its own. Either run it with

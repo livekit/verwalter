@@ -9,8 +9,14 @@ inputs:
     description: Pull request number for `check`. Defaults to the event's pull request.
     default: ${{ github.event.pull_request.number }}
   token:
-    description: GitHub token with contents and pull-requests write for `pr` and `release`.
+    description: GitHub token with contents and pull-requests write for `pr` and `release`. Ignored when `app-client-id` is set.
     default: ${{ github.token }}
+  app-client-id:
+    description: Client ID of a GitHub App. With `app-private-key`, the action makes an installation token for this repository and uses it in place of `token`.
+    default: ""
+  app-private-key:
+    description: Private key of that GitHub App.
+    default: ""
   version:
     description: verwalter release to run. Defaults to the version this action was checked out at.
     default: ""
@@ -47,6 +53,14 @@ outputs:
 runs:
   using: composite
   steps:
+    - name: Make GitHub App token
+      id: app
+      if: inputs.app-client-id != ''
+      uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+      with:
+        client-id: ${{ inputs.app-client-id }}
+        private-key: ${{ inputs.app-private-key }}
+
     - name: Install verwalter
       shell: bash
       env:
@@ -83,14 +97,27 @@ runs:
       id: run
       shell: bash
       env:
-        GH_TOKEN: ${{ inputs.token }}
+        GH_TOKEN: ${{ steps.app.outputs.token || inputs.token }}
         COMMAND: ${{ inputs.command }}
         PR: ${{ inputs.pr }}
         ARGS: ${{ inputs.args }}
         DRY_RUN: ${{ inputs.dry-run }}
         RELEASES: ${{ inputs.releases }}
+        DEFAULT_TOKEN: ${{ github.token }}
+        SERVER_URL: ${{ github.server_url }}
       run: |
         set -euo pipefail
+        # git pushes with the credentials of actions/checkout, which are
+        # github.token. Pushes made with github.token start no workflows, so
+        # point git at the other token: the empty value clears the header
+        # that checkout set.
+        if [ "$GH_TOKEN" != "$DEFAULT_TOKEN" ]; then
+          AUTH=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')
+          echo "::add-mask::$AUTH"
+          export GIT_CONFIG_COUNT=2
+          export GIT_CONFIG_KEY_0="http.$SERVER_URL/.extraheader" GIT_CONFIG_VALUE_0=""
+          export GIT_CONFIG_KEY_1="http.$SERVER_URL/.extraheader" GIT_CONFIG_VALUE_1="AUTHORIZATION: basic $AUTH"
+        fi
         git config --global user.name "github-actions[bot]"
         git config --global user.email "github-actions[bot]@users.noreply.github.com"
         if [ "$DRY_RUN" = "true" ]; then ARGS="$ARGS --dry-run"; fi

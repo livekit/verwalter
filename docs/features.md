@@ -83,4 +83,4 @@ and `origin/<base>` are current.
 | Hotfix from a release branch | `pr --base <branch>` works. The changelog entry is not carried back to `main`. Backport it by hand. |
 | A pre-release on a maintenance branch | The rc starts from the highest final tag of the package on any branch. An rc on `v1` after 2.0.0 is therefore 2.0.1-rc.1. Release from `v1` without an rc. |
 | rc numbering in a shallow checkout | Tags number the rc. Check out with `fetch-depth: 0`. |
-| Downstream workflows triggered by tags or releases | Tags and releases made with `github.token` fire no `push` or `release` event. Use an App or PAT token. Or do the next step in the same workflow. |
+| Downstream workflows triggered by tags or releases | Tags and releases made with `github.token` fire no `push` or `release` event. Use a GitHub App (`app-client-id`, `app-private-key`). Or do the next step in the same workflow. |
