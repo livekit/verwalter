@@ -6,6 +6,8 @@ use std::{collections::BTreeSet, fs, path::Path};
 
 use std::process::Command;
 
+use anyhow::{Context, anyhow, bail};
+
 use crate::{
     Error, Version, changeset::Changeset, config::Config, github::Gh, repo::CHANGESET_DIR,
     version::BumpLevel,
@@ -204,7 +206,7 @@ pub fn api_check(
             .into_iter()
             .find(|p| &p.name == name)
             .map(|p| p.version)
-            .ok_or_else(|| format!("{name}: not loaded"))?;
+            .with_context(|| format!("{name}: not loaded"))?;
         let out = Command::new("sh")
             .arg("-c")
             .arg(command)
@@ -215,7 +217,7 @@ pub fn api_check(
             .env("VERWALTER_BASELINE_TAG", config.tag_for(name, &version))
             .env("VERWALTER_LEVEL", claimed.to_string())
             .output()
-            .map_err(|e| format!("{name}: api command: {e}"))?;
+            .with_context(|| format!("{name}: api command"))?;
         let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
         let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
         let kind = stdout.split_whitespace().last().unwrap_or("");
@@ -294,7 +296,7 @@ pub fn write_changeset(
     } else {
         for p in packages {
             if !repo.config.packages.contains_key(p) {
-                return Err(format!("unknown package {p}").into());
+                bail!("unknown package {p}");
             }
         }
         packages.to_vec()
@@ -516,7 +518,7 @@ pub fn run(root: &Path, config: &Config, pr: u64, gh: Gh) -> Result<Check, Error
     let changesets = match read_changesets(root, config, &changed) {
         Ok(c) => c,
         Err(e) => {
-            let body = format!("{MARKER}\n### Changeset invalid\n\n{e}\n");
+            let body = format!("{MARKER}\n### Changeset invalid\n\n{e:#}\n");
             report(&body);
             sync_comment(gh, &n, &existing, Some(&body));
             return Err(e);
@@ -583,7 +585,7 @@ fn read_changesets(
         let Ok(content) = fs::read_to_string(root.join(f)) else {
             continue;
         };
-        out.push(Changeset::parse_known(f, &content, &known).map_err(|e| format!("`{f}`: {e}"))?);
+        out.push(Changeset::parse_known(f, &content, &known).with_context(|| format!("`{f}`"))?);
     }
     Ok(out)
 }
@@ -593,7 +595,7 @@ fn read_changesets(
 /// on its result, not on the comment.
 fn sync_comment(gh: Gh, pr: &str, existing: &Result<Option<String>, Error>, body: Option<&str>) {
     let written = match (existing, body) {
-        (Err(e), _) => Err(e.to_string().into()),
+        (Err(e), _) => Err(anyhow!("{e:#}")),
         (Ok(Some(id)), Some(body)) => gh(&[
             "api",
             "-X",
@@ -612,7 +614,7 @@ fn sync_comment(gh: Gh, pr: &str, existing: &Result<Option<String>, Error>, body
         (Ok(None), None) => return,
     };
     if let Err(e) = written {
-        let e = e.to_string();
+        let e = format!("{e:#}");
         let first = e.lines().next().unwrap_or_default();
         println!("::warning::PR comment not updated, the result is in the job summary: {first}");
     }
@@ -711,7 +713,7 @@ versioning.changelog = "CHANGELOG.md"
                 _ => {
                     writes += 1;
                     body = args.last().unwrap_or(&"").to_string();
-                    Err("HTTP 403: Resource not accessible by integration".into())
+                    Err(anyhow!("HTTP 403: Resource not accessible by integration"))
                 }
             }
         };

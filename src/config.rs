@@ -6,6 +6,7 @@
 
 use std::{collections::BTreeMap, path::Path};
 
+use anyhow::{Context, bail};
 use serde::Deserialize;
 
 use crate::version::BumpLevel;
@@ -396,7 +397,7 @@ fn discover(
         .entry("packages")
         .or_insert_with(|| toml::Table::new().into())
         .as_table_mut()
-        .ok_or("packages: a table")?;
+        .context("packages: a table")?;
     for dir in members
         .iter()
         .flat_map(|m| crate::workspace::expand(root, m))
@@ -406,10 +407,9 @@ fn discover(
             if crate::workspace::excluded(exclude, "", &path) {
                 continue;
             }
-            return Err(format!(
+            bail!(
                 "members: {path} is no Cargo, pnpm, uv or Go workspace member: add it to the workspace, or to exclude"
-            )
-            .into());
+            );
         };
         if m.private || crate::workspace::excluded(exclude, &m.name, &path) {
             continue;
@@ -455,7 +455,7 @@ impl Config {
     /// Reads the config at `path` and finds the `members` packages under
     /// `root`.
     pub fn load(root: &Path, path: &Path) -> Result<Self, crate::Error> {
-        let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let text = std::fs::read_to_string(path).with_context(|| path.display().to_string())?;
         Self::parse_in(&text, Some(root))
     }
 
@@ -474,7 +474,7 @@ impl Config {
         inherit(&mut table);
         let mut config: Self = table.try_into()?;
         if config.packages.is_empty() {
-            return Err("no packages: add [packages.<name>] or members".into());
+            bail!("no packages: add [packages.<name>] or members");
         }
         let inheritors = root
             .map(crate::workspace::cargo_version_inheritors)
@@ -483,13 +483,10 @@ impl Config {
         // the package's path. Everything after this sees repo-relative paths.
         for (name, p) in &mut config.packages {
             if p.path.is_empty() {
-                return Err(format!("{name}: no path, and members does not find it").into());
+                bail!("{name}: no path, and members does not find it");
             }
             if p.versioning.files.is_empty() {
-                return Err(format!(
-                    "{name}: no versioning.files, on the package or in [versioning]"
-                )
-                .into());
+                bail!("{name}: no versioning.files, on the package or in [versioning]");
             }
             for f in &mut p.versioning.files {
                 match f {
@@ -524,10 +521,9 @@ impl Config {
                 && root.is_some()
                 && p.go_module.is_none()
             {
-                return Err(format!(
+                bail!(
                     "{name}: publish.registry = \"goproxy\" needs go.mod as the first versioned file"
-                )
-                .into());
+                );
             }
             // A module in `sdk/v2/` is tagged `sdk/v2.x.y`, which the
             // `<path>/v{version}` default cannot express.
@@ -539,11 +535,10 @@ impl Config {
                     && last[1..].parse::<u64>().is_ok()
                     && module.ends_with(&format!("/{last}"))
                 {
-                    return Err(format!(
+                    bail!(
                         "{name}: {module} is in a major-version directory ({}), which is not supported: keep the module in its directory and change the module path instead",
                         p.path
-                    )
-                    .into());
+                    );
                 }
             }
         }
@@ -579,10 +574,10 @@ impl Config {
         for group in &config.versioning.fixed {
             for name in group {
                 if !config.packages.contains_key(name) {
-                    return Err(format!("fixed group names unknown package {name}").into());
+                    bail!("fixed group names unknown package {name}");
                 }
                 if !seen.insert(name) {
-                    return Err(format!("{name} is in two fixed groups").into());
+                    bail!("{name} is in two fixed groups");
                 }
             }
         }

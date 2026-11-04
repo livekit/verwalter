@@ -7,6 +7,8 @@
 //! them. Dependents without a changeset are not touched. After the
 //! merge, `verwalter release` tags each as a pre-release.
 
+use anyhow::bail;
+
 use crate::{
     Error, Version, apply, branches, git,
     github::{Gh, MARKER, PullRequest, open_pr, section, upsert_pr},
@@ -51,7 +53,7 @@ pub fn plan(repo: &Repo) -> Result<Vec<PlannedRelease>, Error> {
         }
     }
     if groups.is_empty() {
-        return Err("no pending changesets: nothing to pre-release".into());
+        bail!("no pending changesets: nothing to pre-release");
     }
     let in_rc = |name: &str| groups.iter().any(|g| g.iter().any(|m| m == name));
 
@@ -126,7 +128,7 @@ pub fn open(
     let branch = branch_name(repo, target);
     let start = format!("{remote}/{target}");
     if !git::ref_exists(&repo.root, &start) {
-        return Err(format!("{start} does not exist; fetch it first").into());
+        bail!("{start} does not exist; fetch it first");
     }
     // One version when the rc is one group, else "name version" each.
     let prefix = "pre-release: ";

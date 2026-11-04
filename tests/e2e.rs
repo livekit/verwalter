@@ -218,10 +218,10 @@ fn merged_release_consumes_the_changesets() {
         ".changeset/other.md",
         "---\nlivekit-protocol: patch\nsomething-else: patch\n---\ny\n",
     );
-    let err = Repo::load(root)
-        .err()
-        .expect("unknown package refused")
-        .to_string();
+    let err = format!(
+        "{:#}",
+        Repo::load(root).err().expect("unknown package refused")
+    );
     assert!(
         err.contains("other.md: names unknown package something-else"),
         "{err}"
@@ -386,7 +386,7 @@ fn release_tags_and_creates_github_releases_resumably() {
             ["release", "view", tag, ..] if *tag != "livekit-v0.8.0" => {
                 Ok(r#"{"isDraft":false,"assets":[]}"#.into())
             }
-            ["release", "view", ..] => Err("release not found".into()),
+            ["release", "view", ..] => Err(anyhow::anyhow!("release not found")),
             _ => Ok(String::new()),
         }
     };
@@ -477,7 +477,7 @@ fn maintenance_release_is_not_marked_latest() {
     let mut gh = |args: &[&str]| -> Result<String, verwalter::Error> {
         calls.push(args.join(" "));
         match args {
-            ["release", "view", "livekit-v0.7.1", ..] => Err("release not found".into()),
+            ["release", "view", "livekit-v0.7.1", ..] => Err(anyhow::anyhow!("release not found")),
             ["release", "view", ..] => Ok(r#"{"isDraft":false,"assets":[]}"#.into()),
             _ => Ok(String::new()),
         }
@@ -507,7 +507,7 @@ fn release_resumes_a_tag_without_github_release() {
     let mut gh = |args: &[&str]| -> Result<String, verwalter::Error> {
         calls.push(args.join(" "));
         match args {
-            ["release", "view", "livekit-v0.7.0", ..] => Err("not found".into()),
+            ["release", "view", "livekit-v0.7.0", ..] => Err(anyhow::anyhow!("not found")),
             ["release", "view", ..] => Ok(r#"{"isDraft":false,"assets":[]}"#.into()),
             _ => Ok(String::new()),
         }
@@ -549,7 +549,9 @@ fn release_with_assets_then_abandon() {
         };
         calls.borrow_mut().push(args.join(" "));
         match args {
-            ["release", "view", "livekit-v0.7.0", ..] if !exists => Err("not found".into()),
+            ["release", "view", "livekit-v0.7.0", ..] if !exists => {
+                Err(anyhow::anyhow!("not found"))
+            }
             ["release", "view", ..] => Ok(r#"{"isDraft":false,"assets":[]}"#.into()),
             _ => Ok(String::new()),
         }
@@ -821,7 +823,7 @@ fn dry_run_writes_nothing() {
         }
         Ok(match args {
             ["pr", "list", ..] => "[]".into(),
-            ["release", "view", ..] => Err("not found")?,
+            ["release", "view", ..] => Err(anyhow::anyhow!("not found"))?,
             _ => String::new(),
         })
     };
@@ -961,7 +963,7 @@ fn status_reports_state_and_next_step() {
             ["release", "view", "livekit-api-v0.4.3", ..] => {
                 Ok(r#"{"isDraft":true,"assets":[]}"#.into())
             }
-            _ => Err("not found".into()),
+            _ => Err(anyhow::anyhow!("not found")),
         }
     };
     let rows = verwalter::status::status(&repo, "origin", &mut gh).unwrap();
@@ -1011,7 +1013,7 @@ fn release_runs_in_dependency_order_and_stops_at_the_first_failure() {
     let mut gh = |args: &[&str]| -> Result<String, verwalter::Error> {
         calls.borrow_mut().push(args.join(" "));
         match args {
-            ["release", "view", ..] => Err("not found".into()),
+            ["release", "view", ..] => Err(anyhow::anyhow!("not found")),
             _ => Ok(String::new()),
         }
     };
@@ -1026,9 +1028,9 @@ fn release_runs_in_dependency_order_and_stops_at_the_first_failure() {
     let repo2 = Repo::load(root2).unwrap();
     let mut gh2 = |args: &[&str]| -> Result<String, verwalter::Error> {
         match args {
-            ["release", "view", ..] => Err("not found".into()),
+            ["release", "view", ..] => Err(anyhow::anyhow!("not found")),
             ["release", "create", tag, ..] if tag.starts_with("livekit-protocol") => {
-                Err("boom".into())
+                Err(anyhow::anyhow!("boom"))
             }
             _ => Ok(String::new()),
         }
@@ -1069,7 +1071,7 @@ fn hand_bumped_version_is_not_released() {
     let repo = Repo::load(root).unwrap();
     let mut gh = |args: &[&str]| -> Result<String, verwalter::Error> {
         match args {
-            ["release", "view", "livekit-v0.7.1", ..] => Err("not found".into()),
+            ["release", "view", "livekit-v0.7.1", ..] => Err(anyhow::anyhow!("not found")),
             ["release", "view", ..] => Ok(r#"{"isDraft":false,"assets":[]}"#.into()),
             _ => Ok(String::new()),
         }
@@ -1236,8 +1238,9 @@ fn publish_runs_dependencies_first_and_blocks_dependents_of_a_failure() {
         );
         Repo::load(root).unwrap()
     };
-    let no_registry =
-        |_: &str| -> Result<u16, verwalter::Error> { Err("no registry configured".into()) };
+    let no_registry = |_: &str| -> Result<u16, verwalter::Error> {
+        Err(anyhow::anyhow!("no registry configured"))
+    };
     let opts = verwalter::publish::Options {
         jobs: Some(4),
         dry_run: false,
@@ -1451,7 +1454,8 @@ fn workspace_publish_command_runs_once_and_reports_per_member() {
     let repo = Repo::load(root).unwrap();
     assert!(repo.config.in_workspace_publish("livekit-protocol"));
     assert!(!repo.config.in_workspace_publish("livekit"));
-    let no_registry = |_: &str| -> Result<u16, verwalter::Error> { Err("no registry".into()) };
+    let no_registry =
+        |_: &str| -> Result<u16, verwalter::Error> { Err(anyhow::anyhow!("no registry")) };
     let opts = verwalter::publish::Options {
         jobs: Some(4),
         dry_run: false,
@@ -1849,7 +1853,9 @@ fn go_workspace_modules_release_and_publish_through_the_proxy() {
         dry_run: true,
         ..opts
     };
-    let none = |_: &str| -> Result<u16, verwalter::Error> { Err("no request in a dry run".into()) };
+    let none = |_: &str| -> Result<u16, verwalter::Error> {
+        Err(anyhow::anyhow!("no request in a dry run"))
+    };
     let out = verwalter::publish::run(&repo, &dry, &none).unwrap();
     assert!(
         out[0].reason.starts_with("GET https://proxy.golang.org/"),
@@ -1882,7 +1888,7 @@ fn asset_directory_attaches_every_file_in_it() {
     let mut gh = |args: &[&str]| -> Result<String, verwalter::Error> {
         calls.borrow_mut().push(args.join(" "));
         match args {
-            ["release", "view", ..] => Err("not found".into()),
+            ["release", "view", ..] => Err(anyhow::anyhow!("not found")),
             _ => Ok(String::new()),
         }
     };

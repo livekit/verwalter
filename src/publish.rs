@@ -11,6 +11,7 @@ use std::{
     sync::mpsc,
 };
 
+use anyhow::Context;
 use serde::Serialize;
 
 use crate::{
@@ -118,7 +119,7 @@ fn candidates(
         // Spec: Registry goproxy. The proxy request is the publish: an
         // empty command marks it.
         let goproxy = repo.config.registry_of(&p.name) == registry::Registry::Goproxy;
-        let command = repo.config.publish_command(&p.name, in_pnpm_workspace(&repo.root, &cfg.path), npm_tag.as_deref()).or_else(|| goproxy.then(String::new)).ok_or_else(|| {
+        let command = repo.config.publish_command(&p.name, in_pnpm_workspace(&repo.root, &cfg.path), npm_tag.as_deref()).or_else(|| goproxy.then(String::new)).with_context(|| {
             format!("{}: no publish command: set `publish.registry` or `publish.command` on the package, or in `[publish]`", p.name)
         })?;
         out.insert(
@@ -396,7 +397,7 @@ pub fn run(repo: &Repo, options: &Options, http: Http) -> Result<Vec<Outcome>, E
                 }
                 return Ok(());
             }
-            let (name, ok, output, status) = rx.recv().map_err(|e| e.to_string())?;
+            let (name, ok, output, status) = rx.recv()?;
             running.remove(&name);
             let c = &candidates[&name];
             println!(

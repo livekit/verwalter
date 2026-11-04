@@ -8,6 +8,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use anyhow::Context;
+
 use crate::{
     Error,
     changeset::Changeset,
@@ -49,7 +51,7 @@ pub fn apply(
     let package = config
         .packages
         .get(name)
-        .ok_or_else(|| format!("package {name} is not in verwalter.toml"))?;
+        .with_context(|| format!("package {name} is not in verwalter.toml"))?;
     let mut written = Vec::new();
 
     let mut rewrite =

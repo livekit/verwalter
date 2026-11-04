@@ -4,6 +4,7 @@ use std::{
     process::ExitCode,
 };
 
+use anyhow::{Context, anyhow, bail};
 use clap::Parser;
 use verwalter::{
     Error, branches, check, github, plan::plan, prerelease, release, repo::Repo, status,
@@ -136,7 +137,7 @@ fn main() -> ExitCode {
     match run(Cli::parse()) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            eprintln!("error: {e}");
+            eprintln!("error: {e:#}");
             ExitCode::FAILURE
         }
     }
@@ -154,7 +155,7 @@ fn run(cli: Cli) -> Result<(), Error> {
     // absolute, or `$VERWALTER_ROOT/dist` resolves inside the package.
     let root = root
         .canonicalize()
-        .map_err(|e| format!("{}: {e}", root.display()))?;
+        .with_context(|| root.display().to_string())?;
     let config_path = config.unwrap_or_else(|| root.join(verwalter::repo::CONFIG_FILE));
     // Spec: ChangesetCheckOnContributorPullRequest. `check` reads the
     // config only: a broken changeset on the PR is its finding, not a
@@ -185,7 +186,7 @@ fn run(cli: Cli) -> Result<(), Error> {
                     None => format!("{}: the API check did not run: {}", f.package, f.output),
                 });
             }
-            return Err(why.join("\n").into());
+            bail!(why.join("\n"));
         }
         return Ok(());
     }
@@ -242,7 +243,7 @@ fn run(cli: Cli) -> Result<(), Error> {
                 })
                 .collect();
             if !go.is_empty() {
-                return Err(go.join("\n").into());
+                bail!(go.join("\n"));
             }
             Ok(())
         }
@@ -260,7 +261,7 @@ fn run(cli: Cli) -> Result<(), Error> {
             let branch = branches::create(&repo, &releases, &base)?;
             let mut gh = gh(&repo.root, &remote, dry_run);
             let pr = github::sync(&repo, &releases, branch.as_deref(), &remote, dry_run, &mut gh)
-                .map_err(|e| format!("{e}\nresume with: verwalter pr  (the branch is regenerated, the PR updated in place; --dry-run shows the steps)"))?;
+                .map_err(|e| anyhow!("{e:#}\nresume with: verwalter pr  (the branch is regenerated, the PR updated in place; --dry-run shows the steps)"))?;
             match pr {
                 Some(pr) => println!("#{}  {}  on {}", pr.number, pr.head, pr.base),
                 None => println!("nothing to release"),
@@ -312,7 +313,7 @@ fn run(cli: Cli) -> Result<(), Error> {
             github::attribute(&mut repo, &mut gh(&root, &remote, dry_run));
             let mut gh = gh(&repo.root, &remote, dry_run);
             let (releases, pr) = prerelease::open(&repo, &target, &remote, dry_run, &mut gh)
-                .map_err(|e| format!("{e}\nresume with: verwalter pre-release --target {target}  (the rc branch and PR are updated in place)"))?;
+                .map_err(|e| anyhow!("{e:#}\nresume with: verwalter pre-release --target {target}  (the rc branch and PR are updated in place)"))?;
             for r in &releases {
                 println!(
                     "#{}  {}  {} {} -> {}  on {}",
@@ -330,7 +331,7 @@ fn run(cli: Cli) -> Result<(), Error> {
             let outcomes = verwalter::publish::run(&repo, &options, &verwalter::registry::curl)?;
             println!("{}", verwalter::publish::write_outputs(&outcomes)?);
             if verwalter::publish::failed(&outcomes) {
-                return Err("not every package was published".into());
+                bail!("not every package was published");
             }
             Ok(())
         }
@@ -365,7 +366,7 @@ fn run(cli: Cli) -> Result<(), Error> {
 }
 
 fn workspace_error(findings: &[workspace::Finding]) -> Error {
-    format!(
+    anyhow!(
         "verwalter.toml does not match the workspace:\n  {}",
         findings
             .iter()
@@ -373,7 +374,6 @@ fn workspace_error(findings: &[workspace::Finding]) -> Error {
             .collect::<Vec<_>>()
             .join("\n  ")
     )
-    .into()
 }
 
 type GhRunner<'a> = Box<dyn FnMut(&[&str]) -> Result<String, Error> + 'a>;

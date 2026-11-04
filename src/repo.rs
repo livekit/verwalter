@@ -6,6 +6,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use anyhow::Context;
+
 use crate::{Error, Version, changeset::Changeset, config::Config, handler, plan::PackageState};
 
 pub const CONFIG_FILE: &str = "verwalter.toml";
@@ -61,10 +63,10 @@ impl Repo {
             for file in &package.versioning.files {
                 let (file, regex) = (file.path(), file.regex());
                 let content =
-                    fs::read_to_string(root.join(file)).map_err(|e| format!("{file}: {e}"))?;
+                    fs::read_to_string(root.join(file)).with_context(|| file.to_string())?;
                 let read = handler::read_version(file, regex, &content);
                 if let (None, Err(e)) = (&unread, &read) {
-                    unread = Some(e.to_string());
+                    unread = Some(format!("{e:#}"));
                 }
                 match (&version, read.ok()) {
                     (None, found) => version = found,
@@ -95,7 +97,7 @@ impl Repo {
             if version.is_none() && config.is_go(name) {
                 version = Some(go_tag_version(root, config, name));
             }
-            let version = version.ok_or_else(|| match &unread {
+            let version = version.with_context(|| match &unread {
                 Some(e) => format!("{name}: no versioned file carries a version ({e})"),
                 None => format!("{name}: no versioned file carries a version"),
             })?;
@@ -142,7 +144,7 @@ fn read_changesets(dir: &Path, known: &[&str]) -> Result<Vec<Changeset>, Error> 
         let content = fs::read_to_string(&path)?;
         out.push(
             Changeset::parse_known(name, &content, known)
-                .map_err(|e| format!("{}: {e}", path.display()))?,
+                .with_context(|| path.display().to_string())?,
         );
     }
     out.sort_by(|a, b| a.file.cmp(&b.file));

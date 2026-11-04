@@ -7,6 +7,7 @@
 
 use std::{path::Path, process::Command};
 
+use anyhow::{Context, anyhow, bail};
 use serde::Deserialize;
 
 use crate::{Error, apply::render_entry, branches, git, plan::PlannedRelease, repo::Repo};
@@ -41,14 +42,13 @@ pub fn gh_cli<'a>(
         if let Some(slug) = &slug {
             cmd.env("GH_REPO", slug);
         }
-        let out = cmd.output()?;
+        let out = cmd.output().context("cannot run gh")?;
         if !out.status.success() {
-            return Err(format!(
+            bail!(
                 "gh {}: {}",
                 args.join(" "),
                 String::from_utf8_lossy(&out.stderr).trim()
-            )
-            .into());
+            );
         }
         Ok(String::from_utf8(out.stdout)?.trim().to_string())
     }
@@ -190,7 +190,7 @@ pub fn sync(
         git::write(&repo.root, dry_run, &["push", "--force", "--quiet", remote, &format!("{branch}:{branch}")]).map_err(|e| {
             if e.to_string().contains("directory file conflict") {
                 let prefix = repo.config.release.branch_prefix.trim_end_matches('/');
-                format!("{e}\na branch named `{prefix}` exists on {remote}, so `{branch}` cannot be created; rename that branch or set [release].branch_prefix in verwalter.toml", ).into()
+                anyhow!("{e:#}\na branch named `{prefix}` exists on {remote}, so `{branch}` cannot be created; rename that branch or set [release].branch_prefix in verwalter.toml")
             } else {
                 e
             }
@@ -267,7 +267,7 @@ fn number_from_url(url: &str) -> Result<u64, Error> {
         .rsplit('/')
         .next()
         .and_then(|n| n.parse().ok())
-        .ok_or_else(|| format!("unexpected `gh pr create` output: {url}").into())
+        .with_context(|| format!("unexpected `gh pr create` output: {url}"))
 }
 
 /// Append `key=value` lines to `$GITHUB_OUTPUT` when running in Actions.

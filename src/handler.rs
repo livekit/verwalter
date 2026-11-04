@@ -3,6 +3,7 @@
 //! `knope_versioning::versioned_file::Config` for the supported names.
 //! Functions take content, not paths, so they stay pure.
 
+use anyhow::{Context, bail};
 use knope_versioning::{
     Action, GoVersioning, Package, VersionedFile, VersionedFileConfig, package::Name,
     release_notes::ReleaseNotes, versioned_file::cargo,
@@ -238,14 +239,14 @@ pub fn read_version(path: &str, regex: Option<&str>, content: &str) -> Result<Ve
         let m = re
             .captures(content)
             .and_then(|c| c.name("version"))
-            .ok_or_else(|| format!("{path}: regex `{re}` has no `version` match"))?;
+            .with_context(|| format!("{path}: regex `{re}` has no `version` match"))?;
         return Ok(m.as_str().parse()?);
     }
     if is_go_mod(path) {
         let (module, version) =
-            go_module(content).ok_or_else(|| format!("{path}: no module line"))?;
-        return version.ok_or_else(|| {
-            format!("{path}: no `// vX.Y.Z` comment on the module line of {module}").into()
+            go_module(content).with_context(|| format!("{path}: no module line"))?;
+        return version.with_context(|| {
+            format!("{path}: no `// vX.Y.Z` comment on the module line of {module}")
         });
     }
     if is_pyproject(path)
@@ -256,7 +257,7 @@ pub fn read_version(path: &str, regex: Option<&str>, content: &str) -> Result<Ve
         } else {
             "list the file the build backend reads it from, with a regex"
         };
-        return Err(format!("{path}: the version is dynamic: {instead}").into());
+        bail!("{path}: the version is dynamic: {instead}");
     }
     Ok(load(path, None, content)?.1.version()?)
 }
@@ -271,7 +272,7 @@ fn regex_write(path: &str, re: &str, content: &str, version: &Version) -> Result
     let mut matched = false;
     for caps in re.captures_iter(content) {
         let Some(group) = caps.name("version") else {
-            return Err(format!("{path}: regex `{re}` has no `version` group").into());
+            bail!("{path}: regex `{re}` has no `version` group");
         };
         matched = true;
         out.push_str(&content[last..group.start()]);
@@ -279,7 +280,7 @@ fn regex_write(path: &str, re: &str, content: &str, version: &Version) -> Result
         last = group.end();
     }
     if !matched {
-        return Err(format!("{path}: regex `{re}` matches nothing").into());
+        bail!("{path}: regex `{re}` matches nothing");
     }
     out.push_str(&content[last..]);
     Ok(out)
@@ -343,9 +344,9 @@ pub fn write_version(
         if let Some(module) = dependency {
             return Ok(go_mod_pin(content, module, version));
         }
-        let (module, _) = go_module(content).ok_or_else(|| format!("{path}: no module line"))?;
+        let (module, _) = go_module(content).with_context(|| format!("{path}: no module line"))?;
         if let Some(e) = go_major_error(&module, version) {
-            return Err(e.into());
+            bail!(e);
         }
     }
     if let (true, Some(dep)) = (path.rsplit('/').next() == Some("uv.lock"), dependency) {

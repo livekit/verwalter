@@ -4,6 +4,8 @@
 
 use std::{fs, path::Path};
 
+use anyhow::{Context, bail};
+
 use crate::{Error, apply, git, plan::PlannedRelease, repo::Repo};
 
 /// `release/main`: the prefix plus the base branch, so it never collides
@@ -61,7 +63,7 @@ pub fn join_capped(parts: &[String], max: usize) -> String {
 pub fn create(repo: &Repo, plan: &[PlannedRelease], base: &str) -> Result<Option<String>, Error> {
     let root = repo.root.as_path();
     if !git::ref_exists(root, base) {
-        return Err(format!("base ref {base} does not exist").into());
+        bail!("base ref {base} does not exist");
     }
     if plan.is_empty() {
         return Ok(None);
@@ -108,7 +110,7 @@ pub fn commit_branch(
         branch.replace('/', "_")
     ));
     let _ = fs::remove_dir_all(&worktree);
-    let wt = worktree.to_str().ok_or("temp dir is not valid UTF-8")?;
+    let wt = worktree.to_str().context("temp dir is not valid UTF-8")?;
     git::run(root, &["worktree", "add", "--detach", "--force", wt, start])?;
     let result = (|| -> Result<(), Error> {
         edit(&worktree)?;

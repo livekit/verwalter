@@ -6,6 +6,7 @@
 
 use std::{fs, path::Path};
 
+use anyhow::{Context, anyhow, bail};
 use serde::Serialize;
 
 use crate::{Error, config::ReleaseMode, git, github::Gh, repo::Repo};
@@ -116,7 +117,7 @@ pub fn expand_assets(root: &Path, assets: &[String]) -> Result<Vec<String>, Erro
             continue;
         }
         let mut files: Vec<String> = fs::read_dir(&dir)
-            .map_err(|e| format!("--asset {asset}: {e}"))?
+            .with_context(|| format!("--asset {asset}"))?
             .filter_map(Result::ok)
             .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
             .filter_map(|e| e.file_name().into_string().ok())
@@ -124,7 +125,7 @@ pub fn expand_assets(root: &Path, assets: &[String]) -> Result<Vec<String>, Erro
             .map(|n| format!("{}/{n}", asset.trim_end_matches('/')))
             .collect();
         if files.is_empty() {
-            return Err(format!("--asset {asset}: the directory has no files").into());
+            bail!("--asset {asset}: the directory has no files");
         }
         files.sort();
         out.extend(files);
@@ -139,7 +140,9 @@ fn resume_hint(e: Error, package: &str, options: &Options) -> Error {
         .map(|a| format!(" --asset {a}"))
         .collect();
     let publish = if options.publish { " --publish" } else { "" };
-    format!("{package}: {e}\nresume with: verwalter release --package {package}{assets}{publish}  (add --dry-run to see the steps first)").into()
+    anyhow!(
+        "{package}: {e:#}\nresume with: verwalter release --package {package}{assets}{publish}  (add --dry-run to see the steps first)"
+    )
 }
 
 fn release_one(

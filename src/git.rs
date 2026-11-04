@@ -6,26 +6,28 @@ use std::{
     process::{Command, Output},
 };
 
+use anyhow::{Context, bail};
+
 use crate::Error;
 
 fn output(root: &Path, args: &[&str]) -> Result<Output, Error> {
-    Ok(Command::new("git")
+    Command::new("git")
         .arg("-C")
         .arg(root)
         .args(args)
-        .output()?)
+        .output()
+        .context("cannot run git")
 }
 
 /// Run git and return trimmed stdout; a non-zero exit is an error.
 pub fn run(root: &Path, args: &[&str]) -> Result<String, Error> {
     let out = output(root, args)?;
     if !out.status.success() {
-        return Err(format!(
+        bail!(
             "git {}: {}",
             args.join(" "),
             String::from_utf8_lossy(&out.stderr).trim()
-        )
-        .into());
+        );
     }
     Ok(String::from_utf8(out.stdout)?.trim().to_string())
 }

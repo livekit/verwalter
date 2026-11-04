@@ -6,6 +6,7 @@
 
 use std::process::Command;
 
+use anyhow::{Context, anyhow, bail};
 use serde::Deserialize;
 
 use crate::{Error, Version, config::Config, handler::to_pep440};
@@ -56,13 +57,12 @@ pub fn curl(url: &str) -> Result<u16, Error> {
             url,
         ])
         .output()
-        .map_err(|e| format!("curl: {e} (is curl installed?)"))?;
+        .context("curl (is curl installed?)")?;
     if !out.status.success() {
-        return Err(format!(
+        bail!(
             "curl {url}: {}",
             String::from_utf8_lossy(&out.stderr).trim()
-        )
-        .into());
+        );
     }
     Ok(String::from_utf8_lossy(&out.stdout).trim().parse()?)
 }
@@ -130,7 +130,7 @@ pub fn exists(url: Option<String>, http: Http) -> Result<Option<bool>, Error> {
         404 => Ok(Some(false)),
         // The Go proxy protocol answers "not found" with 404 or 410.
         410 if url.starts_with(GOPROXY) => Ok(Some(false)),
-        code => Err(format!("{url}: HTTP {code}").into()),
+        code => Err(anyhow!("{url}: HTTP {code}")),
     }
 }
 
