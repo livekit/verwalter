@@ -6,7 +6,7 @@
 
 use std::{collections::BTreeMap, path::Path};
 
-use anyhow::{Context, bail};
+use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 
 use crate::version::BumpLevel;
@@ -377,11 +377,7 @@ fn inherit(table: &mut toml::Table) {
 /// a `members` directory gets a package entry, or the `path` of the entry
 /// of its name. Without `[versioning].files`, its versioned file is the
 /// manifest it was found by.
-fn discover(
-    table: &mut toml::Table,
-    root: &Path,
-    workspace: &Workspace,
-) -> Result<(), crate::Error> {
+fn discover(table: &mut toml::Table, root: &Path, workspace: &Workspace) -> Result<()> {
     let Workspace {
         members, exclude, ..
     } = workspace;
@@ -454,17 +450,17 @@ fn under(path: &str, file: &str) -> String {
 impl Config {
     /// Reads the config at `path` and finds the `members` packages under
     /// `root`.
-    pub fn load(root: &Path, path: &Path) -> Result<Self, crate::Error> {
+    pub fn load(root: &Path, path: &Path) -> Result<Self> {
         let text = std::fs::read_to_string(path).with_context(|| path.display().to_string())?;
         Self::parse_in(&text, Some(root))
     }
 
     /// The config text alone: `members` finds nothing without a checkout.
-    pub fn parse(text: &str) -> Result<Self, crate::Error> {
+    pub fn parse(text: &str) -> Result<Self> {
         Self::parse_in(text, None)
     }
 
-    fn parse_in(text: &str, root: Option<&Path>) -> Result<Self, crate::Error> {
+    fn parse_in(text: &str, root: Option<&Path>) -> Result<Self> {
         // The file as written first, so an error carries its line.
         let written = toml::from_str::<Self>(text)?;
         let mut table: toml::Table = toml::from_str(text)?;

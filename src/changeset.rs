@@ -2,9 +2,9 @@
 //! YAML front matter with one `package: level` line per bump (package names
 //! quoted or unquoted), markdown body as the summary.
 
-use anyhow::bail;
+use anyhow::{Result, bail};
 
-use crate::{Error, version::BumpLevel};
+use crate::version::BumpLevel;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Bump {
@@ -90,7 +90,7 @@ impl Changeset {
 
     /// `parse`, plus an error for a bump line naming a package not in
     /// `known`.
-    pub fn parse_known(file: &str, content: &str, known: &[&str]) -> Result<Self, Error> {
+    pub fn parse_known(file: &str, content: &str, known: &[&str]) -> Result<Self> {
         let c = Self::parse(file, content)?;
         let unknown = c.unknown_packages(known);
         if !unknown.is_empty() {

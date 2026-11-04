@@ -7,14 +7,14 @@
 
 use std::{path::Path, process::Command};
 
-use anyhow::{Context, anyhow, bail};
+use anyhow::{Context, Result, anyhow, bail};
 use serde::Deserialize;
 
-use crate::{Error, apply::render_entry, branches, git, plan::PlannedRelease, repo::Repo};
+use crate::{apply::render_entry, branches, git, plan::PlannedRelease, repo::Repo};
 
 /// Runs `gh` with the given arguments and returns stdout. Injected so
 /// tests can fake GitHub.
-pub type Gh<'a> = &'a mut dyn FnMut(&[&str]) -> Result<String, Error>;
+pub type Gh<'a> = &'a mut dyn FnMut(&[&str]) -> Result<String>;
 
 /// `owner/repo` of a GitHub remote URL (ssh or https), if it is one.
 pub fn repo_slug(url: &str) -> Option<String> {
@@ -32,7 +32,7 @@ pub fn repo_slug(url: &str) -> Option<String> {
 pub fn gh_cli<'a>(
     root: &'a Path,
     remote: &str,
-) -> impl FnMut(&[&str]) -> Result<String, Error> + 'a + use<'a> {
+) -> impl FnMut(&[&str]) -> Result<String> + 'a + use<'a> {
     let slug = crate::git::run(root, &["remote", "get-url", remote])
         .ok()
         .and_then(|u| repo_slug(&u));
@@ -69,8 +69,8 @@ pub const MARKER: &str = "<!-- verwalter release -->";
 /// `release create|delete|edit`, `label create`, `api -X ...`) is printed
 /// and faked, while reads go through.
 pub fn dry_run_gh(
-    mut inner: impl FnMut(&[&str]) -> Result<String, Error>,
-) -> impl FnMut(&[&str]) -> Result<String, Error> {
+    mut inner: impl FnMut(&[&str]) -> Result<String>,
+) -> impl FnMut(&[&str]) -> Result<String> {
     move |args: &[&str]| {
         let is_write = matches!(
             args,
@@ -170,7 +170,7 @@ pub fn sync(
     remote: &str,
     dry_run: bool,
     gh: Gh,
-) -> Result<Option<PullRequest>, Error> {
+) -> Result<Option<PullRequest>> {
     let label = repo.config.release.label.as_str();
     gh(&[
         "label",
@@ -230,7 +230,7 @@ pub fn upsert_pr(
     title: &str,
     body: &str,
     label: &str,
-) -> Result<PullRequest, Error> {
+) -> Result<PullRequest> {
     let number = match existing {
         Some(existing) => {
             let n = existing.number.to_string();
@@ -262,7 +262,7 @@ pub fn upsert_pr(
     })
 }
 
-fn number_from_url(url: &str) -> Result<u64, Error> {
+fn number_from_url(url: &str) -> Result<u64> {
     url.trim()
         .rsplit('/')
         .next()
@@ -271,7 +271,7 @@ fn number_from_url(url: &str) -> Result<u64, Error> {
 }
 
 /// Append `key=value` lines to `$GITHUB_OUTPUT` when running in Actions.
-pub fn append_output(lines: &str) -> Result<(), Error> {
+pub fn append_output(lines: &str) -> Result<()> {
     if let Ok(path) = std::env::var("GITHUB_OUTPUT") {
         use std::io::Write;
         let mut f = std::fs::OpenOptions::new()
@@ -284,7 +284,7 @@ pub fn append_output(lines: &str) -> Result<(), Error> {
 }
 
 /// The open PR whose head is `head`, if any.
-pub fn open_pr(gh: Gh, head: &str) -> Result<Option<PullRequest>, Error> {
+pub fn open_pr(gh: Gh, head: &str) -> Result<Option<PullRequest>> {
     let open: Vec<PullRequest> = serde_json::from_str(&gh(&[
         "pr",
         "list",

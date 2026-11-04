@@ -6,9 +6,9 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use anyhow::Context;
+use anyhow::{Context, Result};
 
-use crate::{Error, Version, changeset::Changeset, config::Config, handler, plan::PackageState};
+use crate::{Version, changeset::Changeset, config::Config, handler, plan::PackageState};
 
 pub const CONFIG_FILE: &str = "verwalter.toml";
 pub const CHANGESET_DIR: &str = ".changeset";
@@ -25,11 +25,11 @@ pub struct Repo {
 
 impl Repo {
     /// Load with the config at `<root>/verwalter.toml`.
-    pub fn load(root: &Path) -> Result<Self, Error> {
+    pub fn load(root: &Path) -> Result<Self> {
         Self::load_with_config(root, &root.join(CONFIG_FILE))
     }
 
-    pub fn load_with_config(root: &Path, config_path: &Path) -> Result<Self, Error> {
+    pub fn load_with_config(root: &Path, config_path: &Path) -> Result<Self> {
         let config = Config::load(root, config_path)?;
         let (packages, warnings) = Self::load_packages(root, &config)?;
         let names: Vec<&str> = config.packages.keys().map(String::as_str).collect();
@@ -46,10 +46,7 @@ impl Repo {
     /// The packages alone: versions and in-repo dependencies from the
     /// manifests, with the file-drift warnings. `check` uses this without
     /// the changesets, which it reads from the PR itself.
-    pub fn load_packages(
-        root: &Path,
-        config: &Config,
-    ) -> Result<(Vec<PackageState>, Vec<String>), Error> {
+    pub fn load_packages(root: &Path, config: &Config) -> Result<(Vec<PackageState>, Vec<String>)> {
         let names: Vec<&str> = config.packages.keys().map(String::as_str).collect();
         // Dependents name a package by its key: the module path for Go.
         let key_of = |n: &str| config.dependency_key(n).to_string();
@@ -128,7 +125,7 @@ fn go_tag_version(root: &Path, config: &Config, name: &str) -> Version {
 /// Every `*.md` in the changeset directory except `README.md`. A bump line
 /// naming a package that is not configured is an error, so a typo cannot
 /// sit in `.changeset/` unnoticed.
-fn read_changesets(dir: &Path, known: &[&str]) -> Result<Vec<Changeset>, Error> {
+fn read_changesets(dir: &Path, known: &[&str]) -> Result<Vec<Changeset>> {
     let Ok(entries) = fs::read_dir(dir) else {
         return Ok(Vec::new());
     };

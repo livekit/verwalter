@@ -6,11 +6,9 @@ use std::{
     process::{Command, Output},
 };
 
-use anyhow::{Context, bail};
+use anyhow::{Context, Result, bail};
 
-use crate::Error;
-
-fn output(root: &Path, args: &[&str]) -> Result<Output, Error> {
+fn output(root: &Path, args: &[&str]) -> Result<Output> {
     Command::new("git")
         .arg("-C")
         .arg(root)
@@ -20,7 +18,7 @@ fn output(root: &Path, args: &[&str]) -> Result<Output, Error> {
 }
 
 /// Run git and return trimmed stdout; a non-zero exit is an error.
-pub fn run(root: &Path, args: &[&str]) -> Result<String, Error> {
+pub fn run(root: &Path, args: &[&str]) -> Result<String> {
     let out = output(root, args)?;
     if !out.status.success() {
         bail!(
@@ -34,7 +32,7 @@ pub fn run(root: &Path, args: &[&str]) -> Result<String, Error> {
 
 /// A git command that changes the remote or the refs. With `dry_run` it
 /// is printed instead of run.
-pub fn write(root: &Path, dry_run: bool, args: &[&str]) -> Result<String, Error> {
+pub fn write(root: &Path, dry_run: bool, args: &[&str]) -> Result<String> {
     if dry_run {
         println!("dry-run: git {}", args.join(" "));
         return Ok(String::new());

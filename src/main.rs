@@ -3,10 +3,10 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use anyhow::{Context, anyhow, bail};
+use anyhow::{Context, Result, anyhow, bail};
 use clap::Parser;
 use verwalter::{
-    Error, branches, check, github, plan::plan, prerelease, release, repo::Repo, status,
+    branches, check, github, plan::plan, prerelease, release, repo::Repo, status,
     version::BumpLevel, workspace,
 };
 
@@ -134,11 +134,11 @@ fn releases(text: &str) -> Result<BTreeSet<String>, serde_json::Error> {
 
 // Returning the error prints `Error: ` with its `Caused by:` chain (and a
 // backtrace under RUST_BACKTRACE=1), and exits 1.
-fn main() -> Result<(), Error> {
+fn main() -> Result<()> {
     run(Cli::parse())
 }
 
-fn run(cli: Cli) -> Result<(), Error> {
+fn run(cli: Cli) -> Result<()> {
     let Cli {
         command,
         checkout: root,
@@ -360,7 +360,7 @@ fn run(cli: Cli) -> Result<(), Error> {
     }
 }
 
-fn workspace_error(findings: &[workspace::Finding]) -> Error {
+fn workspace_error(findings: &[workspace::Finding]) -> anyhow::Error {
     anyhow!(
         "verwalter.toml does not match the workspace:\n  {}",
         findings
@@ -371,7 +371,7 @@ fn workspace_error(findings: &[workspace::Finding]) -> Error {
     )
 }
 
-type GhRunner<'a> = Box<dyn FnMut(&[&str]) -> Result<String, Error> + 'a>;
+type GhRunner<'a> = Box<dyn FnMut(&[&str]) -> Result<String> + 'a>;
 
 /// The gh runner, with every write printed instead of run under `--dry-run`.
 fn gh<'a>(root: &'a Path, remote: &str, dry_run: bool) -> GhRunner<'a> {

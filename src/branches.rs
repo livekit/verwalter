@@ -4,9 +4,9 @@
 
 use std::{fs, path::Path};
 
-use anyhow::{Context, bail};
+use anyhow::{Context, Result, bail};
 
-use crate::{Error, apply, git, plan::PlannedRelease, repo::Repo};
+use crate::{apply, git, plan::PlannedRelease, repo::Repo};
 
 /// `release/main`: the prefix plus the base branch, so it never collides
 /// with the rc branches (`release/<package>-rc`) under the same prefix.
@@ -60,7 +60,7 @@ pub fn join_capped(parts: &[String], max: usize) -> String {
 /// Create or reset the release branch from `base`, usually
 /// `origin/<base branch>`, with every planned release applied and the
 /// changesets consumed. None when nothing is planned.
-pub fn create(repo: &Repo, plan: &[PlannedRelease], base: &str) -> Result<Option<String>, Error> {
+pub fn create(repo: &Repo, plan: &[PlannedRelease], base: &str) -> Result<Option<String>> {
     let root = repo.root.as_path();
     if !git::ref_exists(root, base) {
         bail!("base ref {base} does not exist");
@@ -99,8 +99,8 @@ pub fn commit_branch(
     start: &str,
     branch: &str,
     message: &str,
-    edit: impl FnOnce(&Path) -> Result<(), Error>,
-) -> Result<(), Error> {
+    edit: impl FnOnce(&Path) -> Result<()>,
+) -> Result<()> {
     // The counter keeps parallel runs in one process apart (tests).
     static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -112,7 +112,7 @@ pub fn commit_branch(
     let _ = fs::remove_dir_all(&worktree);
     let wt = worktree.to_str().context("temp dir is not valid UTF-8")?;
     git::run(root, &["worktree", "add", "--detach", "--force", wt, start])?;
-    let result = (|| -> Result<(), Error> {
+    let result = (|| -> Result<()> {
         edit(&worktree)?;
         git::run(&worktree, &["add", "-A"])?;
         let mut args = git::identity_args(&worktree);

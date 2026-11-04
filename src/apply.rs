@@ -8,10 +8,9 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use anyhow::Context;
+use anyhow::{Context, Result};
 
 use crate::{
-    Error,
     changeset::Changeset,
     config::Config,
     handler,
@@ -46,7 +45,7 @@ pub fn apply(
     changesets: &[Changeset],
     plan: &[PlannedRelease],
     release: &PlannedRelease,
-) -> Result<Vec<PathBuf>, Error> {
+) -> Result<Vec<PathBuf>> {
     let name = release.package.as_str();
     let package = config
         .packages
@@ -54,22 +53,21 @@ pub fn apply(
         .with_context(|| format!("package {name} is not in verwalter.toml"))?;
     let mut written = Vec::new();
 
-    let mut rewrite =
-        |rel: &str, regex: Option<&str>, dependency: Option<&str>| -> Result<(), Error> {
-            let path = root.join(rel);
-            if !path.exists() {
-                return Ok(());
+    let mut rewrite = |rel: &str, regex: Option<&str>, dependency: Option<&str>| -> Result<()> {
+        let path = root.join(rel);
+        if !path.exists() {
+            return Ok(());
+        }
+        let before = fs::read_to_string(&path)?;
+        let after = handler::write_version(rel, regex, &before, dependency, &release.to)?;
+        if after != before {
+            fs::write(&path, after)?;
+            if !written.contains(&path) {
+                written.push(path);
             }
-            let before = fs::read_to_string(&path)?;
-            let after = handler::write_version(rel, regex, &before, dependency, &release.to)?;
-            if after != before {
-                fs::write(&path, after)?;
-                if !written.contains(&path) {
-                    written.push(path);
-                }
-            }
-            Ok(())
-        };
+        }
+        Ok(())
+    };
 
     // Own version. A lock file holds it under the package's own entry.
     for file in &package.versioning.files {
