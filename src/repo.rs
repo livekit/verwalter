@@ -6,7 +6,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 
 use crate::{Version, changeset::Changeset, config::Config, handler, plan::PackageState};
 
@@ -55,17 +55,20 @@ impl Repo {
         for (name, package) in &config.packages {
             let mut version: Option<Version> = None;
             // Why the first file carries no version, for the error below.
-            let mut unread: Option<String> = None;
+            let mut unread: Option<anyhow::Error> = None;
             let mut dependencies = Vec::new();
             for file in &package.versioning.files {
                 let (file, regex) = (file.path(), file.regex());
                 let content =
                     fs::read_to_string(root.join(file)).with_context(|| file.to_string())?;
-                let read = handler::read_version(file, regex, &content);
-                if let (None, Err(e)) = (&unread, &read) {
-                    unread = Some(format!("{e:#}"));
-                }
-                match (&version, read.ok()) {
+                let read = match handler::read_version(file, regex, &content) {
+                    Ok(v) => Some(v),
+                    Err(e) => {
+                        unread.get_or_insert(e);
+                        None
+                    }
+                };
+                match (&version, read) {
                     (None, found) => version = found,
                     (Some(first), Some(other)) if *first != other => warnings.push(format!(
                         "{name}: {file} says {other}, {} says {first}; the next release aligns them",
@@ -94,10 +97,13 @@ impl Repo {
             if version.is_none() && config.is_go(name) {
                 version = Some(go_tag_version(root, config, name));
             }
-            let version = version.with_context(|| match &unread {
-                Some(e) => format!("{name}: no versioned file carries a version ({e})"),
-                None => format!("{name}: no versioned file carries a version"),
-            })?;
+            let version = match (version, unread) {
+                (Some(version), _) => version,
+                (None, Some(e)) => {
+                    return Err(e.context(format!("{name}: no versioned file carries a version")));
+                }
+                (None, None) => bail!("{name}: no versioned file carries a version"),
+            };
             packages.push(PackageState {
                 name: name.clone(),
                 version,
