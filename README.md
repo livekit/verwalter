@@ -13,6 +13,17 @@ first.
 
 The behaviour is specified in [specs/versioning.allium](specs/versioning.allium).
 
+## Installation
+
+### From source
+
+```sh
+git clone https://github.com/livekit/verwalter
+cd verwalter 
+cargo install --path .
+verwalter --version  # Verify install
+```
+
 ## Quick start
 
 **1. Describe the packages** in `verwalter.toml` at the repository root.
