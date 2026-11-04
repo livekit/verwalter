@@ -26,8 +26,9 @@ permissions:
 jobs:
   build:
     # Only a release PR the tool opened: the branch prefix alone would let
-    # any pushed `release/*` branch trigger a publish.
-    if: github.event_name == 'workflow_dispatch' || (github.event.pull_request.merged == true && startsWith(github.event.pull_request.head.ref, 'release/') && github.event.pull_request.user.login == 'github-actions[bot]' && contains(github.event.pull_request.body, '<!-- verwalter release -->'))
+    # any pushed `release/*` branch trigger a publish. A bot opens it:
+    # github-actions[bot], or the GitHub App of `app-client-id`.
+    if: github.event_name == 'workflow_dispatch' || (github.event.pull_request.merged == true && startsWith(github.event.pull_request.head.ref, 'release/') && github.event.pull_request.user.type == 'Bot' && contains(github.event.pull_request.body, '<!-- verwalter release -->'))
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
