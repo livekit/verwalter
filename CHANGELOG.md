@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.27.0
+
+### Minor Changes
+
+- The action takes a GitHub App (`app-client-id`, `app-private-key`) in place of `token`, and `git push` now uses the given token, so release PRs, tags and releases start other workflows - [#60](https://github.com/livekit/verwalter/pull/60) ([@lukasIO](https://github.com/lukasIO))
+
+### Patch Changes
+
+- Document installation from source - [#57](https://github.com/livekit/verwalter/pull/57) ([@ladvoc](https://github.com/ladvoc))
+
 ## 0.26.0
 
 ### Minor Changes
