@@ -3,7 +3,7 @@
 //! `knope_versioning::versioned_file::Config` for the supported names.
 //! Functions take content, not paths, so they stay pure.
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, bail, ensure};
 use knope_versioning::{
     Action, GoVersioning, Package, VersionedFile, VersionedFileConfig, package::Name,
     release_notes::ReleaseNotes, versioned_file::cargo,
@@ -279,9 +279,7 @@ fn regex_write(path: &str, re: &str, content: &str, version: &Version) -> Result
         out.push_str(&version.to_string());
         last = group.end();
     }
-    if !matched {
-        bail!("{path}: regex `{re}` matches nothing");
-    }
+    ensure!(matched, "{path}: regex `{re}` matches nothing");
     out.push_str(&content[last..]);
     Ok(out)
 }

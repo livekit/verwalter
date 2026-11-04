@@ -6,7 +6,7 @@ use std::{collections::BTreeSet, fs, path::Path};
 
 use std::process::Command;
 
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{Context, Result, anyhow, ensure};
 
 use crate::{
     Version, changeset::Changeset, config::Config, github::Gh, repo::CHANGESET_DIR,
@@ -295,9 +295,7 @@ pub fn write_changeset(
         check.missing().into_iter().map(String::from).collect()
     } else {
         for p in packages {
-            if !repo.config.packages.contains_key(p) {
-                bail!("unknown package {p}");
-            }
+            ensure!(repo.config.packages.contains_key(p), "unknown package {p}");
         }
         packages.to_vec()
     };

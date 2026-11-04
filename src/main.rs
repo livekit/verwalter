@@ -3,7 +3,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{Context, Result, anyhow, bail, ensure};
 use clap::Parser;
 use verwalter::{
     branches, check, github, plan::plan, prerelease, release, repo::Repo, status,
@@ -237,9 +237,7 @@ fn run(cli: Cli) -> Result<()> {
                     verwalter::handler::go_major_error(module, &r.to)
                 })
                 .collect();
-            if !go.is_empty() {
-                bail!(go.join("\n"));
-            }
+            ensure!(go.is_empty(), go.join("\n"));
             Ok(())
         }
         Command::Branches { base } => {

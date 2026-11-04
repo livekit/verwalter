@@ -6,7 +6,7 @@
 
 use std::process::Command;
 
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{Context, Result, anyhow, ensure};
 use serde::Deserialize;
 
 use crate::{Version, config::Config, handler::to_pep440};
@@ -58,12 +58,11 @@ pub fn curl(url: &str) -> Result<u16> {
         ])
         .output()
         .context("curl (is curl installed?)")?;
-    if !out.status.success() {
-        bail!(
-            "curl {url}: {}",
-            String::from_utf8_lossy(&out.stderr).trim()
-        );
-    }
+    ensure!(
+        out.status.success(),
+        "curl {url}: {}",
+        String::from_utf8_lossy(&out.stderr).trim()
+    );
     Ok(String::from_utf8_lossy(&out.stdout).trim().parse()?)
 }
 

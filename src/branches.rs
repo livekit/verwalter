@@ -4,7 +4,7 @@
 
 use std::{fs, path::Path};
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, ensure};
 
 use crate::{apply, git, plan::PlannedRelease, repo::Repo};
 
@@ -62,9 +62,10 @@ pub fn join_capped(parts: &[String], max: usize) -> String {
 /// changesets consumed. None when nothing is planned.
 pub fn create(repo: &Repo, plan: &[PlannedRelease], base: &str) -> Result<Option<String>> {
     let root = repo.root.as_path();
-    if !git::ref_exists(root, base) {
-        bail!("base ref {base} does not exist");
-    }
+    ensure!(
+        git::ref_exists(root, base),
+        "base ref {base} does not exist"
+    );
     if plan.is_empty() {
         return Ok(None);
     }

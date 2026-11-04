@@ -7,7 +7,7 @@
 //! them. Dependents without a changeset are not touched. After the
 //! merge, `verwalter release` tags each as a pre-release.
 
-use anyhow::{Result, bail};
+use anyhow::{Result, bail, ensure};
 
 use crate::{
     Version, apply, branches, git,
@@ -127,9 +127,10 @@ pub fn open(
     let releases = plan(repo)?;
     let branch = branch_name(repo, target);
     let start = format!("{remote}/{target}");
-    if !git::ref_exists(&repo.root, &start) {
-        bail!("{start} does not exist; fetch it first");
-    }
+    ensure!(
+        git::ref_exists(&repo.root, &start),
+        "{start} does not exist; fetch it first"
+    );
     // One version when the rc is one group, else "name version" each.
     let prefix = "pre-release: ";
     let title = if releases.iter().all(|r| r.to == releases[0].to) {

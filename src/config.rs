@@ -6,7 +6,7 @@
 
 use std::{collections::BTreeMap, path::Path};
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, bail, ensure};
 use serde::Deserialize;
 
 use crate::version::BumpLevel;
@@ -569,9 +569,10 @@ impl Config {
         let mut seen = std::collections::BTreeSet::new();
         for group in &config.versioning.fixed {
             for name in group {
-                if !config.packages.contains_key(name) {
-                    bail!("fixed group names unknown package {name}");
-                }
+                ensure!(
+                    config.packages.contains_key(name),
+                    "fixed group names unknown package {name}"
+                );
                 if !seen.insert(name) {
                     bail!("{name} is in two fixed groups");
                 }

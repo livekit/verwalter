@@ -7,7 +7,7 @@
 
 use std::{path::Path, process::Command};
 
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{Context, Result, anyhow, ensure};
 use serde::Deserialize;
 
 use crate::{apply::render_entry, branches, git, plan::PlannedRelease, repo::Repo};
@@ -43,13 +43,12 @@ pub fn gh_cli<'a>(
             cmd.env("GH_REPO", slug);
         }
         let out = cmd.output().context("cannot run gh")?;
-        if !out.status.success() {
-            bail!(
-                "gh {}: {}",
-                args.join(" "),
-                String::from_utf8_lossy(&out.stderr).trim()
-            );
-        }
+        ensure!(
+            out.status.success(),
+            "gh {}: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
         Ok(String::from_utf8(out.stdout)?.trim().to_string())
     }
 }

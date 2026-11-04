@@ -6,7 +6,7 @@ use std::{
     process::{Command, Output},
 };
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, ensure};
 
 fn output(root: &Path, args: &[&str]) -> Result<Output> {
     Command::new("git")
@@ -20,13 +20,12 @@ fn output(root: &Path, args: &[&str]) -> Result<Output> {
 /// Run git and return trimmed stdout; a non-zero exit is an error.
 pub fn run(root: &Path, args: &[&str]) -> Result<String> {
     let out = output(root, args)?;
-    if !out.status.success() {
-        bail!(
-            "git {}: {}",
-            args.join(" "),
-            String::from_utf8_lossy(&out.stderr).trim()
-        );
-    }
+    ensure!(
+        out.status.success(),
+        "git {}: {}",
+        args.join(" "),
+        String::from_utf8_lossy(&out.stderr).trim()
+    );
     Ok(String::from_utf8(out.stdout)?.trim().to_string())
 }
 
