@@ -41,7 +41,7 @@ per registry for `verwalter.toml`:
 |---|---|---|
 | `changeset-check.yml` | `pull_request` on `main` | `check` |
 | `release-pr.yml` | `push` to `main` | `pr` |
-| `release.yml` | `pull_request` closed, merged, head `release/*`, author is a bot, body with the verwalter marker | `release`, then `publish` |
+| `release.yml` | `pull_request` closed, merged, head `release/*`, author `github-actions[bot]` or the App (`vars.VERWALTER_RELEASE_BOT`, default `verwalter-release[bot]`), body with the verwalter marker | `release`, then `publish` |
 | `pre-release.yml` | `workflow_dispatch` | `pre-release --target ${{ github.ref_name }}`, with `fetch-depth: 0` because the tags number the rc. The pending changesets decide what is in it and how far it moves. |
 
 To ship releases from a maintenance branch such as `v1` next to `main`:
@@ -79,7 +79,10 @@ removes this limit. The action uses the token for the GitHub API and for
 `git push`.
 
 1. Create an App in the organization settings (Developer settings →
-   GitHub Apps → New GitHub App). Clear **Webhook → Active**. Give it
+   GitHub Apps → New GitHub App). Name it `verwalter-release`, or set
+   the org variable `VERWALTER_RELEASE_BOT` to its login, such as
+   `my-app[bot]`: the example `release.yml` publishes only PRs from
+   `github-actions[bot]` or that login. Clear **Webhook → Active**. Give it
    these repository permissions: Contents read and write, Pull requests
    read and write.
 2. Under **Key pairs**, click **New key**. Keep the downloaded `.pem` file
