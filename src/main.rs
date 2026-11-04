@@ -1,7 +1,6 @@
 use std::{
     collections::BTreeSet,
     path::{Path, PathBuf},
-    process::ExitCode,
 };
 
 use anyhow::{Context, anyhow, bail};
@@ -133,14 +132,10 @@ fn releases(text: &str) -> Result<BTreeSet<String>, serde_json::Error> {
         .collect())
 }
 
-fn main() -> ExitCode {
-    match run(Cli::parse()) {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(e) => {
-            eprintln!("error: {e:#}");
-            ExitCode::FAILURE
-        }
-    }
+// Returning the error prints `Error: ` with its `Caused by:` chain (and a
+// backtrace under RUST_BACKTRACE=1), and exits 1.
+fn main() -> Result<(), Error> {
+    run(Cli::parse())
 }
 
 fn run(cli: Cli) -> Result<(), Error> {
