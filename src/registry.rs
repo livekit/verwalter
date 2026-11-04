@@ -6,7 +6,7 @@
 
 use std::process::Command;
 
-use anyhow::{Context, Result, anyhow, ensure};
+use anyhow::{Context, Result, bail, ensure};
 use serde::Deserialize;
 
 use crate::{Version, config::Config, handler::to_pep440};
@@ -129,7 +129,7 @@ pub fn exists(url: Option<String>, http: Http) -> Result<Option<bool>> {
         404 => Ok(Some(false)),
         // The Go proxy protocol answers "not found" with 404 or 410.
         410 if url.starts_with(GOPROXY) => Ok(Some(false)),
-        code => Err(anyhow!("{url}: HTTP {code}")),
+        code => bail!("{url}: HTTP {code}"),
     }
 }
 
