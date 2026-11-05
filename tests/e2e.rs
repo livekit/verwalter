@@ -1293,8 +1293,7 @@ fn publish_runs_dependencies_first_and_blocks_dependents_of_a_failure() {
 
     // No command at all: an error before anything runs.
     let err = verwalter::publish::run(&Repo::load(root).unwrap(), &opts, &no_registry)
-        .err()
-        .expect("no command");
+        .expect_err("no command");
     assert!(err.to_string().contains("no publish command"), "{err}");
 
     // Everything succeeds: the order file shows protocol before the others.
