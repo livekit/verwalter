@@ -29,6 +29,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: main
+      # Not devenv: Nix-built binaries link to /nix/store and do not run elsewhere.
       - uses: actions-rust-lang/setup-rust-toolchain@a188e68d0fd2bd36ad51dccb2b07ba6e75105f30 # v2.0.1
       - run: cargo build --release --locked
       - run: tar -C target/release -czf "verwalter-${{ matrix.target }}.tar.gz" verwalter
@@ -50,7 +51,7 @@ jobs:
         with:
           path: dist
           merge-multiple: true
-      - uses: actions-rust-lang/setup-rust-toolchain@a188e68d0fd2bd36ad51dccb2b07ba6e75105f30 # v2.0.1
-      - run: cargo run --quiet -- release --asset dist/verwalter-x86_64-unknown-linux-gnu.tar.gz --asset dist/verwalter-aarch64-unknown-linux-gnu.tar.gz --asset dist/verwalter-aarch64-apple-darwin.tar.gz
+      - uses: ./.github/actions/setup-devenv
+      - run: devenv shell -- cargo run --quiet -- release --asset dist/verwalter-x86_64-unknown-linux-gnu.tar.gz --asset dist/verwalter-aarch64-unknown-linux-gnu.tar.gz --asset dist/verwalter-aarch64-apple-darwin.tar.gz
         env:
           GH_TOKEN: ${{ github.token }}
