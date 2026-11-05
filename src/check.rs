@@ -6,8 +6,10 @@ use std::{collections::BTreeSet, fs, path::Path};
 
 use std::process::Command;
 
+use anyhow::{Context, Result, anyhow, ensure};
+
 use crate::{
-    Error, Version, changeset::Changeset, config::Config, github::Gh, repo::CHANGESET_DIR,
+    Version, changeset::Changeset, config::Config, github::Gh, repo::CHANGESET_DIR,
     version::BumpLevel,
 };
 
@@ -143,7 +145,7 @@ pub fn plan_also(
     config: &Config,
     check: &mut Check,
     changesets: &[Changeset],
-) -> Result<(), Error> {
+) -> Result<()> {
     if check.bumps.is_empty() {
         return Ok(());
     }
@@ -183,7 +185,7 @@ pub fn api_check(
     config: &Config,
     check: &mut Check,
     changesets: &[Changeset],
-) -> Result<(), Error> {
+) -> Result<()> {
     if !matches!(check.status, Status::Passed | Status::Failed) {
         return Ok(());
     }
@@ -204,7 +206,7 @@ pub fn api_check(
             .into_iter()
             .find(|p| &p.name == name)
             .map(|p| p.version)
-            .ok_or_else(|| format!("{name}: not loaded"))?;
+            .with_context(|| format!("{name}: not loaded"))?;
         let out = Command::new("sh")
             .arg("-c")
             .arg(command)
@@ -215,7 +217,7 @@ pub fn api_check(
             .env("VERWALTER_BASELINE_TAG", config.tag_for(name, &version))
             .env("VERWALTER_LEVEL", claimed.to_string())
             .output()
-            .map_err(|e| format!("{name}: api command: {e}"))?;
+            .with_context(|| format!("{name}: api command"))?;
         let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
         let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
         let kind = stdout.split_whitespace().last().unwrap_or("");
@@ -275,7 +277,7 @@ pub fn write_changeset(
     level: crate::version::BumpLevel,
     summary: Option<&str>,
     packages: &[String],
-) -> Result<Option<std::path::PathBuf>, Error> {
+) -> Result<Option<std::path::PathBuf>> {
     let root = &repo.root;
     let missing: Vec<String> = if packages.is_empty() {
         let merge_base = crate::git::run(root, &["merge-base", base, "HEAD"])?;
@@ -293,9 +295,7 @@ pub fn write_changeset(
         check.missing().into_iter().map(String::from).collect()
     } else {
         for p in packages {
-            if !repo.config.packages.contains_key(p) {
-                return Err(format!("unknown package {p}").into());
-            }
+            ensure!(repo.config.packages.contains_key(p), "unknown package {p}");
         }
         packages.to_vec()
     };
@@ -462,7 +462,7 @@ fn urlencode(s: &str) -> String {
 /// the comment when it has something to say, deletes it otherwise,
 /// returns the check. Changeset contents are read
 /// from the checkout, which CI has at the PR head.
-pub fn run(root: &Path, config: &Config, pr: u64, gh: Gh) -> Result<Check, Error> {
+pub fn run(root: &Path, config: &Config, pr: u64, gh: Gh) -> Result<Check> {
     #[derive(serde::Deserialize)]
     struct Pr {
         title: String,
@@ -516,7 +516,7 @@ pub fn run(root: &Path, config: &Config, pr: u64, gh: Gh) -> Result<Check, Error
     let changesets = match read_changesets(root, config, &changed) {
         Ok(c) => c,
         Err(e) => {
-            let body = format!("{MARKER}\n### Changeset invalid\n\n{e}\n");
+            let body = format!("{MARKER}\n### Changeset invalid\n\n{e:#}\n");
             report(&body);
             sync_comment(gh, &n, &existing, Some(&body));
             return Err(e);
@@ -568,11 +568,7 @@ fn report(body: &str) {
 
 /// The PR's `.changeset/*.md` files, parsed and checked against the
 /// config. The error names the file.
-fn read_changesets(
-    root: &Path,
-    config: &Config,
-    changed: &[String],
-) -> Result<Vec<Changeset>, Error> {
+fn read_changesets(root: &Path, config: &Config, changed: &[String]) -> Result<Vec<Changeset>> {
     let known: Vec<&str> = config.packages.keys().map(String::as_str).collect();
     let mut out = Vec::new();
     for f in changed.iter().filter(|f| {
@@ -583,7 +579,7 @@ fn read_changesets(
         let Ok(content) = fs::read_to_string(root.join(f)) else {
             continue;
         };
-        out.push(Changeset::parse_known(f, &content, &known).map_err(|e| format!("`{f}`: {e}"))?);
+        out.push(Changeset::parse_known(f, &content, &known).with_context(|| format!("`{f}`"))?);
     }
     Ok(out)
 }
@@ -591,9 +587,9 @@ fn read_changesets(
 /// Writes the comment (`body`) or deletes it (None). Best effort: the
 /// token of a PR from a fork cannot write, and the check passes or fails
 /// on its result, not on the comment.
-fn sync_comment(gh: Gh, pr: &str, existing: &Result<Option<String>, Error>, body: Option<&str>) {
+fn sync_comment(gh: Gh, pr: &str, existing: &Result<Option<String>>, body: Option<&str>) {
     let written = match (existing, body) {
-        (Err(e), _) => Err(e.to_string().into()),
+        (Err(e), _) => Err(anyhow!("{e:#}")),
         (Ok(Some(id)), Some(body)) => gh(&[
             "api",
             "-X",
@@ -612,7 +608,7 @@ fn sync_comment(gh: Gh, pr: &str, existing: &Result<Option<String>, Error>, body
         (Ok(None), None) => return,
     };
     if let Err(e) = written {
-        let e = e.to_string();
+        let e = format!("{e:#}");
         let first = e.lines().next().unwrap_or_default();
         println!("::warning::PR comment not updated, the result is in the job summary: {first}");
     }
@@ -704,14 +700,14 @@ versioning.changelog = "CHANGELOG.md"
         let config = Config::parse(CONFIG).unwrap();
         let mut writes = 0;
         let mut body = String::new();
-        let mut gh = |args: &[&str]| -> Result<String, Error> {
+        let mut gh = |args: &[&str]| -> Result<String> {
             match args {
                 ["pr", "view", ..] => Ok(r#"{"title":"t","headRefName":"feat","headRepositoryOwner":{"login":"o"},"headRepository":{"name":"r"},"labels":[],"files":[{"path":"livekit-protocol/x.proto"}]}"#.into()),
                 ["api", path, ..] if path.ends_with("/comments") => Ok(String::new()),
                 _ => {
                     writes += 1;
                     body = args.last().unwrap_or(&"").to_string();
-                    Err("HTTP 403: Resource not accessible by integration".into())
+                    Err(anyhow!("HTTP 403: Resource not accessible by integration"))
                 }
             }
         };

@@ -11,10 +11,10 @@ use std::{
     sync::mpsc,
 };
 
+use anyhow::{Context, Result};
 use serde::Serialize;
 
 use crate::{
-    Error,
     config::ReleaseMode,
     git,
     registry::{self, Http},
@@ -75,10 +75,7 @@ fn in_pnpm_workspace(root: &std::path::Path, path: &str) -> bool {
 /// Every package whose current version is tagged, or only those in
 /// `only`, with its in-repo dependencies among those packages. A
 /// candidate without a publish command is an error before anything runs.
-fn candidates(
-    repo: &Repo,
-    only: Option<&BTreeSet<String>>,
-) -> Result<BTreeMap<String, Candidate>, Error> {
+fn candidates(repo: &Repo, only: Option<&BTreeSet<String>>) -> Result<BTreeMap<String, Candidate>> {
     let mut out = BTreeMap::new();
     for p in &repo.packages {
         let cfg = &repo.config.packages[&p.name];
@@ -118,7 +115,7 @@ fn candidates(
         // Spec: Registry goproxy. The proxy request is the publish: an
         // empty command marks it.
         let goproxy = repo.config.registry_of(&p.name) == registry::Registry::Goproxy;
-        let command = repo.config.publish_command(&p.name, in_pnpm_workspace(&repo.root, &cfg.path), npm_tag.as_deref()).or_else(|| goproxy.then(String::new)).ok_or_else(|| {
+        let command = repo.config.publish_command(&p.name, in_pnpm_workspace(&repo.root, &cfg.path), npm_tag.as_deref()).or_else(|| goproxy.then(String::new)).with_context(|| {
             format!("{}: no publish command: set `publish.registry` or `publish.command` on the package, or in `[publish]`", p.name)
         })?;
         out.insert(
@@ -174,12 +171,7 @@ fn outcome(
 
 /// Per-member outcomes after the workspace command: the registry says
 /// what is there; without a registry the command's exit status does.
-fn workspace_outcomes(
-    repo: &Repo,
-    c: &Candidate,
-    ok: bool,
-    http: Http,
-) -> Result<Vec<Outcome>, Error> {
+fn workspace_outcomes(repo: &Repo, c: &Candidate, ok: bool, http: Http) -> Result<Vec<Outcome>> {
     let mut out = Vec::new();
     for (name, version, tag) in &c.members {
         let status =
@@ -241,7 +233,7 @@ fn run_command(repo: &Repo, name: &str, c: &Candidate, first: bool) -> (bool, St
 
 /// Run the publish command for every tagged package. Returns one outcome
 /// per package, in the order they finished.
-pub fn run(repo: &Repo, options: &Options, http: Http) -> Result<Vec<Outcome>, Error> {
+pub fn run(repo: &Repo, options: &Options, http: Http) -> Result<Vec<Outcome>> {
     let candidates = candidates(repo, options.only.as_ref())?;
     let jobs = options.jobs.unwrap_or(repo.config.publish.jobs).max(1);
     let mut done: BTreeMap<String, &'static str> = BTreeMap::new();
@@ -249,7 +241,7 @@ pub fn run(repo: &Repo, options: &Options, http: Http) -> Result<Vec<Outcome>, E
     let mut running: BTreeSet<String> = BTreeSet::new();
     let (tx, rx) = mpsc::channel::<(String, bool, String, String)>();
 
-    std::thread::scope(|scope| -> Result<(), Error> {
+    std::thread::scope(|scope| -> Result<()> {
         loop {
             // Block whatever depends on a failure, then start what is ready.
             let mut progressed = true;
@@ -396,7 +388,7 @@ pub fn run(repo: &Repo, options: &Options, http: Http) -> Result<Vec<Outcome>, E
                 }
                 return Ok(());
             }
-            let (name, ok, output, status) = rx.recv().map_err(|e| e.to_string())?;
+            let (name, ok, output, status) = rx.recv()?;
             running.remove(&name);
             let c = &candidates[&name];
             println!(
@@ -429,7 +421,7 @@ pub fn run(repo: &Repo, options: &Options, http: Http) -> Result<Vec<Outcome>, E
 
 /// Spec: WorkflowPublishHandoff. Appends to `$GITHUB_OUTPUT` when set.
 /// Returns the summary for stdout.
-pub fn write_outputs(outcomes: &[Outcome]) -> Result<String, Error> {
+pub fn write_outputs(outcomes: &[Outcome]) -> Result<String> {
     let names = |status: &str| {
         serde_json::to_string(
             &outcomes

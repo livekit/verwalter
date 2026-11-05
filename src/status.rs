@@ -4,8 +4,9 @@
 
 use std::collections::BTreeSet;
 
+use anyhow::Result;
+
 use crate::{
-    Error,
     config::ReleaseMode,
     git,
     github::{Gh, PullRequest},
@@ -34,7 +35,7 @@ pub struct PackageStatus {
     pub next_step: String,
 }
 
-pub fn status(repo: &Repo, remote: &str, gh: Gh) -> Result<Vec<PackageStatus>, Error> {
+pub fn status(repo: &Repo, remote: &str, gh: Gh) -> Result<Vec<PackageStatus>> {
     let root = repo.root.as_path();
     let remote_tags: BTreeSet<String> = git::run(root, &["ls-remote", "--tags", remote])
         .map(|out| {

@@ -6,9 +6,10 @@
 
 use std::process::Command;
 
+use anyhow::{Context, Result, bail, ensure};
 use serde::Deserialize;
 
-use crate::{Error, Version, config::Config, handler::to_pep440};
+use crate::{Version, config::Config, handler::to_pep440};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
@@ -31,12 +32,12 @@ pub enum Registry {
 }
 
 /// An HTTP status for a URL. Injected so tests need no network.
-pub type Http<'a> = &'a (dyn Fn(&str) -> Result<u16, Error> + Sync);
+pub type Http<'a> = &'a (dyn Fn(&str) -> Result<u16> + Sync);
 
 /// `curl` on the machine: 200, 404, or an error for anything else.
 /// crates.io answers 403 to curl's default User-Agent, so the tool
 /// names itself.
-pub fn curl(url: &str) -> Result<u16, Error> {
+pub fn curl(url: &str) -> Result<u16> {
     let agent = format!(
         "verwalter/{} (https://github.com/livekit/verwalter)",
         env!("CARGO_PKG_VERSION")
@@ -56,14 +57,12 @@ pub fn curl(url: &str) -> Result<u16, Error> {
             url,
         ])
         .output()
-        .map_err(|e| format!("curl: {e} (is curl installed?)"))?;
-    if !out.status.success() {
-        return Err(format!(
-            "curl {url}: {}",
-            String::from_utf8_lossy(&out.stderr).trim()
-        )
-        .into());
-    }
+        .context("curl (is curl installed?)")?;
+    ensure!(
+        out.status.success(),
+        "curl {url}: {}",
+        String::from_utf8_lossy(&out.stderr).trim()
+    );
     Ok(String::from_utf8_lossy(&out.stdout).trim().parse()?)
 }
 
@@ -121,7 +120,7 @@ fn goproxy_module_url(config: &Config, name: &str) -> Option<String> {
 /// Some(true) on 200, Some(false) on 404, None without a registry, an
 /// error for any other answer: a registry outage must not look like
 /// "not there yet".
-pub fn exists(url: Option<String>, http: Http) -> Result<Option<bool>, Error> {
+pub fn exists(url: Option<String>, http: Http) -> Result<Option<bool>> {
     let Some(url) = url else {
         return Ok(None);
     };
@@ -130,7 +129,7 @@ pub fn exists(url: Option<String>, http: Http) -> Result<Option<bool>, Error> {
         404 => Ok(Some(false)),
         // The Go proxy protocol answers "not found" with 404 or 410.
         410 if url.starts_with(GOPROXY) => Ok(Some(false)),
-        code => Err(format!("{url}: HTTP {code}").into()),
+        code => bail!("{url}: HTTP {code}"),
     }
 }
 

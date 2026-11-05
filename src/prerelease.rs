@@ -7,8 +7,10 @@
 //! them. Dependents without a changeset are not touched. After the
 //! merge, `verwalter release` tags each as a pre-release.
 
+use anyhow::{Result, bail, ensure};
+
 use crate::{
-    Error, Version, apply, branches, git,
+    Version, apply, branches, git,
     github::{Gh, MARKER, PullRequest, open_pr, section, upsert_pr},
     plan::PlannedRelease,
     repo::Repo,
@@ -21,7 +23,7 @@ pub fn branch_name(repo: &Repo, target: &str) -> String {
 }
 
 /// Versions of `package` that have a release tag.
-pub fn released_versions(repo: &Repo, package: &str) -> Result<Vec<Version>, Error> {
+pub fn released_versions(repo: &Repo, package: &str) -> Result<Vec<Version>> {
     let tags = git::run(&repo.root, &["tag", "--list"])?;
     Ok(tags
         .lines()
@@ -33,7 +35,7 @@ pub fn released_versions(repo: &Repo, package: &str) -> Result<Vec<Version>, Err
 /// group. Each group moves from its highest version by the highest level
 /// its changesets name, past every rc a member has tagged. Dependencies
 /// come before dependents, like a release plan.
-pub fn plan(repo: &Repo) -> Result<Vec<PlannedRelease>, Error> {
+pub fn plan(repo: &Repo) -> Result<Vec<PlannedRelease>> {
     let find = |name: &str| repo.packages.iter().find(|p| p.name == name);
     let pending = |name: &str| {
         repo.changesets
@@ -51,7 +53,7 @@ pub fn plan(repo: &Repo) -> Result<Vec<PlannedRelease>, Error> {
         }
     }
     if groups.is_empty() {
-        return Err("no pending changesets: nothing to pre-release".into());
+        bail!("no pending changesets: nothing to pre-release");
     }
     let in_rc = |name: &str| groups.iter().any(|g| g.iter().any(|m| m == name));
 
@@ -121,13 +123,14 @@ pub fn open(
     remote: &str,
     dry_run: bool,
     gh: Gh,
-) -> Result<(Vec<PlannedRelease>, PullRequest), Error> {
+) -> Result<(Vec<PlannedRelease>, PullRequest)> {
     let releases = plan(repo)?;
     let branch = branch_name(repo, target);
     let start = format!("{remote}/{target}");
-    if !git::ref_exists(&repo.root, &start) {
-        return Err(format!("{start} does not exist; fetch it first").into());
-    }
+    ensure!(
+        git::ref_exists(&repo.root, &start),
+        "{start} does not exist; fetch it first"
+    );
     // One version when the rc is one group, else "name version" each.
     let prefix = "pre-release: ";
     let title = if releases.iter().all(|r| r.to == releases[0].to) {

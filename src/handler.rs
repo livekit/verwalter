@@ -3,6 +3,7 @@
 //! `knope_versioning::versioned_file::Config` for the supported names.
 //! Functions take content, not paths, so they stay pure.
 
+use anyhow::{Context, Result, bail, ensure};
 use knope_versioning::{
     Action, GoVersioning, Package, VersionedFile, VersionedFileConfig, package::Name,
     release_notes::ReleaseNotes, versioned_file::cargo,
@@ -10,7 +11,7 @@ use knope_versioning::{
 use relative_path::RelativePathBuf;
 use toml_edit::DocumentMut;
 
-use crate::{Error, Version};
+use crate::Version;
 
 const NO_TAGS: &[&str] = &[];
 
@@ -207,7 +208,7 @@ fn load(
     path: &str,
     dependency: Option<&str>,
     content: &str,
-) -> Result<(VersionedFileConfig, VersionedFile), Error> {
+) -> Result<(VersionedFileConfig, VersionedFile)> {
     let config = VersionedFileConfig::new(
         RelativePathBuf::from(path),
         dependency.map(String::from),
@@ -232,20 +233,20 @@ fn load(
 
 /// The package version in a manifest. Lock files have none. `regex` picks
 /// the version out of a file knope has no format for (config::VersionedFile).
-pub fn read_version(path: &str, regex: Option<&str>, content: &str) -> Result<Version, Error> {
+pub fn read_version(path: &str, regex: Option<&str>, content: &str) -> Result<Version> {
     if let Some(re) = regex {
         let re = regex::Regex::new(re)?;
         let m = re
             .captures(content)
             .and_then(|c| c.name("version"))
-            .ok_or_else(|| format!("{path}: regex `{re}` has no `version` match"))?;
+            .with_context(|| format!("{path}: regex `{re}` has no `version` match"))?;
         return Ok(m.as_str().parse()?);
     }
     if is_go_mod(path) {
         let (module, version) =
-            go_module(content).ok_or_else(|| format!("{path}: no module line"))?;
-        return version.ok_or_else(|| {
-            format!("{path}: no `// vX.Y.Z` comment on the module line of {module}").into()
+            go_module(content).with_context(|| format!("{path}: no module line"))?;
+        return version.with_context(|| {
+            format!("{path}: no `// vX.Y.Z` comment on the module line of {module}")
         });
     }
     if is_pyproject(path)
@@ -256,7 +257,7 @@ pub fn read_version(path: &str, regex: Option<&str>, content: &str) -> Result<Ve
         } else {
             "list the file the build backend reads it from, with a regex"
         };
-        return Err(format!("{path}: the version is dynamic: {instead}").into());
+        bail!("{path}: the version is dynamic: {instead}");
     }
     Ok(load(path, None, content)?.1.version()?)
 }
@@ -264,23 +265,21 @@ pub fn read_version(path: &str, regex: Option<&str>, content: &str) -> Result<Ve
 /// A regex file: the `version` group of every match becomes `version`,
 /// nothing else moves. The regex wins over the file name, so a Cargo.lock
 /// entry or a README line can be addressed directly.
-fn regex_write(path: &str, re: &str, content: &str, version: &Version) -> Result<String, Error> {
+fn regex_write(path: &str, re: &str, content: &str, version: &Version) -> Result<String> {
     let re = regex::Regex::new(re)?;
     let mut out = String::with_capacity(content.len());
     let mut last = 0;
     let mut matched = false;
     for caps in re.captures_iter(content) {
         let Some(group) = caps.name("version") else {
-            return Err(format!("{path}: regex `{re}` has no `version` group").into());
+            bail!("{path}: regex `{re}` has no `version` group");
         };
         matched = true;
         out.push_str(&content[last..group.start()]);
         out.push_str(&version.to_string());
         last = group.end();
     }
-    if !matched {
-        return Err(format!("{path}: regex `{re}` matches nothing").into());
-    }
+    ensure!(matched, "{path}: regex `{re}` matches nothing");
     out.push_str(&content[last..]);
     Ok(out)
 }
@@ -299,7 +298,7 @@ pub fn write_version(
     content: &str,
     dependency: Option<&str>,
     version: &Version,
-) -> Result<String, Error> {
+) -> Result<String> {
     if let Some(re) = regex {
         // A regex file carries one version, its own. Nothing to pin.
         if dependency.is_some() {
@@ -343,9 +342,9 @@ pub fn write_version(
         if let Some(module) = dependency {
             return Ok(go_mod_pin(content, module, version));
         }
-        let (module, _) = go_module(content).ok_or_else(|| format!("{path}: no module line"))?;
+        let (module, _) = go_module(content).with_context(|| format!("{path}: no module line"))?;
         if let Some(e) = go_major_error(&module, version) {
-            return Err(e.into());
+            bail!(e);
         }
     }
     if let (true, Some(dep)) = (path.rsplit('/').next() == Some("uv.lock"), dependency) {
@@ -464,7 +463,7 @@ fn pyproject_pin(content: &str, dep: &str, version: &Version) -> String {
 /// The `[[package]]` entry of `dep` gets `version`, and every
 /// `requires-dist` specifier on `dep` moves its lower bound, as the
 /// pyproject pin does. Without that, `uv sync --locked` rejects the lock.
-fn uv_lock_pin(content: &str, dep: &str, version: &Version) -> Result<String, Error> {
+fn uv_lock_pin(content: &str, dep: &str, version: &Version) -> Result<String> {
     let wanted = normalise_py(dep);
     let new = to_pep440(version);
     let mut doc: DocumentMut = content.parse()?;
@@ -517,7 +516,7 @@ pub fn internal_dependencies(
     path: &str,
     content: &str,
     candidates: &[&str],
-) -> Result<Vec<String>, Error> {
+) -> Result<Vec<String>> {
     let file_name = path.rsplit('/').next().unwrap_or(path);
     let found: Vec<String> = match file_name {
         "Cargo.toml" => {

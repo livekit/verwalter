@@ -6,9 +6,10 @@
 
 use std::{fs, path::Path};
 
+use anyhow::{Context, Result, anyhow, bail};
 use serde::Serialize;
 
-use crate::{Error, config::ReleaseMode, git, github::Gh, repo::Repo};
+use crate::{config::ReleaseMode, git, github::Gh, repo::Repo};
 
 /// One line of the handoff to the publish workflow.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -67,7 +68,7 @@ pub fn view(gh: Gh, tag: &str) -> Option<ReleaseState> {
 ///
 /// Packages are handled in dependency order and the run stops at the
 /// first failure, so a dependent is never released before its dependency.
-pub fn run(repo: &Repo, remote: &str, options: &Options, gh: Gh) -> Result<Vec<Released>, Error> {
+pub fn run(repo: &Repo, remote: &str, options: &Options, gh: Gh) -> Result<Vec<Released>> {
     let deps_of = |name: &str| -> Vec<&str> {
         repo.packages
             .iter()
@@ -107,7 +108,7 @@ pub fn run(repo: &Repo, remote: &str, options: &Options, gh: Gh) -> Result<Vec<R
 /// artifacts into one directory names it once. Hidden files and
 /// subdirectories are left out. Paths stay relative to the checkout, where
 /// gh runs. A file is passed on as it is: gh reports a missing one.
-pub fn expand_assets(root: &Path, assets: &[String]) -> Result<Vec<String>, Error> {
+pub fn expand_assets(root: &Path, assets: &[String]) -> Result<Vec<String>> {
     let mut out = Vec::new();
     for asset in assets {
         let dir = root.join(asset);
@@ -116,7 +117,7 @@ pub fn expand_assets(root: &Path, assets: &[String]) -> Result<Vec<String>, Erro
             continue;
         }
         let mut files: Vec<String> = fs::read_dir(&dir)
-            .map_err(|e| format!("--asset {asset}: {e}"))?
+            .with_context(|| format!("--asset {asset}"))?
             .filter_map(Result::ok)
             .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
             .filter_map(|e| e.file_name().into_string().ok())
@@ -124,7 +125,7 @@ pub fn expand_assets(root: &Path, assets: &[String]) -> Result<Vec<String>, Erro
             .map(|n| format!("{}/{n}", asset.trim_end_matches('/')))
             .collect();
         if files.is_empty() {
-            return Err(format!("--asset {asset}: the directory has no files").into());
+            bail!("--asset {asset}: the directory has no files");
         }
         files.sort();
         out.extend(files);
@@ -132,14 +133,16 @@ pub fn expand_assets(root: &Path, assets: &[String]) -> Result<Vec<String>, Erro
     Ok(out)
 }
 
-fn resume_hint(e: Error, package: &str, options: &Options) -> Error {
+fn resume_hint(e: anyhow::Error, package: &str, options: &Options) -> anyhow::Error {
     let assets: String = options
         .assets
         .iter()
         .map(|a| format!(" --asset {a}"))
         .collect();
     let publish = if options.publish { " --publish" } else { "" };
-    format!("{package}: {e}\nresume with: verwalter release --package {package}{assets}{publish}  (add --dry-run to see the steps first)").into()
+    anyhow!(
+        "{package}: {e:#}\nresume with: verwalter release --package {package}{assets}{publish}  (add --dry-run to see the steps first)"
+    )
 }
 
 fn release_one(
@@ -149,7 +152,7 @@ fn release_one(
     name: &str,
     version: &crate::Version,
     gh: Gh,
-) -> Result<Option<Released>, Error> {
+) -> Result<Option<Released>> {
     let root = repo.root.as_path();
     let package = &repo.config.packages[name];
     if package.release.mode == ReleaseMode::None {
@@ -298,7 +301,7 @@ pub fn first_release(
     name: &str,
     version: &crate::Version,
     http: crate::registry::Http,
-) -> Result<bool, Error> {
+) -> Result<bool> {
     match crate::registry::exists(crate::registry::package_url(&repo.config, name), http)? {
         Some(has_any) => Ok(!has_any),
         None => Ok(crate::prerelease::released_versions(repo, name)?
@@ -310,13 +313,7 @@ pub fn first_release(
 /// Spec: MaintainerAbandonsRelease. Removes the GitHub release and the
 /// tag, locally and on the remote, for a release whose commit turned out
 /// broken. Missing pieces are skipped; the registry is not touched.
-pub fn abandon(
-    repo: &Repo,
-    remote: &str,
-    tag: &str,
-    dry_run: bool,
-    gh: Gh,
-) -> Result<Vec<String>, Error> {
+pub fn abandon(repo: &Repo, remote: &str, tag: &str, dry_run: bool, gh: Gh) -> Result<Vec<String>> {
     let root = repo.root.as_path();
     let mut removed = Vec::new();
     if view(gh, tag).is_some() {
@@ -344,7 +341,7 @@ pub fn abandon(
     Ok(removed)
 }
 
-fn remote_has_tag(root: &Path, remote: &str, tag: &str) -> Result<bool, Error> {
+fn remote_has_tag(root: &Path, remote: &str, tag: &str) -> Result<bool> {
     Ok(!git::run(
         root,
         &["ls-remote", "--tags", remote, &format!("refs/tags/{tag}")],
@@ -384,7 +381,7 @@ fn previous_version(changelog: &str, version: &str) -> Option<String> {
 }
 
 /// Spec: WorkflowReleaseHandoff. Appends to `$GITHUB_OUTPUT` when set.
-pub fn write_outputs(released: &[Released]) -> Result<String, Error> {
+pub fn write_outputs(released: &[Released]) -> Result<String> {
     let json = serde_json::to_string(released)?;
     crate::github::append_output(&format!(
         "released={}\nreleases={json}\n",

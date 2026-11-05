@@ -6,33 +6,32 @@ use std::{
     process::{Command, Output},
 };
 
-use crate::Error;
+use anyhow::{Context, Result, ensure};
 
-fn output(root: &Path, args: &[&str]) -> Result<Output, Error> {
-    Ok(Command::new("git")
+fn output(root: &Path, args: &[&str]) -> Result<Output> {
+    Command::new("git")
         .arg("-C")
         .arg(root)
         .args(args)
-        .output()?)
+        .output()
+        .context("cannot run git")
 }
 
 /// Run git and return trimmed stdout; a non-zero exit is an error.
-pub fn run(root: &Path, args: &[&str]) -> Result<String, Error> {
+pub fn run(root: &Path, args: &[&str]) -> Result<String> {
     let out = output(root, args)?;
-    if !out.status.success() {
-        return Err(format!(
-            "git {}: {}",
-            args.join(" "),
-            String::from_utf8_lossy(&out.stderr).trim()
-        )
-        .into());
-    }
+    ensure!(
+        out.status.success(),
+        "git {}: {}",
+        args.join(" "),
+        String::from_utf8_lossy(&out.stderr).trim()
+    );
     Ok(String::from_utf8(out.stdout)?.trim().to_string())
 }
 
 /// A git command that changes the remote or the refs. With `dry_run` it
 /// is printed instead of run.
-pub fn write(root: &Path, dry_run: bool, args: &[&str]) -> Result<String, Error> {
+pub fn write(root: &Path, dry_run: bool, args: &[&str]) -> Result<String> {
     if dry_run {
         println!("dry-run: git {}", args.join(" "));
         return Ok(String::new());

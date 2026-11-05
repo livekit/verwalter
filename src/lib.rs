@@ -29,5 +29,3 @@ pub mod release;
 pub mod status;
 
 pub use knope_versioning::semver::Version;
-
-pub type Error = Box<dyn std::error::Error + Send + Sync>;

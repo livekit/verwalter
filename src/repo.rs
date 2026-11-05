@@ -6,7 +6,9 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::{Error, Version, changeset::Changeset, config::Config, handler, plan::PackageState};
+use anyhow::{Context, Result, bail};
+
+use crate::{Version, changeset::Changeset, config::Config, handler, plan::PackageState};
 
 pub const CONFIG_FILE: &str = "verwalter.toml";
 pub const CHANGESET_DIR: &str = ".changeset";
@@ -23,11 +25,11 @@ pub struct Repo {
 
 impl Repo {
     /// Load with the config at `<root>/verwalter.toml`.
-    pub fn load(root: &Path) -> Result<Self, Error> {
+    pub fn load(root: &Path) -> Result<Self> {
         Self::load_with_config(root, &root.join(CONFIG_FILE))
     }
 
-    pub fn load_with_config(root: &Path, config_path: &Path) -> Result<Self, Error> {
+    pub fn load_with_config(root: &Path, config_path: &Path) -> Result<Self> {
         let config = Config::load(root, config_path)?;
         let (packages, warnings) = Self::load_packages(root, &config)?;
         let names: Vec<&str> = config.packages.keys().map(String::as_str).collect();
@@ -44,10 +46,7 @@ impl Repo {
     /// The packages alone: versions and in-repo dependencies from the
     /// manifests, with the file-drift warnings. `check` uses this without
     /// the changesets, which it reads from the PR itself.
-    pub fn load_packages(
-        root: &Path,
-        config: &Config,
-    ) -> Result<(Vec<PackageState>, Vec<String>), Error> {
+    pub fn load_packages(root: &Path, config: &Config) -> Result<(Vec<PackageState>, Vec<String>)> {
         let names: Vec<&str> = config.packages.keys().map(String::as_str).collect();
         // Dependents name a package by its key: the module path for Go.
         let key_of = |n: &str| config.dependency_key(n).to_string();
@@ -56,17 +55,20 @@ impl Repo {
         for (name, package) in &config.packages {
             let mut version: Option<Version> = None;
             // Why the first file carries no version, for the error below.
-            let mut unread: Option<String> = None;
+            let mut unread: Option<anyhow::Error> = None;
             let mut dependencies = Vec::new();
             for file in &package.versioning.files {
                 let (file, regex) = (file.path(), file.regex());
                 let content =
-                    fs::read_to_string(root.join(file)).map_err(|e| format!("{file}: {e}"))?;
-                let read = handler::read_version(file, regex, &content);
-                if let (None, Err(e)) = (&unread, &read) {
-                    unread = Some(e.to_string());
-                }
-                match (&version, read.ok()) {
+                    fs::read_to_string(root.join(file)).with_context(|| file.to_string())?;
+                let read = match handler::read_version(file, regex, &content) {
+                    Ok(v) => Some(v),
+                    Err(e) => {
+                        unread.get_or_insert(e);
+                        None
+                    }
+                };
+                match (&version, read) {
                     (None, found) => version = found,
                     (Some(first), Some(other)) if *first != other => warnings.push(format!(
                         "{name}: {file} says {other}, {} says {first}; the next release aligns them",
@@ -95,10 +97,13 @@ impl Repo {
             if version.is_none() && config.is_go(name) {
                 version = Some(go_tag_version(root, config, name));
             }
-            let version = version.ok_or_else(|| match &unread {
-                Some(e) => format!("{name}: no versioned file carries a version ({e})"),
-                None => format!("{name}: no versioned file carries a version"),
-            })?;
+            let version = match (version, unread) {
+                (Some(version), _) => version,
+                (None, Some(e)) => {
+                    return Err(e.context(format!("{name}: no versioned file carries a version")));
+                }
+                (None, None) => bail!("{name}: no versioned file carries a version"),
+            };
             packages.push(PackageState {
                 name: name.clone(),
                 version,
@@ -126,7 +131,7 @@ fn go_tag_version(root: &Path, config: &Config, name: &str) -> Version {
 /// Every `*.md` in the changeset directory except `README.md`. A bump line
 /// naming a package that is not configured is an error, so a typo cannot
 /// sit in `.changeset/` unnoticed.
-fn read_changesets(dir: &Path, known: &[&str]) -> Result<Vec<Changeset>, Error> {
+fn read_changesets(dir: &Path, known: &[&str]) -> Result<Vec<Changeset>> {
     let Ok(entries) = fs::read_dir(dir) else {
         return Ok(Vec::new());
     };
@@ -142,7 +147,7 @@ fn read_changesets(dir: &Path, known: &[&str]) -> Result<Vec<Changeset>, Error> 
         let content = fs::read_to_string(&path)?;
         out.push(
             Changeset::parse_known(name, &content, known)
-                .map_err(|e| format!("{}: {e}", path.display()))?,
+                .with_context(|| path.display().to_string())?,
         );
     }
     out.sort_by(|a, b| a.file.cmp(&b.file));
