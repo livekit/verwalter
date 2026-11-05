@@ -10,6 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions-rust-lang/setup-rust-toolchain@a188e68d0fd2bd36ad51dccb2b07ba6e75105f30 # v2.0.1
-      - run: cargo test
-      - run: cargo clippy -- -D warnings
+      - uses: ./.github/actions/setup-devenv
+      # All git hooks in devenv.nix on all files, then enterTest.
+      - name: Checks & tests
+        run: devenv test

@@ -1,0 +1,22 @@
+name: Set up devenv
+description: Install Nix and devenv, and restore the Cargo cache.
+runs:
+  using: composite
+  steps:
+    - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
+    - uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866 # v17
+      with:
+        name: devenv
+    - shell: bash
+      run: |
+        nix profile add nixpkgs#devenv
+        # Incremental artifacts only bloat the cache in CI.
+        echo "CARGO_INCREMENTAL=0" >> "$GITHUB_ENV"
+    - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: cargo-${{ runner.os }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}
+        restore-keys: cargo-${{ runner.os }}-
