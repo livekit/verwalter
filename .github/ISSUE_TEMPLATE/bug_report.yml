@@ -1,0 +1,18 @@
+name: Bug Report
+description: File a bug report.
+labels: [triage]
+body:
+  - type: input
+    id: version
+    validations: { required: true }
+    attributes:
+      label: Application Version
+      description: What version of the tool are you using?
+      placeholder: "v0.1.0"
+  - type: textarea
+    id: description
+    validations: { required: true }
+    attributes:
+      label: Issue Description
+      description: |
+        Please describe the issue, providing steps to reproduce and any other relevant information.
