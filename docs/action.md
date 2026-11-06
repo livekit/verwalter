@@ -19,7 +19,7 @@
 | `version` | verwalter release to download. Defaults to the version the action was checked out at. If the download fails, the action builds that checked-out version with `cargo`. |
 | `dry-run` | `"true"` passes `--dry-run`. Reads still run, writes are printed. |
 | `args` | Extra arguments passed to the command. |
-| `releases` | `publish` only: the `releases` output of the `release` step. Only those packages are published. |
+| `releases` | `publish` only: the `releases` output of the `release` step. Only those packages are published. Without it, or with an empty list, every tagged package is, and the registry check skips the versions it has. |
 
 | Output (`release` only) | Meaning |
 |---|---|

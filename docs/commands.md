@@ -10,7 +10,7 @@
 | `verwalter pr [--remote origin]` | Push the branch and open or update the PR. |
 | `verwalter release [--asset <file\|dir>]... [--package <name>] [--publish]` | Tag and create GitHub releases for every untagged version that has a changelog entry. Uploads assets to drafts or a named package. A directory stands for every file directly in it. `--publish` flips a draft. |
 | `verwalter release --abandon <tag>` | Delete a GitHub release and its tag. |
-| `verwalter publish [--releases <json>] [--jobs <n>]` | Run each package's publish command for the packages in `--releases` (the `releases` output of `release`), or every tagged package without it, dependencies first, up to `n` at once. A failure blocks dependents. A version on the registry is skipped. |
+| `verwalter publish [--releases <json>] [--jobs <n>]` | Run each package's publish command for the packages in `--releases` (the `releases` output of `release`), or every tagged package without it or with an empty list, dependencies first, up to `n` at once. A failure blocks dependents. A version on the registry is skipped. |
 | `verwalter pre-release [--target <branch>]` | Open an rc PR for every package with a pending changeset and the fixed groups they are in, from `target`. Changesets stay pending. |
 
 All commands take `--config <file>` and an optional checkout path. `pr`,
