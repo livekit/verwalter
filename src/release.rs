@@ -226,7 +226,7 @@ fn release_one(
     // Spec: CreateGitHubRelease / ResumeTaggedReleasesWithoutGitHubRelease,
     // then WorkflowPublishesRelease for drafts.
     if package.release.mode == ReleaseMode::TagAndRelease {
-        match view(gh, &tag) {
+        match view(gh, &tag)? {
             Some(existing) => {
                 let mut draft = existing.draft;
                 // Assets go to an existing release only when it is still a
@@ -279,14 +279,14 @@ fn release_one(
                     // Two release runs at once (two PRs merged together):
                     // the other one won the create, which is as good as done.
                     Err(e) => match view(gh, &tag) {
-                        Some(existing) => {
+                        Ok(Some(existing)) => {
                             status = if existing.draft {
                                 "drafted"
                             } else {
                                 "published"
                             }
                         }
-                        None => return Err(e),
+                        _ => return Err(e),
                     },
                 }
             }
@@ -332,7 +332,7 @@ pub fn first_release(
 pub fn abandon(repo: &Repo, remote: &str, tag: &str, dry_run: bool, gh: Gh) -> Result<Vec<String>> {
     let root = repo.root.as_path();
     let mut removed = Vec::new();
-    if view(gh, tag).is_some() {
+    if view(gh, tag)?.is_some() {
         gh(&["release", "delete", tag, "--yes"])?;
         removed.push(format!("release {tag}"));
     }
