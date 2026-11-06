@@ -5,7 +5,7 @@
 //! ponytail: GitHub access goes through the `gh` CLI, which CI has and
 //! which carries the token; no HTTP client.
 
-use std::{path::Path, process::Command};
+use std::{path::{Path, PathBuf}, process::Command};
 
 use anyhow::{Context, Result, anyhow, ensure};
 use serde::Deserialize;
@@ -18,34 +18,31 @@ pub trait Client {
     fn execute(&self, args: &[&str]) -> Result<String>;
 }
 
-/// Runs `gh` with the given arguments and returns stdout. Injected so
-/// tests can fake GitHub.
-pub type Gh<'a> = &'a mut dyn FnMut(&[&str]) -> Result<String>;
-
-/// `owner/repo` of a GitHub remote URL (ssh or https), if it is one.
-pub fn repo_slug(url: &str) -> Option<String> {
-    let rest = url.trim().strip_suffix(".git").unwrap_or(url.trim());
-    let after = rest
-        .split_once("github.com")
-        .map(|(_, a)| a.trim_start_matches([':', '/']))?;
-    let mut parts = after.split('/');
-    Some(format!("{}/{}", parts.next()?, parts.next()?))
+/// GitHub CLI client using the system's installation.
+pub struct SystemClient {
+    slug: Option<String>,
+    root: PathBuf
 }
 
-/// Runs gh pinned to the repository behind `remote` (`GH_REPO`), so a
-/// clone with an `upstream` remote never resolves PR numbers against the
-/// parent repository.
-pub fn gh_cli<'a>(
-    root: &'a Path,
-    remote: &str,
-) -> impl FnMut(&[&str]) -> Result<String> + 'a + use<'a> {
-    let slug = crate::git::run(root, &["remote", "get-url", remote])
-        .ok()
-        .and_then(|u| repo_slug(&u));
-    move |args: &[&str]| {
+impl SystemClient {
+    /// A missing remote leaves `GH_REPO` unset, so commands that never
+    /// call gh still work in a checkout without it.
+    pub fn new(root: &Path, remote: &str) -> Self {
+        let slug = crate::git::run(root, &["remote", "get-url", remote])
+            .ok()
+            .and_then(|u| repo_slug(&u));
+        Self { slug, root: root.to_path_buf() }
+    }
+}
+
+impl Client for SystemClient {
+    fn execute(&self, args: &[&str]) -> Result<String> {
         let mut cmd = Command::new("gh");
-        cmd.current_dir(root).args(args);
-        if let Some(slug) = &slug {
+        cmd.current_dir(&self.root).args(args);
+        // Runs gh pinned to the repository behind `remote` (`GH_REPO`), so a
+        // clone with an `upstream` remote never resolves PR numbers against the
+        // parent repository.
+        if let Some(slug) = &self.slug {
             cmd.env("GH_REPO", slug);
         }
         let out = cmd.output().context("cannot run gh")?;
@@ -59,24 +56,17 @@ pub fn gh_cli<'a>(
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-pub struct PullRequest {
-    pub number: u64,
-    #[serde(rename = "headRefName")]
-    pub head: String,
-    #[serde(rename = "baseRefName")]
-    pub base: String,
+/// Wrapper around another [`Client`] which rejects write operations.
+pub struct DryRunClient<C>(C);
+
+impl<C: Client> DryRunClient<C> {
+    pub fn new(inner: C) -> Self {
+        Self(inner)
+    }
 }
 
-pub const MARKER: &str = "<!-- verwalter release -->";
-
-/// Wraps a gh runner so that every write (`pr create|edit|close|comment`,
-/// `release create|delete|edit`, `label create`, `api -X ...`) is printed
-/// and faked, while reads go through.
-pub fn dry_run_gh(
-    mut inner: impl FnMut(&[&str]) -> Result<String>,
-) -> impl FnMut(&[&str]) -> Result<String> {
-    move |args: &[&str]| {
+impl<C: Client> Client for DryRunClient<C> {
+    fn execute(&self, args: &[&str]) -> Result<String> {
         let is_write = matches!(
             args,
             ["pr", "create" | "edit" | "close" | "comment", ..]
@@ -85,7 +75,7 @@ pub fn dry_run_gh(
                 | ["api", "-X", ..]
         );
         if !is_write {
-            return inner(args);
+            return self.0.execute(args);
         }
         let shown: Vec<&str> = args
             .iter()
@@ -98,6 +88,27 @@ pub fn dry_run_gh(
         })
     }
 }
+
+/// `owner/repo` of a GitHub remote URL (ssh or https), if it is one.
+pub fn repo_slug(url: &str) -> Option<String> {
+    let rest = url.trim().strip_suffix(".git").unwrap_or(url.trim());
+    let after = rest
+        .split_once("github.com")
+        .map(|(_, a)| a.trim_start_matches([':', '/']))?;
+    let mut parts = after.split('/');
+    Some(format!("{}/{}", parts.next()?, parts.next()?))
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct PullRequest {
+    pub number: u64,
+    #[serde(rename = "headRefName")]
+    pub head: String,
+    #[serde(rename = "baseRefName")]
+    pub base: String,
+}
+
+pub const MARKER: &str = "<!-- verwalter release -->";
 
 /// Push every branch and make GitHub match the plan.
 /// Spec: ChangelogUpdated, "PR link and author". For each changeset, the
