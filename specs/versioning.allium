@@ -255,7 +255,7 @@ entity ChangesetCheck {
     -- a changeset of their own: dependents and fixed-group members. The
     -- comment names them with the reason, without a level or a version,
     -- because both can change before the merge.
-    also_released: Set<Package>
+    also_bumped: Set<Package>
     -- release_pull_request: the head branch carries the release prefix.
     -- A release PR consumes changesets rather than adding one.
     status: passed | failed | exempt | release_pull_request
@@ -824,7 +824,7 @@ surface ContributorPullRequestCheck {
         check.affected_packages
         check.covered_packages
         check.bumps
-        check.also_released
+        check.also_bumped
         check.missing_packages when check.status = failed
         check.api_findings when check.status = failed
         create_changeset_link(check.pull_request, check.missing_packages) when check.status = failed
