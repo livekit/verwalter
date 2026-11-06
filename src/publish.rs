@@ -28,7 +28,7 @@ pub struct Options {
     pub dry_run: bool,
     /// Spec: WorkflowRunsPublish.releases. The packages this run released,
     /// from the `release` step's output. None publishes every tagged
-    /// package, for a re-run by hand.
+    /// package, for a re-run by hand; the CLI maps an empty list to None.
     pub only: Option<BTreeSet<String>>,
 }
 

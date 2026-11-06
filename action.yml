@@ -27,7 +27,7 @@ inputs:
     description: Extra arguments passed through to verwalter.
     default: ""
   releases:
-    description: "`publish` only: the `releases` output of the `release` step. Only those packages are published. Without it, every tagged package is."
+    description: "`publish` only: the `releases` output of the `release` step. Only those packages are published. Without it, or with an empty list, every tagged package is, and the registry check skips the versions it has."
     default: ""
 
 outputs:

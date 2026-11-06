@@ -865,7 +865,10 @@ surface PreReleaseRequest {
 -- a `for` clause, so `check` reports the other outcomes as unreachable.
 -- `releases`, when the workflow hands over the list from `release`, keeps
 -- the run to the packages it released: without it, every tagged package
--- runs its command again, and only a registry can tell that apart.
+-- runs its command again, and only a registry can tell that apart. An
+-- empty list counts as absent: it reaches publish only from a re-run
+-- by hand after a run that released nothing, and the re-run is for the
+-- versions a registry lacks.
 rule WorkflowPublishesInDependencyOrder {
     when: WorkflowRunsPublish(workflow, repository, releases?)
     let candidates = filter(Packages, p => p.repository = repository and p.release_mode != none and GitTags.any(t => t.package = p and t.version = p.version) and (releases = none or p in releases))
