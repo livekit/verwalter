@@ -32,9 +32,9 @@ pub struct Check {
     /// Spec: ChangesetCheck.bumps. What the PR's changesets claim, one
     /// line per package at the highest level, for the comment.
     pub bumps: Vec<crate::changeset::Bump>,
-    /// Spec: ChangesetCheck.also_released. Packages the merge releases
+    /// Spec: ChangesetCheck.also_bumped. Packages the next release bumps
     /// without a changeset of their own, with the reason: a dependent,
-    /// or a member of a fixed group. Filled by `also_released`.
+    /// or a member of a fixed group. Filled by `also_bumped`.
     pub also: Vec<(String, String)>,
 }
 
@@ -110,9 +110,9 @@ pub fn evaluate(
     }
 }
 
-/// Spec: ChangesetCheck.also_released. The plan over the PR's changesets
+/// Spec: ChangesetCheck.also_bumped. The plan over the PR's changesets
 /// alone, minus the covered packages: what rides along, and why.
-pub fn also_released(check: &mut Check, planned: &[crate::plan::PlannedRelease]) {
+pub fn also_bumped(check: &mut Check, planned: &[crate::plan::PlannedRelease]) {
     check.also = planned
         .iter()
         .filter(|r| !check.covered.contains(&r.package))
@@ -139,7 +139,7 @@ pub fn also_released(check: &mut Check, planned: &[crate::plan::PlannedRelease])
         .collect();
 }
 
-/// `also_released` against the manifests in the checkout.
+/// `also_bumped` against the manifests in the checkout.
 pub fn plan_also(
     root: &Path,
     config: &Config,
@@ -155,7 +155,7 @@ pub fn plan_also(
         changesets,
         config.versioning.dependent_bump_level,
     );
-    also_released(check, &planned);
+    also_bumped(check, &planned);
     Ok(())
 }
 
@@ -372,7 +372,7 @@ pub fn comment(
         }
         out.push('\n');
         if !check.also.is_empty() {
-            out.push_str("**Also released**\n\n");
+            out.push_str("**Also bumped**\n\n");
             for (p, why) in &check.also {
                 out.push_str(&format!("- `{p}`: {why}\n"));
             }
@@ -803,10 +803,10 @@ versioning.changelog = "CHANGELOG.md"
         );
     }
 
-    // Spec: ChangesetCheck.also_released. A dependent and a fixed-group
+    // Spec: ChangesetCheck.also_bumped. A dependent and a fixed-group
     // member ride along, named with the reason and without a level.
     #[test]
-    fn also_released_names_dependents_and_group_members() {
+    fn also_bumped_names_dependents_and_group_members() {
         use crate::plan::{PackageState, plan};
         let v = |s: &str| -> Version { s.parse().unwrap() };
         let mut packages = vec![
@@ -825,7 +825,7 @@ versioning.changelog = "CHANGELOG.md"
             &s(&["core/x", ".changeset/a.md"]),
             &cs,
         );
-        also_released(&mut c, &plan(&packages, &cs, BumpLevel::Patch));
+        also_bumped(&mut c, &plan(&packages, &cs, BumpLevel::Patch));
         assert_eq!(
             c.also,
             [
@@ -835,7 +835,7 @@ versioning.changelog = "CHANGELOG.md"
         );
         let body = comment(&c, &config, "o/r", "feat", "t");
         assert!(body.contains(
-            "**Also released**\n\n- `ffi`: fixed with `core`\n- `client`: depends on `core`\n"
+            "**Also bumped**\n\n- `ffi`: fixed with `core`\n- `client`: depends on `core`\n"
         ));
     }
 
