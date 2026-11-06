@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.28.0
+
+### Minor Changes
+
+- Add a `dependencies` key to a package for in-repo dependencies its manifests do not name, such as an unpublished crate a Python or Node package links at build time - [#74](https://github.com/livekit/verwalter/pull/74) ([@lukasIO](https://github.com/lukasIO))
+
 ## 0.27.1
 
 ### Patch Changes
