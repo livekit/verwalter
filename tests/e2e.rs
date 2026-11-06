@@ -2046,3 +2046,84 @@ fn release_branch_leaves_lfs_pointers_alone() {
         pointer.trim()
     );
 }
+
+// Spec: Package.dependencies. A dependency the manifests do not name is
+// configured; a release of it bumps the dependent, whose manifest holds no
+// pin to move. The unpublished crate is a package with release.mode none.
+#[test]
+fn configured_dependency_fans_out_without_a_pin() {
+    let r = fixture("configured-dep");
+    let root = &r.0;
+    write(
+        root,
+        "verwalter.toml",
+        r#"
+[packages.krisp]
+path = "rust/krisp"
+versioning.files = ["Cargo.toml"]
+release.mode = "none"
+publish.registry = "none"
+
+[packages.noise-node]
+path = "nodejs"
+dependencies = ["krisp"]
+versioning.files = ["package.json"]
+
+[packages.noise-py]
+path = "python"
+dependencies = ["krisp"]
+versioning.files = ["pyproject.toml"]
+"#,
+    );
+    write(
+        root,
+        "rust/krisp/Cargo.toml",
+        "[package]\nname = \"krisp\"\nversion = \"0.1.0\"\n",
+    );
+    let package_json = "{\n  \"name\": \"noise-node\",\n  \"version\": \"0.3.0\",\n  \"peerDependencies\": {\n    \"@livekit/rtc-node\": \"^1.0.0\"\n  }\n}\n";
+    write(root, "nodejs/package.json", package_json);
+    write(
+        root,
+        "python/pyproject.toml",
+        "[project]\nname = \"noise-py\"\nversion = \"0.3.2\"\ndependencies = [\"livekit>=0.21.3\"]\n",
+    );
+    for p in ["rust/krisp", "nodejs", "python"] {
+        write(root, &format!("{p}/CHANGELOG.md"), "# Changelog\n");
+    }
+    write(
+        root,
+        ".changeset/krisp.md",
+        "---\nkrisp: minor\n---\nFaster filter\n",
+    );
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-q", "-m", "krisp change"]);
+
+    let repo = Repo::load(root).unwrap();
+    let by = |n: &str| repo.packages.iter().find(|p| p.name == n).unwrap();
+    assert_eq!(by("noise-node").dependencies, ["krisp"]);
+    assert_eq!(by("noise-py").dependencies, ["krisp"]);
+    let plan = plan(
+        &repo.packages,
+        &repo.changesets,
+        repo.config.versioning.dependent_bump_level,
+    );
+    branches::create(&repo, &plan, "main").unwrap();
+    assert_eq!(
+        git(root, &["log", "-1", "--format=%s", "release/main"]),
+        "release: krisp 0.2.0, noise-node 0.3.1, noise-py 0.3.3"
+    );
+    assert!(git(root, &["show", "release/main:rust/krisp/Cargo.toml"]).contains("0.2.0"));
+    // Only the version moved: there is no pin on krisp to write.
+    assert_eq!(
+        git(root, &["show", "release/main:nodejs/package.json"]),
+        package_json.replace("0.3.0", "0.3.1").trim()
+    );
+    assert!(
+        git(root, &["show", "release/main:python/pyproject.toml"])
+            .contains("version = \"0.3.3\"\ndependencies = [\"livekit>=0.21.3\"]")
+    );
+    assert!(
+        git(root, &["show", "release/main:nodejs/CHANGELOG.md"])
+            .contains("Updated dependencies: krisp@0.2.0")
+    );
+}

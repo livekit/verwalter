@@ -67,6 +67,7 @@ path = "livekit-protocol"        # the only required key, unless `members` finds
 
 [packages.livekit-ffi]
 path = "livekit-ffi"
+dependencies = ["livekit-protocol"]   # in-repo packages its manifests do not name; added to the ones they do
 versioning.files = ["Cargo.toml", "../livekit-ffi-node/package.json"]   # the first file carries the version
 versioning.changelog = false
 release.tag = "ffi/v{version}"
@@ -124,7 +125,13 @@ package: there, or failed), and a package with its own `publish.command` or
 another registry keeps the per-package path and waits for the members it
 depends on.
 
-Dependencies between packages are read from the manifests, not configured.
+Dependencies between packages are read from the manifests. A package
+whose manifests do not name one, for example a Python package that links
+an in-repo crate at build time, lists it in `dependencies`. A release of
+that crate then bumps the package too, by `dependent_bump_level`. A crate
+that is never published is still a package, with `release.mode = "none"`
+and `publish.registry = "none"`: its changesets bump its `Cargo.toml` and
+fan out to the packages that list it.
 
 **Versioned files.** Formats come from
 [knope-versioning](https://crates.io/crates/knope-versioning): `Cargo.toml`,

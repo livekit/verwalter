@@ -56,7 +56,9 @@ impl Repo {
             let mut version: Option<Version> = None;
             // Why the first file carries no version, for the error below.
             let mut unread: Option<anyhow::Error> = None;
-            let mut dependencies = Vec::new();
+            // Spec: Package.dependencies. The configured ones, then the
+            // ones the manifests name.
+            let mut dependencies = package.dependencies.clone();
             for file in &package.versioning.files {
                 let (file, regex) = (file.path(), file.regex());
                 let content =
