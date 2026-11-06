@@ -2010,3 +2010,39 @@ fn crates_on_the_workspace_version_release_together() {
     assert!(lock.contains("name = \"y\"\nversion = \"2.0.0\""));
     assert!(lock.contains("name = \"z\"\nversion = \"0.3.1\""));
 }
+
+// A release branch must not fetch LFS objects: CI has no LFS credentials
+// and the tool only edits text files. The pointer stays a pointer.
+#[test]
+fn release_branch_leaves_lfs_pointers_alone() {
+    if Command::new("git-lfs").arg("version").output().is_err() {
+        eprintln!("git-lfs not installed, skipping");
+        return;
+    }
+    let r = fixture("lfs");
+    let root = &r.0;
+    git(root, &["lfs", "install", "--local"]);
+    git(root, &["lfs", "track", "*.bin"]);
+    // A pointer whose object is nowhere: a smudge would fail.
+    let pointer = "version https://git-lfs.github.com/spec/v1\noid sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\nsize 3\n";
+    write(root, "blob.bin", pointer);
+    write(
+        root,
+        ".changeset/one.md",
+        "---\nlivekit-protocol: patch\n---\nOne\n",
+    );
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-q", "-m", "lfs pointer and changeset"]);
+
+    let repo = Repo::load(root).unwrap();
+    let plan = plan(
+        &repo.packages,
+        &repo.changesets,
+        repo.config.versioning.dependent_bump_level,
+    );
+    assert!(branches::create(&repo, &plan, "main").unwrap().is_some());
+    assert_eq!(
+        git(root, &["show", "release/main:blob.bin"]),
+        pointer.trim()
+    );
+}
