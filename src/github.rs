@@ -12,6 +12,12 @@ use serde::Deserialize;
 
 use crate::{apply::render_entry, branches, git, plan::PlannedRelease, repo::Repo};
 
+/// GitHub CLI client.
+pub trait Client {
+    /// Execute a raw command using the client.
+    fn execute(&self, args: &[&str]) -> Result<String>;
+}
+
 /// Runs `gh` with the given arguments and returns stdout. Injected so
 /// tests can fake GitHub.
 pub type Gh<'a> = &'a mut dyn FnMut(&[&str]) -> Result<String>;
