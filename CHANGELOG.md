@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.27.1
+
+### Patch Changes
+
+- Adopt anyhow for error handling - [#64](https://github.com/livekit/verwalter/pull/64) ([@ladvoc](https://github.com/ladvoc))
+- Fix changeset silently overwritten - [#71](https://github.com/livekit/verwalter/pull/71) ([@ladvoc](https://github.com/ladvoc))
+- Fix `verwalter pr` failing in repositories that use Git LFS. The release worktree no longer downloads LFS objects. - [#73](https://github.com/livekit/verwalter/pull/73) ([@lukasIO](https://github.com/lukasIO))
+- Fix release view query swallows errors - [#72](https://github.com/livekit/verwalter/pull/72) ([@ladvoc](https://github.com/ladvoc))
+
 ## 0.27.0
 
 ### Minor Changes
