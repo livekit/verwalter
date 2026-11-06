@@ -9,7 +9,7 @@ use std::{fs, path::Path};
 use anyhow::{Context, Result, anyhow, bail};
 use serde::Serialize;
 
-use crate::{config::ReleaseMode, git, github::Gh, repo::Repo};
+use crate::{config::ReleaseMode, git, github, repo::Repo};
 
 /// One line of the handoff to the publish workflow.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -55,8 +55,8 @@ pub struct Asset {
     pub name: String,
 }
 
-pub fn view(gh: Gh, tag: &str) -> Option<ReleaseState> {
-    gh(&["release", "view", tag, "--json", "isDraft,assets"])
+pub fn view(gh: &dyn github::Client, tag: &str) -> Option<ReleaseState> {
+    gh.execute(&["release", "view", tag, "--json", "isDraft,assets"])
         .ok()
         .and_then(|j| serde_json::from_str(&j).ok())
 }
@@ -68,7 +68,7 @@ pub fn view(gh: Gh, tag: &str) -> Option<ReleaseState> {
 ///
 /// Packages are handled in dependency order and the run stops at the
 /// first failure, so a dependent is never released before its dependency.
-pub fn run(repo: &Repo, remote: &str, options: &Options, gh: Gh) -> Result<Vec<Released>> {
+pub fn run(repo: &Repo, remote: &str, options: &Options, gh: &dyn github::Client) -> Result<Vec<Released>> {
     let deps_of = |name: &str| -> Vec<&str> {
         repo.packages
             .iter()
@@ -151,7 +151,7 @@ fn release_one(
     options: &Options,
     name: &str,
     version: &crate::Version,
-    gh: Gh,
+    gh: &dyn github::Client,
 ) -> Result<Option<Released>> {
     let root = repo.root.as_path();
     let package = &repo.config.packages[name];
@@ -219,11 +219,11 @@ fn release_one(
                 if !options.assets.is_empty() && (draft || options.package.is_some()) {
                     let mut args = vec!["release", "upload", tag.as_str(), "--clobber"];
                     args.extend(options.assets.iter().map(String::as_str));
-                    gh(&args)?;
+                    gh.execute(&args)?;
                     fresh = true;
                 }
                 if draft && options.publish {
-                    gh(&["release", "edit", &tag, "--draft=false"])?;
+                    gh.execute(&["release", "edit", &tag, "--draft=false"])?;
                     draft = false;
                     fresh = true;
                 }
@@ -255,7 +255,7 @@ fn release_one(
                 ) {
                     args.push("--latest=false");
                 }
-                match gh(&args) {
+                match gh.execute(&args) {
                     Ok(_) => {
                         fresh = true;
                         status = if draft { "drafted" } else { "published" };
@@ -313,11 +313,11 @@ pub fn first_release(
 /// Spec: MaintainerAbandonsRelease. Removes the GitHub release and the
 /// tag, locally and on the remote, for a release whose commit turned out
 /// broken. Missing pieces are skipped; the registry is not touched.
-pub fn abandon(repo: &Repo, remote: &str, tag: &str, dry_run: bool, gh: Gh) -> Result<Vec<String>> {
+pub fn abandon(repo: &Repo, remote: &str, tag: &str, dry_run: bool, gh: &dyn github::Client) -> Result<Vec<String>> {
     let root = repo.root.as_path();
     let mut removed = Vec::new();
     if view(gh, tag).is_some() {
-        gh(&["release", "delete", tag, "--yes"])?;
+        gh.execute(&["release", "delete", tag, "--yes"])?;
         removed.push(format!("release {tag}"));
     }
     if remote_has_tag(root, remote, tag)? {

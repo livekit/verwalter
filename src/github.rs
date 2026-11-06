@@ -115,7 +115,7 @@ pub const MARKER: &str = "<!-- verwalter release -->";
 /// commit that added it names the PR (via `commits/{sha}/pulls`) and its
 /// author; a commit without a PR links the commit itself. Lookups that
 /// fail leave the line without a suffix rather than block the release.
-pub fn attribute(repo: &mut Repo, gh: Gh) {
+pub fn attribute(repo: &mut Repo, gh: &dyn Client) {
     let root = repo.root.clone();
     for c in &mut repo.changesets {
         let Some(sha) = git::added_in(
@@ -134,14 +134,14 @@ pub fn attribute(repo: &mut Repo, gh: Gh) {
                 format!(" ([@{login}](https://github.com/{login}))")
             }
         };
-        let pulls = gh(&[
+        let pulls = gh.execute(&[
             "api",
             &format!("repos/{{owner}}/{{repo}}/commits/{sha}/pulls"),
             "--jq",
             r#".[0] | select(. != null) | "\(.number)\t\(.html_url)\t\(.user.login // "-")""#,
         ]);
-        let mut commit = || {
-            gh(&[
+        let commit = || {
+            gh.execute(&[
                 "api",
                 &format!("repos/{{owner}}/{{repo}}/commits/{sha}"),
                 "--jq",
@@ -185,10 +185,10 @@ pub fn sync(
     branch: Option<&str>,
     remote: &str,
     dry_run: bool,
-    gh: Gh,
+    gh: &dyn Client,
 ) -> Result<Option<PullRequest>> {
     let label = repo.config.release.label.as_str();
-    gh(&[
+    gh.execute(&[
         "label",
         "create",
         label,
@@ -224,7 +224,7 @@ pub fn sync(
 
     // Spec: CloseReleasePullRequestWithNothingPending.
     if let Some(stale) = existing {
-        gh(&[
+        gh.execute(&[
             "pr",
             "close",
             &stale.number.to_string(),
@@ -239,7 +239,7 @@ pub fn sync(
 /// Open a PR for `head` against `base`, or bring `existing` (the open PR
 /// on `head`) up to date: title, body, label and base.
 pub fn upsert_pr(
-    gh: Gh,
+    gh: &dyn Client,
     existing: Option<&PullRequest>,
     head: &str,
     base: &str,
@@ -250,7 +250,7 @@ pub fn upsert_pr(
     let number = match existing {
         Some(existing) => {
             let n = existing.number.to_string();
-            gh(&[
+            gh.execute(&[
                 "pr",
                 "edit",
                 &n,
@@ -262,11 +262,11 @@ pub fn upsert_pr(
                 label,
             ])?;
             if existing.base != base {
-                gh(&["pr", "edit", &n, "--base", base])?;
+                gh.execute(&["pr", "edit", &n, "--base", base])?;
             }
             existing.number
         }
-        None => number_from_url(&gh(&[
+        None => number_from_url(&gh.execute(&[
             "pr", "create", "--head", head, "--base", base, "--title", title, "--body", body,
             "--label", label,
         ])?)?,
@@ -300,8 +300,8 @@ pub fn append_output(lines: &str) -> Result<()> {
 }
 
 /// The open PR whose head is `head`, if any.
-pub fn open_pr(gh: Gh, head: &str) -> Result<Option<PullRequest>> {
-    let open: Vec<PullRequest> = serde_json::from_str(&gh(&[
+pub fn open_pr(gh: &dyn Client, head: &str) -> Result<Option<PullRequest>> {
+    let open: Vec<PullRequest> = serde_json::from_str(&gh.execute(&[
         "pr",
         "list",
         "--state",

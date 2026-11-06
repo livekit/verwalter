@@ -9,7 +9,7 @@ use std::process::Command;
 use anyhow::{Context, Result, anyhow, ensure};
 
 use crate::{
-    Version, changeset::Changeset, config::Config, github::Gh, repo::CHANGESET_DIR,
+    Version, changeset::Changeset, config::Config, github, repo::CHANGESET_DIR,
     version::BumpLevel,
 };
 
@@ -462,7 +462,7 @@ fn urlencode(s: &str) -> String {
 /// the comment when it has something to say, deletes it otherwise,
 /// returns the check. Changeset contents are read
 /// from the checkout, which CI has at the PR head.
-pub fn run(root: &Path, config: &Config, pr: u64, gh: Gh) -> Result<Check> {
+pub fn run(root: &Path, config: &Config, pr: u64, gh: &dyn github::Client) -> Result<Check> {
     #[derive(serde::Deserialize)]
     struct Pr {
         title: String,
@@ -492,7 +492,7 @@ pub fn run(root: &Path, config: &Config, pr: u64, gh: Gh) -> Result<Check> {
         path: String,
     }
     let n = pr.to_string();
-    let pr: Pr = serde_json::from_str(&gh(&[
+    let pr: Pr = serde_json::from_str(&gh.execute(&[
         "pr",
         "view",
         &n,
@@ -502,7 +502,7 @@ pub fn run(root: &Path, config: &Config, pr: u64, gh: Gh) -> Result<Check> {
     let labels: Vec<String> = pr.labels.into_iter().map(|l| l.name).collect();
     let changed: Vec<String> = pr.files.into_iter().map(|f| f.path).collect();
 
-    let existing = gh(&[
+    let existing = gh.execute(&[
         "api",
         &format!("repos/{{owner}}/{{repo}}/issues/{n}/comments"),
         "--paginate",
@@ -587,10 +587,10 @@ fn read_changesets(root: &Path, config: &Config, changed: &[String]) -> Result<V
 /// Writes the comment (`body`) or deletes it (None). Best effort: the
 /// token of a PR from a fork cannot write, and the check passes or fails
 /// on its result, not on the comment.
-fn sync_comment(gh: Gh, pr: &str, existing: &Result<Option<String>>, body: Option<&str>) {
+fn sync_comment(gh: &dyn github::Client, pr: &str, existing: &Result<Option<String>>, body: Option<&str>) {
     let written = match (existing, body) {
         (Err(e), _) => Err(anyhow!("{e:#}")),
-        (Ok(Some(id)), Some(body)) => gh(&[
+        (Ok(Some(id)), Some(body)) => gh.execute(&[
             "api",
             "-X",
             "PATCH",
@@ -598,8 +598,8 @@ fn sync_comment(gh: Gh, pr: &str, existing: &Result<Option<String>>, body: Optio
             "-f",
             &format!("body={body}"),
         ]),
-        (Ok(None), Some(body)) => gh(&["pr", "comment", pr, "--body", body]),
-        (Ok(Some(id)), None) => gh(&[
+        (Ok(None), Some(body)) => gh.execute(&["pr", "comment", pr, "--body", body]),
+        (Ok(Some(id)), None) => gh.execute(&[
             "api",
             "-X",
             "DELETE",

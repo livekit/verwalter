@@ -9,7 +9,7 @@ use anyhow::Result;
 use crate::{
     config::ReleaseMode,
     git,
-    github::{Gh, PullRequest},
+    github,
     plan::plan,
     prerelease, release,
     repo::Repo,
@@ -35,7 +35,7 @@ pub struct PackageStatus {
     pub next_step: String,
 }
 
-pub fn status(repo: &Repo, remote: &str, gh: Gh) -> Result<Vec<PackageStatus>> {
+pub fn status(repo: &Repo, remote: &str, gh: &dyn github::Client) -> Result<Vec<PackageStatus>> {
     let root = repo.root.as_path();
     let remote_tags: BTreeSet<String> = git::run(root, &["ls-remote", "--tags", remote])
         .map(|out| {
@@ -45,7 +45,7 @@ pub fn status(repo: &Repo, remote: &str, gh: Gh) -> Result<Vec<PackageStatus>> {
                 .collect()
         })
         .unwrap_or_default();
-    let open: Vec<PullRequest> = gh(&[
+    let open: Vec<github::PullRequest> = gh.execute(&[
         "pr",
         "list",
         "--state",
