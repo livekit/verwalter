@@ -1228,6 +1228,8 @@ fn changeset_command_covers_the_changed_packages() {
 // the dependents; a version the registry has is skipped.
 #[test]
 fn publish_runs_dependencies_first_and_blocks_dependents_of_a_failure() {
+    // No GitHub release behind the tags: nothing to flip.
+    let mut no_gh = |_: &[&str]| -> Result<String> { Ok(String::new()) };
     let r = fixture("publish");
     let root = &r.0;
     git(root, &["tag", "livekit-protocol-v0.3.1"]);
@@ -1265,13 +1267,15 @@ fn publish_runs_dependencies_first_and_blocks_dependents_of_a_failure() {
         only: Some(["livekit-api".to_string()].into_iter().collect()),
     };
     let missing = |_: &str| -> Result<u16> { Ok(404) };
-    let out = verwalter::publish::run(&Repo::load(root).unwrap(), &dry, &missing).unwrap();
+    let out =
+        verwalter::publish::run(&Repo::load(root).unwrap(), &dry, &missing, &mut no_gh).unwrap();
     assert!(out[0].reason.contains("pnpm publish"), "{out:?}");
     let dry = verwalter::publish::Options {
         only: Some(["livekit".to_string()].into_iter().collect()),
         ..dry
     };
-    let out = verwalter::publish::run(&Repo::load(root).unwrap(), &dry, &missing).unwrap();
+    let out =
+        verwalter::publish::run(&Repo::load(root).unwrap(), &dry, &missing, &mut no_gh).unwrap();
     assert!(out[0].reason.contains("npm publish"), "{out:?}");
     fs::remove_file(root.join("livekit-api/pnpm-workspace.yaml")).unwrap();
     write(root, "verwalter.toml", &base);
@@ -1292,14 +1296,19 @@ fn publish_runs_dependencies_first_and_blocks_dependents_of_a_failure() {
         only: Some(["livekit".to_string()].into_iter().collect()),
     };
     assert!(
-        verwalter::publish::run(&Repo::load(root).unwrap(), &github_only, &no_registry)
-            .unwrap()
-            .is_empty()
+        verwalter::publish::run(
+            &Repo::load(root).unwrap(),
+            &github_only,
+            &no_registry,
+            &mut no_gh
+        )
+        .unwrap()
+        .is_empty()
     );
     write(root, "verwalter.toml", &base);
 
     // No command at all: an error before anything runs.
-    let err = verwalter::publish::run(&Repo::load(root).unwrap(), &opts, &no_registry)
+    let err = verwalter::publish::run(&Repo::load(root).unwrap(), &opts, &no_registry, &mut no_gh)
         .err()
         .expect("no command");
     assert!(err.to_string().contains("no publish command"), "{err}");
@@ -1308,7 +1317,7 @@ fn publish_runs_dependencies_first_and_blocks_dependents_of_a_failure() {
     let repo = with_command(
         "echo $VERWALTER_PACKAGE $VERWALTER_VERSION $VERWALTER_TAG $VERWALTER_REGISTRY first=$VERWALTER_FIRST_RELEASE $(pwd | xargs basename) >> $VERWALTER_ROOT/order",
     );
-    let outcomes = verwalter::publish::run(&repo, &opts, &no_registry).unwrap();
+    let outcomes = verwalter::publish::run(&repo, &opts, &no_registry, &mut no_gh).unwrap();
     assert!(
         outcomes.iter().all(|o| o.status == "published"),
         "{outcomes:?}"
@@ -1329,7 +1338,7 @@ fn publish_runs_dependencies_first_and_blocks_dependents_of_a_failure() {
         dry_run: false,
         only: Some(["livekit-api".to_string()].into_iter().collect()),
     };
-    let outcomes = verwalter::publish::run(&repo, &only, &no_registry).unwrap();
+    let outcomes = verwalter::publish::run(&repo, &only, &no_registry, &mut no_gh).unwrap();
     assert_eq!(
         outcomes
             .iter()
@@ -1349,7 +1358,7 @@ fn publish_runs_dependencies_first_and_blocks_dependents_of_a_failure() {
     // protocol fails: both dependents are blocked, nothing else ran.
     let repo =
         with_command("echo {package} >> $VERWALTER_ROOT/order; [ {package} != livekit-protocol ]");
-    let outcomes = verwalter::publish::run(&repo, &opts, &no_registry).unwrap();
+    let outcomes = verwalter::publish::run(&repo, &opts, &no_registry, &mut no_gh).unwrap();
     let by: std::collections::BTreeMap<&str, (&str, &str)> = outcomes
         .iter()
         .map(|o| (o.package.as_str(), (o.status, o.reason.as_str())))
@@ -1380,6 +1389,7 @@ fn publish_runs_dependencies_first_and_blocks_dependents_of_a_failure() {
             only: None,
         },
         &no_registry,
+        &mut no_gh,
     )
     .unwrap();
     let by: std::collections::BTreeMap<&str, &str> = outcomes
@@ -1415,7 +1425,7 @@ fn publish_runs_dependencies_first_and_blocks_dependents_of_a_failure() {
             404
         })
     };
-    let outcomes = verwalter::publish::run(&repo, &opts, &has_protocol).unwrap();
+    let outcomes = verwalter::publish::run(&repo, &opts, &has_protocol, &mut no_gh).unwrap();
     let by: std::collections::BTreeMap<&str, &str> = outcomes
         .iter()
         .map(|o| (o.package.as_str(), o.status))
@@ -1428,7 +1438,7 @@ fn publish_runs_dependencies_first_and_blocks_dependents_of_a_failure() {
             .contains("protocol")
     );
     let down = |_: &str| -> Result<u16> { Ok(503) };
-    assert!(verwalter::publish::run(&repo, &opts, &down).is_err());
+    assert!(verwalter::publish::run(&repo, &opts, &down, &mut no_gh).is_err());
 }
 
 // Spec: config.publish.workspace. One command for the crates, run once
@@ -1436,6 +1446,8 @@ fn publish_runs_dependencies_first_and_blocks_dependents_of_a_failure() {
 // for the members it depends on.
 #[test]
 fn workspace_publish_command_runs_once_and_reports_per_member() {
+    // No GitHub release behind the tags: nothing to flip.
+    let mut no_gh = |_: &[&str]| -> Result<String> { Ok(String::new()) };
     let r = fixture("publish-ws");
     let root = &r.0;
     git(root, &["tag", "livekit-protocol-v0.3.1"]);
@@ -1464,7 +1476,7 @@ fn workspace_publish_command_runs_once_and_reports_per_member() {
         dry_run: false,
         only: None,
     };
-    let outcomes = verwalter::publish::run(&repo, &opts, &no_registry).unwrap();
+    let outcomes = verwalter::publish::run(&repo, &opts, &no_registry, &mut no_gh).unwrap();
     let by: std::collections::BTreeMap<&str, &str> = outcomes
         .iter()
         .map(|o| (o.package.as_str(), o.status))
@@ -1500,7 +1512,7 @@ fn workspace_publish_command_runs_once_and_reports_per_member() {
             404
         })
     };
-    let outcomes = verwalter::publish::run(&repo, &opts, &only_api).unwrap();
+    let outcomes = verwalter::publish::run(&repo, &opts, &only_api, &mut no_gh).unwrap();
     let by: std::collections::BTreeMap<&str, &str> = outcomes
         .iter()
         .map(|o| (o.package.as_str(), o.status))
@@ -1744,6 +1756,8 @@ fn prerelease_of_a_dependent_carries_pending_dependencies() {
 // `<dir>/vX.Y.Z`, and the Go module proxy request is the publish.
 #[test]
 fn go_workspace_modules_release_and_publish_through_the_proxy() {
+    // No GitHub release behind the tags: nothing to flip.
+    let mut no_gh = |_: &[&str]| -> Result<String> { Ok(String::new()) };
     let r = Repo_(std::env::temp_dir().join(format!("verwalter-it-{}-go", std::process::id())));
     let root = &r.0;
     let _ = fs::remove_dir_all(root);
@@ -1842,7 +1856,7 @@ fn go_workspace_modules_release_and_publish_through_the_proxy() {
         dry_run: false,
         only: None,
     };
-    let out = verwalter::publish::run(&repo, &opts, &proxy).unwrap();
+    let out = verwalter::publish::run(&repo, &opts, &proxy, &mut no_gh).unwrap();
     let status: Vec<(&str, &str)> = out.iter().map(|o| (o.package.as_str(), o.status)).collect();
     assert_eq!(status, [("sdk/core", "published"), ("sdk/auth", "failed")]);
     assert!(out[1].reason.contains("re-run publish"));
@@ -1857,7 +1871,7 @@ fn go_workspace_modules_release_and_publish_through_the_proxy() {
         ..opts
     };
     let none = |_: &str| -> Result<u16> { Err(anyhow!("no request in a dry run")) };
-    let out = verwalter::publish::run(&repo, &dry, &none).unwrap();
+    let out = verwalter::publish::run(&repo, &dry, &none, &mut no_gh).unwrap();
     assert!(
         out[0].reason.starts_with("GET https://proxy.golang.org/"),
         "{out:?}"
@@ -2126,4 +2140,68 @@ versioning.files = ["pyproject.toml"]
         git(root, &["show", "release/main:nodejs/CHANGELOG.md"])
             .contains("Updated dependencies: krisp@0.2.0")
     );
+}
+
+// Spec: PublishFlipsDrafts. A package the tool publishes is released as
+// a draft; `publish` flips it once the registry has the version, and a
+// flip that fails is a failed outcome, so a re-run tries it again.
+#[test]
+fn publish_flips_the_draft_release_once_the_registry_has_it() {
+    let r = fixture("publish-draft");
+    let root = &r.0;
+    git(root, &["tag", "livekit-protocol-v0.3.1"]);
+    git(root, &["tag", "livekit-api-v0.4.3"]);
+    git(root, &["tag", "livekit-v0.7.0"]);
+    let base = fs::read_to_string(root.join("verwalter.toml")).unwrap();
+    write(
+        root,
+        "verwalter.toml",
+        &format!("{base}\n[publish]\ncommand = 'true'\n"),
+    );
+    let repo = Repo::load(root).unwrap();
+    // A publish command makes every package a draft by default.
+    assert!(repo.config.draft("livekit-protocol"));
+    let no_registry = |_: &str| -> Result<u16> { Err(anyhow!("no registry configured")) };
+    let opts = verwalter::publish::Options {
+        jobs: Some(1),
+        dry_run: false,
+        only: None,
+    };
+
+    // protocol and api are drafts, livekit is published already.
+    let mut calls: Vec<String> = Vec::new();
+    let mut gh = |args: &[&str]| -> Result<String> {
+        calls.push(args.join(" "));
+        match args {
+            ["api", "graphql", "-f", "tag=livekit-v0.7.0", ..] => {
+                Ok(r#"{"isDraft":false,"assets":[]}"#.into())
+            }
+            ["api", "graphql", ..] => Ok(r#"{"isDraft":true,"assets":[]}"#.into()),
+            ["release", "edit", "livekit-api-v0.4.3", "--draft=false"] => Err(anyhow!("HTTP 502")),
+            _ => Ok(String::new()),
+        }
+    };
+    let outcomes = verwalter::publish::run(&repo, &opts, &no_registry, &mut gh).unwrap();
+    let by = |n: &str| outcomes.iter().find(|o| o.package == n).unwrap();
+    assert_eq!(by("livekit-protocol").status, "published");
+    assert_eq!(by("livekit").status, "published");
+    assert_eq!(by("livekit-api").status, "failed");
+    assert!(
+        by("livekit-api")
+            .reason
+            .contains("draft release livekit-api-v0.4.3")
+    );
+    assert!(verwalter::publish::failed(&outcomes));
+    assert!(calls.contains(&"release edit livekit-protocol-v0.3.1 --draft=false".to_string()));
+    assert!(calls.contains(&"release edit livekit-api-v0.4.3 --draft=false".to_string()));
+    assert!(!calls.contains(&"release edit livekit-v0.7.0 --draft=false".to_string()));
+
+    // The explicit value still wins: release.draft = false, nothing to flip.
+    write(
+        root,
+        "verwalter.toml",
+        &format!("{base}\n[publish]\ncommand = 'true'\n[release]\ndraft = false\n"),
+    );
+    let repo = Repo::load(root).unwrap();
+    assert!(!repo.config.draft("livekit-protocol"));
 }

@@ -17,6 +17,7 @@ use serde::Serialize;
 use crate::{
     config::ReleaseMode,
     git,
+    github::Gh,
     registry::{self, Http},
     repo::Repo,
 };
@@ -231,9 +232,46 @@ fn run_command(repo: &Repo, name: &str, c: &Candidate, first: bool) -> (bool, St
     }
 }
 
+/// Spec: PublishFlipsDrafts. A package is finished when the registry has
+/// it and its GitHub release, if it is a draft, is published. A flip that
+/// fails turns the outcome into a failure, so a re-run comes back: the
+/// registry then says `exists`, and the flip is tried again.
+fn finish(repo: &Repo, gh: Gh, o: &mut Outcome) {
+    if !matches!(o.status, "published" | "exists")
+        || repo.config.packages[&o.package].release.mode != ReleaseMode::TagAndRelease
+    {
+        return;
+    }
+    let draft = match crate::release::view(gh, &o.tag) {
+        Ok(state) => state.is_some_and(|s| s.draft),
+        Err(e) => {
+            o.status = "failed";
+            o.reason = format!(
+                "on the registry, but the release {} could not be read: {e}",
+                o.tag
+            );
+            return;
+        }
+    };
+    if !draft {
+        return;
+    }
+    match gh(&["release", "edit", &o.tag, "--draft=false"]) {
+        Ok(_) => println!("{}: published the draft release {}", o.package, o.tag),
+        Err(e) => {
+            o.status = "failed";
+            o.reason = format!(
+                "on the registry, but the draft release {} could not be published: {e}",
+                o.tag
+            );
+        }
+    }
+}
+
 /// Run the publish command for every tagged package. Returns one outcome
-/// per package, in the order they finished.
-pub fn run(repo: &Repo, options: &Options, http: Http) -> Result<Vec<Outcome>> {
+/// per package, in the order they finished. Then flips the draft release
+/// of every package the registry has (`finish`).
+pub fn run(repo: &Repo, options: &Options, http: Http, gh: Gh) -> Result<Vec<Outcome>> {
     let candidates = candidates(repo, options.only.as_ref())?;
     let jobs = options.jobs.unwrap_or(repo.config.publish.jobs).max(1);
     let mut done: BTreeMap<String, &'static str> = BTreeMap::new();
@@ -416,6 +454,9 @@ pub fn run(repo: &Repo, options: &Options, http: Http) -> Result<Vec<Outcome>> {
             ));
         }
     })?;
+    for o in &mut outcomes {
+        finish(repo, gh, o);
+    }
     Ok(outcomes)
 }
 

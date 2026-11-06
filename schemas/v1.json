@@ -206,7 +206,7 @@
           ]
         },
         "draft": {
-          "description": "Default for `release.draft` of every package. Default: false.",
+          "description": "Default for `release.draft` of every package. Unset: a package\nthe tool publishes is a draft until `publish` confirms it.",
           "type": [
             "boolean",
             "null"
@@ -366,8 +366,12 @@
           "$ref": "#/$defs/ReleaseMode"
         },
         "draft": {
-          "type": "boolean",
-          "default": false
+          "description": "The GitHub release is created as a draft, and `publish` flips it\nonce the registry has the version. Unset: a draft when the tool\npublishes the package (`Config::draft`), else published on\ncreation.",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
         }
       },
       "additionalProperties": false

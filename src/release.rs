@@ -261,7 +261,7 @@ fn release_one(
                     "--verify-tag",
                 ];
                 args.extend(options.assets.iter().map(String::as_str));
-                let draft = package.release.draft && !options.publish;
+                let draft = repo.config.draft(name) && !options.publish;
                 if draft {
                     args.push("--draft");
                 }
