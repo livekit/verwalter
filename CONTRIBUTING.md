@@ -2,12 +2,38 @@
 
 Thanks for your interest in contributing!
 
-## Before writing code
+## 1. Reporting Bugs
 
-If you'd like to contribute code, it's recommended to first discuss your idea on the
-[LiveKit Developer Community](https://community.livekit.io/c/client-sdk). This helps keep changes aligned with the LiveKit roadmap and avoids duplicated or unnecessary work.
+- For suspected or confirmed bugs, please open an issue.
+- If possible, provide steps on how to reproduce.
 
-## Checks that must pass
+> [!IMPORTANT]
+> Bug reports must use the "Bug Report" template; issues that don't will be closed automatically.
+
+## 2. Pull Requests
+
+### 2.1. Before Opening
+
+Start a discussion about your proposed change in one of the following channels:
+- **For bugs**: open an issue.
+- **For feature requests**: post in the [LiveKit Developer Community](https://community.livekit.io/c/client-sdk). This helps keep changes aligned with the LiveKit roadmap and avoids duplicated or unnecessary work.
+
+> [!IMPORTANT]
+> Unsolicited PRs will not be accepted.
+
+### 2.2. Changeset
+
+All code changes must have a chageset in order to get released. This project uses [_verwalter_](https://github.com/livekit/verwalter) for release management. Commit a changeset to your branch with required bump level and a brief summary of what changed:
+
+```sh
+verwalter changeset \
+    --level [patch|minor|major] \ # set based on nature of change
+    --summary "Improve performance of status check"
+```
+
+Summary should be suitable for a changelog entry, extended description belongs in the PR description.
+
+### 2.3. Required Checks
 
 Please make sure your change passes all of the following:
 
@@ -17,30 +43,14 @@ cargo clippy --all-targets -- -D warnings   # lints
 cargo test                                  # tests
 ```
 
-## Changeset
+### 2.4. PR Description
 
-This repo itself uses verwalter for release management. Create a changeset with required bump level and a brief summary of what changed:
-
-```sh
-verwalter changeset \
-    --level [patch|minor|major] \ # set based on nature of change
-    --summary "Improve performance of status check"
-```
-
-Summary should be suitable for a changelog entry, extended description belongs in the PR.
-
-## Pull requests
-
-- Open PRs against the `main` branch
+- Link discussion: an issue (e.g. `Closes #123`) or a LiveKit Developer Community thread
 - Describe *what* the change does and *why*
-- Clearly state any breaking changes and choose changeset level accordingly
 - Keep description concise and relevant to PR reviewers
-- Link any related issues (e.g. `Closes #123`)
+- Note potential areas for improvement or areas you would like reviewers to scrutinize
+- When referring to specific parts of the code, include a [permalink](https://docs.github.com/en/get-started/writing-on-github/working-with-advanced-formatting/creating-a-permanent-link-to-a-code-snippet#linking-to-code) with line number
 
-## Reporting bugs
-
-The issue tracker is for bugs or suspected bugs only. Bug reports must use the "Bug Report" template; issues that don't will be closed automatically.
-
-## License
+## 3. License
 
 By contributing, you agree that your contributions will be licensed under the same terms as this project (see the `LICENSE` file)
