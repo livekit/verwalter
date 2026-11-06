@@ -68,7 +68,12 @@ pub fn view(gh: &dyn github::Client, tag: &str) -> Option<ReleaseState> {
 ///
 /// Packages are handled in dependency order and the run stops at the
 /// first failure, so a dependent is never released before its dependency.
-pub fn run(repo: &Repo, remote: &str, options: &Options, gh: &dyn github::Client) -> Result<Vec<Released>> {
+pub fn run(
+    repo: &Repo,
+    remote: &str,
+    options: &Options,
+    gh: &dyn github::Client,
+) -> Result<Vec<Released>> {
     let deps_of = |name: &str| -> Vec<&str> {
         repo.packages
             .iter()
@@ -313,7 +318,13 @@ pub fn first_release(
 /// Spec: MaintainerAbandonsRelease. Removes the GitHub release and the
 /// tag, locally and on the remote, for a release whose commit turned out
 /// broken. Missing pieces are skipped; the registry is not touched.
-pub fn abandon(repo: &Repo, remote: &str, tag: &str, dry_run: bool, gh: &dyn github::Client) -> Result<Vec<String>> {
+pub fn abandon(
+    repo: &Repo,
+    remote: &str,
+    tag: &str,
+    dry_run: bool,
+    gh: &dyn github::Client,
+) -> Result<Vec<String>> {
     let root = repo.root.as_path();
     let mut removed = Vec::new();
     if view(gh, tag).is_some() {

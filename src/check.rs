@@ -9,8 +9,7 @@ use std::process::Command;
 use anyhow::{Context, Result, anyhow, ensure};
 
 use crate::{
-    Version, changeset::Changeset, config::Config, github, repo::CHANGESET_DIR,
-    version::BumpLevel,
+    Version, changeset::Changeset, config::Config, github, repo::CHANGESET_DIR, version::BumpLevel,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -502,14 +501,15 @@ pub fn run(root: &Path, config: &Config, pr: u64, gh: &dyn github::Client) -> Re
     let labels: Vec<String> = pr.labels.into_iter().map(|l| l.name).collect();
     let changed: Vec<String> = pr.files.into_iter().map(|f| f.path).collect();
 
-    let existing = gh.execute(&[
-        "api",
-        &format!("repos/{{owner}}/{{repo}}/issues/{n}/comments"),
-        "--paginate",
-        "--jq",
-        &format!(".[] | select(.body | contains(\"{MARKER}\")) | .id"),
-    ])
-    .map(|out| out.lines().next().map(str::to_string));
+    let existing = gh
+        .execute(&[
+            "api",
+            &format!("repos/{{owner}}/{{repo}}/issues/{n}/comments"),
+            "--paginate",
+            "--jq",
+            &format!(".[] | select(.body | contains(\"{MARKER}\")) | .id"),
+        ])
+        .map(|out| out.lines().next().map(str::to_string));
 
     // A changeset the tool cannot use is the contributor's finding too:
     // it goes into the comment, not only into the workflow log.
@@ -587,7 +587,12 @@ fn read_changesets(root: &Path, config: &Config, changed: &[String]) -> Result<V
 /// Writes the comment (`body`) or deletes it (None). Best effort: the
 /// token of a PR from a fork cannot write, and the check passes or fails
 /// on its result, not on the comment.
-fn sync_comment(gh: &dyn github::Client, pr: &str, existing: &Result<Option<String>>, body: Option<&str>) {
+fn sync_comment(
+    gh: &dyn github::Client,
+    pr: &str,
+    existing: &Result<Option<String>>,
+    body: Option<&str>,
+) {
     let written = match (existing, body) {
         (Err(e), _) => Err(anyhow!("{e:#}")),
         (Ok(Some(id)), Some(body)) => gh.execute(&[

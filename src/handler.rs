@@ -165,18 +165,18 @@ fn from_pep440(s: &str) -> String {
     for label in ["rc", "a", "b"] {
         if let Some((stable, n)) = s.split_once(label)
             && !n.is_empty()
-                && n.bytes().all(|b| b.is_ascii_digit())
-                && stable
-                    .split('.')
-                    .all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
-            {
-                let semver_label = match label {
-                    "a" => "alpha",
-                    "b" => "beta",
-                    _ => "rc",
-                };
-                return format!("{stable}-{semver_label}.{n}");
-            }
+            && n.bytes().all(|b| b.is_ascii_digit())
+            && stable
+                .split('.')
+                .all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
+        {
+            let semver_label = match label {
+                "a" => "alpha",
+                "b" => "beta",
+                _ => "rc",
+            };
+            return format!("{stable}-{semver_label}.{n}");
+        }
     }
     s.to_string()
 }

@@ -5,7 +5,10 @@
 //! ponytail: GitHub access goes through the `gh` CLI, which CI has and
 //! which carries the token; no HTTP client.
 
-use std::{path::{Path, PathBuf}, process::Command};
+use std::{
+    path::{Path, PathBuf},
+    process::Command,
+};
 
 use anyhow::{Context, Result, anyhow, ensure};
 use serde::Deserialize;
@@ -21,7 +24,7 @@ pub trait Client {
 /// GitHub CLI client using the system's installation.
 pub struct SystemClient {
     slug: Option<String>,
-    root: PathBuf
+    root: PathBuf,
 }
 
 impl SystemClient {
@@ -31,7 +34,10 @@ impl SystemClient {
         let slug = crate::git::run(root, &["remote", "get-url", remote])
             .ok()
             .and_then(|u| repo_slug(&u));
-        Self { slug, root: root.to_path_buf() }
+        Self {
+            slug,
+            root: root.to_path_buf(),
+        }
     }
 }
 
