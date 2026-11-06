@@ -149,8 +149,11 @@ Then:
   build job before `release`: drop the `--asset` argument and the
   `upload-artifact` and `download-artifact` steps.
 - In the publish job, set up the registry tooling the commands need
-  (`setup-node` with `registry-url`, `cargo login`, `uv`, `setup-dart`),
-  and `id-token: write` for trusted publishing. The command publishes
+  (`setup-node`, `cargo login`, `uv`, `setup-dart`), and `id-token: write`
+  for trusted publishing. With npm trusted publishing, give `setup-node`
+  no `registry-url`: without a token it then exports a placeholder
+  `NODE_AUTH_TOKEN` and writes it to `.npmrc`, and a publish that falls
+  back to it fails with 404. The command publishes
   what is on disk, so the job installs and builds first, or downloads
   the build job's artifact.
 - In `changeset-check.yml`, drop the `taiki-e/install-action` step and
@@ -495,7 +498,7 @@ this release unless `CHANGELOG.md` already exists.
 
 | Registry | Built-in command | Notes |
 |---|---|---|
-| npm | `npm publish --provenance --access public`, or `pnpm publish` in a pnpm workspace | `--tag next` for an rc, `--tag latest-1` for a maintenance release. `setup-node` with `registry-url` and `id-token: write` for provenance. |
+| npm | `npm publish --provenance --access public`, or `pnpm publish` in a pnpm workspace | `--tag next` for an rc, `--tag latest-1` for a maintenance release. `id-token: write` for trusted publishing and provenance. No `registry-url` on `setup-node`: its placeholder token breaks the fallback. |
 | crates.io | `cargo publish` | `[publish] workspace = "cargo publish --workspace"` on cargo 1.90 and later. Else per crate, dependencies first, which the tool orders. |
 | PyPI | `python -m twine upload dist/*` | Build first. `pypa/gh-action-pypi-publish` with `skip-existing: true` is the alternative for multi-wheel packages. |
 | pub.dev | `dart pub publish --force` | `setup-dart` mints the token from OIDC. |

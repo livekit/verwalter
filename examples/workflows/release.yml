@@ -95,8 +95,10 @@ jobs:
         with:
           name: dist
           path: dist
-      # Set up the registry tooling the commands need: setup-node with
-      # registry-url for npm provenance, cargo login, twine, ...
+      # Set up the registry tooling the commands need: setup-node, cargo
+      # login, twine, ... With npm trusted publishing, give setup-node no
+      # registry-url: it writes a placeholder token that a publish falls
+      # back to, and fails with 404.
       # For packages with `release.draft = true`, the command also uploads the
       # assets built here and publishes the GitHub release:
       #   gh release upload "$VERWALTER_TAG" dist/* --clobber
