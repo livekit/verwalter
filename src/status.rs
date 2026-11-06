@@ -84,11 +84,12 @@ pub fn status(repo: &Repo, remote: &str, gh: Gh) -> Result<Vec<PackageStatus>> {
             ("none".to_string(), 0)
         } else {
             match release::view(gh, &tag) {
-                Some(r) => (
+                Ok(Some(r)) => (
                     if r.draft { "draft" } else { "published" }.to_string(),
                     r.assets.len(),
                 ),
-                None => ("none".to_string(), 0),
+                Ok(None) => ("none".to_string(), 0),
+                Err(_) => ("unknown".to_string(), 0),
             }
         };
         let pending: Vec<String> = repo

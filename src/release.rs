@@ -41,7 +41,7 @@ pub struct Options {
     pub dry_run: bool,
 }
 
-/// The GitHub release behind a tag, as `gh release view` reports it.
+/// The GitHub release behind a tag, as the `view` query returns it.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
 pub struct ReleaseState {
     #[serde(rename = "isDraft")]
@@ -55,10 +55,26 @@ pub struct Asset {
     pub name: String,
 }
 
-pub fn view(gh: Gh, tag: &str) -> Option<ReleaseState> {
-    gh(&["release", "view", tag, "--json", "isDraft,assets"])
-        .ok()
-        .and_then(|j| serde_json::from_str(&j).ok())
+pub fn view(gh: Gh, tag: &str) -> Result<Option<ReleaseState>> {
+    let json = gh(&[
+        "api",
+        "graphql",
+        "-F",
+        &format!("tag={tag}"),
+        "-F",
+        "owner={owner}",
+        "-F",
+        "repo={repo}",
+        "-f",
+        "query=query($owner:String!,$repo:String!,$tag:String!){repository(owner:$owner,name:$repo){release(tagName:$tag){isDraft releaseAssets(first:100){nodes{name}}}}}",
+        "--jq",
+        ".data.repository.release | if . then {isDraft, assets: .releaseAssets.nodes} else empty end",
+    ])?;
+    Ok(if json.is_empty() {
+        None
+    } else {
+        Some(serde_json::from_str(&json)?)
+    })
 }
 
 /// Finish every release that is not complete and report it. A package
@@ -210,7 +226,7 @@ fn release_one(
     // Spec: CreateGitHubRelease / ResumeTaggedReleasesWithoutGitHubRelease,
     // then WorkflowPublishesRelease for drafts.
     if package.release.mode == ReleaseMode::TagAndRelease {
-        match view(gh, &tag) {
+        match view(gh, &tag)? {
             Some(existing) => {
                 let mut draft = existing.draft;
                 // Assets go to an existing release only when it is still a
@@ -263,14 +279,14 @@ fn release_one(
                     // Two release runs at once (two PRs merged together):
                     // the other one won the create, which is as good as done.
                     Err(e) => match view(gh, &tag) {
-                        Some(existing) => {
+                        Ok(Some(existing)) => {
                             status = if existing.draft {
                                 "drafted"
                             } else {
                                 "published"
                             }
                         }
-                        None => return Err(e),
+                        _ => return Err(e),
                     },
                 }
             }
@@ -316,7 +332,7 @@ pub fn first_release(
 pub fn abandon(repo: &Repo, remote: &str, tag: &str, dry_run: bool, gh: Gh) -> Result<Vec<String>> {
     let root = repo.root.as_path();
     let mut removed = Vec::new();
-    if view(gh, tag).is_some() {
+    if view(gh, tag)?.is_some() {
         gh(&["release", "delete", tag, "--yes"])?;
         removed.push(format!("release {tag}"));
     }
