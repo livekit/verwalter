@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.28.2
+
+### Patch Changes
+
+- Publish verwalter to crates.io again: `cargo binstall verwalter` installs the release binary, `cargo install verwalter` builds it - [#80](https://github.com/livekit/verwalter/pull/80) ([@lukasIO](https://github.com/lukasIO))
+
 ## 0.28.1
 
 ### Patch Changes
