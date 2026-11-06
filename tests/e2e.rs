@@ -11,9 +11,10 @@ use anyhow::{Result, anyhow};
 use verwalter::{branches, github::Client, plan::plan, repo::Repo};
 
 /// Fake GitHub: answers each gh call with the wrapped closure.
-struct Mock<F>(F);
+struct MockClient<F>(F);
 
-impl<F: Fn(&[&str]) -> Result<String>> Client for Mock<F> {
+/// Blanket implementation for closures.
+impl<F: Fn(&[&str]) -> Result<String>> Client for MockClient<F> {
     fn execute(&self, args: &[&str]) -> Result<String> {
         (self.0)(args)
     }
@@ -285,7 +286,7 @@ fn pr_sync_pushes_and_creates_updates_closes() {
     let has = |prefix: &str| calls.borrow().iter().any(|c| c.starts_with(prefix));
     // #40 is the open PR on the release branch, with a wrong base.
     let open = r#"[{"number":40,"headRefName":"release/main","baseRefName":"next"}]"#;
-    let gh = Mock(|args: &[&str]| -> Result<String> {
+    let gh = MockClient(|args: &[&str]| -> Result<String> {
         calls.borrow_mut().push(args.join(" "));
         Ok(match args {
             ["pr", "list", ..] => open.into(),
@@ -341,7 +342,7 @@ fn pr_sync_pushes_and_creates_updates_closes() {
 
     // A fresh repo gets a new PR.
     calls.borrow_mut().clear();
-    let gh = Mock(|args: &[&str]| -> Result<String> {
+    let gh = MockClient(|args: &[&str]| -> Result<String> {
         calls.borrow_mut().push(args.join(" "));
         Ok(match args {
             ["pr", "list", ..] => "[]".into(),
@@ -389,7 +390,7 @@ fn release_tags_and_creates_github_releases_resumably() {
 
     let repo = Repo::load(root).unwrap();
     let calls = std::cell::RefCell::new(Vec::<String>::new());
-    let gh = Mock(|args: &[&str]| -> Result<String> {
+    let gh = MockClient(|args: &[&str]| -> Result<String> {
         calls.borrow_mut().push(args.join(" "));
         match args {
             // Older tags already have releases; the new one does not yet.
@@ -438,7 +439,7 @@ fn release_tags_and_creates_github_releases_resumably() {
 
     // Second run: nothing to tag, nothing to create.
     let before = calls.borrow().len();
-    let gh2 = Mock(|args: &[&str]| -> Result<String> {
+    let gh2 = MockClient(|args: &[&str]| -> Result<String> {
         calls.borrow_mut().push(args.join(" "));
         Ok(if args[2] == "livekit-v0.8.0" {
             r#"{"isDraft":true,"assets":[]}"#.into()
@@ -486,7 +487,7 @@ fn maintenance_release_is_not_marked_latest() {
 
     let repo = Repo::load(root).unwrap();
     let calls = std::cell::RefCell::new(Vec::<String>::new());
-    let gh = Mock(|args: &[&str]| -> Result<String> {
+    let gh = MockClient(|args: &[&str]| -> Result<String> {
         calls.borrow_mut().push(args.join(" "));
         match args {
             ["release", "view", "livekit-v0.7.1", ..] => Err(anyhow!("release not found")),
@@ -518,7 +519,7 @@ fn release_resumes_a_tag_without_github_release() {
     git(root, &["commit", "-qm", "later"]);
     let repo = Repo::load(root).unwrap();
     let calls = std::cell::RefCell::new(Vec::<String>::new());
-    let gh = Mock(|args: &[&str]| -> Result<String> {
+    let gh = MockClient(|args: &[&str]| -> Result<String> {
         calls.borrow_mut().push(args.join(" "));
         match args {
             ["release", "view", "livekit-v0.7.0", ..] => Err(anyhow!("not found")),
@@ -557,7 +558,7 @@ fn release_with_assets_then_abandon() {
 
     let repo = Repo::load(root).unwrap();
     let calls = std::cell::RefCell::new(Vec::<String>::new());
-    let gh = Mock(|args: &[&str]| -> Result<String> {
+    let gh = MockClient(|args: &[&str]| -> Result<String> {
         let exists = {
             let calls = calls.borrow();
             calls.iter().any(|c| c.starts_with("release create"))
@@ -636,7 +637,7 @@ fn prerelease_opens_an_rc_pr_without_consuming_changesets() {
 
     let repo = Repo::load(root).unwrap();
     let calls = std::cell::RefCell::new(Vec::<String>::new());
-    let gh = Mock(|args: &[&str]| -> Result<String> {
+    let gh = MockClient(|args: &[&str]| -> Result<String> {
         calls.borrow_mut().push(args.join(" "));
         Ok(match args {
             ["pr", "list", ..] => "[]".into(),
@@ -743,7 +744,7 @@ fn prerelease_of_a_fixed_group_member_covers_the_group() {
         1,
         "0.3.1 and 0.4.3 differ"
     );
-    let gh = Mock(|args: &[&str]| -> Result<String> {
+    let gh = MockClient(|args: &[&str]| -> Result<String> {
         Ok(match args {
             ["pr", "list", ..] => "[]".into(),
             ["pr", "create", ..] => "https://github.com/x/y/pull/9".into(),
@@ -828,7 +829,7 @@ fn dry_run_writes_nothing() {
     );
     let branch = branches::create(&repo, &plan, "main").unwrap();
     let writes = std::cell::Cell::new(0);
-    let inner = Mock(|args: &[&str]| -> Result<String> {
+    let inner = MockClient(|args: &[&str]| -> Result<String> {
         if !matches!(args, ["pr", "list", ..] | ["release", "view", ..]) {
             writes.set(writes.get() + 1);
         }
@@ -875,7 +876,7 @@ fn release_finishes_a_partial_release_for_one_package() {
 
     let repo = Repo::load(root).unwrap();
     let calls = std::cell::RefCell::new(Vec::<String>::new());
-    let gh = Mock(|args: &[&str]| -> Result<String> {
+    let gh = MockClient(|args: &[&str]| -> Result<String> {
         let published = calls
             .borrow()
             .iter()
@@ -929,7 +930,7 @@ fn release_error_names_the_resume_command() {
     let root = &r.0;
     // No remote: the tag push fails.
     let repo = Repo::load(root).unwrap();
-    let gh = Mock(|_: &[&str]| -> Result<String> { Ok(String::new()) });
+    let gh = MockClient(|_: &[&str]| -> Result<String> { Ok(String::new()) });
     let err = verwalter::release::run(
         &repo,
         "origin",
@@ -962,7 +963,7 @@ fn status_reports_state_and_next_step() {
     git(root, &["commit", "-q", "-m", "cs"]);
 
     let repo = Repo::load(root).unwrap();
-    let gh = Mock(|args: &[&str]| -> Result<String> {
+    let gh = MockClient(|args: &[&str]| -> Result<String> {
         match args {
             ["pr", "list", ..] => {
                 Ok(r#"[{"number":12,"headRefName":"release/main","baseRefName":"main"}]"#.into())
@@ -1020,7 +1021,7 @@ fn release_runs_in_dependency_order_and_stops_at_the_first_failure() {
     // All three untagged: protocol first, then its dependents by name.
     let repo = Repo::load(root).unwrap();
     let calls = std::cell::RefCell::new(Vec::<String>::new());
-    let gh = Mock(|args: &[&str]| -> Result<String> {
+    let gh = MockClient(|args: &[&str]| -> Result<String> {
         calls.borrow_mut().push(args.join(" "));
         match args {
             ["release", "view", ..] => Err(anyhow!("not found")),
@@ -1036,7 +1037,7 @@ fn release_runs_in_dependency_order_and_stops_at_the_first_failure() {
     let r2 = fixture("order-fail");
     let root2 = &r2.0;
     let repo2 = Repo::load(root2).unwrap();
-    let gh2 = Mock(|args: &[&str]| -> Result<String> {
+    let gh2 = MockClient(|args: &[&str]| -> Result<String> {
         match args {
             ["release", "view", ..] => Err(anyhow!("not found")),
             ["release", "create", tag, ..] if tag.starts_with("livekit-protocol") => {
@@ -1079,7 +1080,7 @@ fn hand_bumped_version_is_not_released() {
     );
     git(root, &["commit", "-q", "-am", "bump by hand"]);
     let repo = Repo::load(root).unwrap();
-    let gh = Mock(|args: &[&str]| -> Result<String> {
+    let gh = MockClient(|args: &[&str]| -> Result<String> {
         match args {
             ["release", "view", "livekit-v0.7.1", ..] => Err(anyhow!("not found")),
             ["release", "view", ..] => Ok(r#"{"isDraft":false,"assets":[]}"#.into()),
@@ -1522,7 +1523,7 @@ fn named_package_is_reported_even_when_complete() {
     git(root, &["tag", "livekit-api-v0.4.3"]);
     git(root, &["push", "-q", "origin", "--tags"]);
     let repo = Repo::load(root).unwrap();
-    let gh = Mock(|args: &[&str]| -> Result<String> {
+    let gh = MockClient(|args: &[&str]| -> Result<String> {
         match args {
             ["release", "view", ..] => Ok(r#"{"isDraft":false,"assets":[{"name":"a"}]}"#.into()),
             other => panic!("unexpected write {other:?}"),
@@ -1564,7 +1565,7 @@ fn changesets_are_attributed_to_their_pr_or_commit() {
     let push_sha = git(root, &["rev-parse", "HEAD"]);
 
     let mut repo = Repo::load(root).unwrap();
-    let gh = Mock(|args: &[&str]| -> Result<String> {
+    let gh = MockClient(|args: &[&str]| -> Result<String> {
         let path = args.get(1).copied().unwrap_or("");
         Ok(
             if path == format!("repos/{{owner}}/{{repo}}/commits/{pr_sha}/pulls") {
@@ -1718,7 +1719,7 @@ fn prerelease_of_a_dependent_carries_pending_dependencies() {
         ]
     );
 
-    let gh = Mock(|args: &[&str]| -> Result<String> {
+    let gh = MockClient(|args: &[&str]| -> Result<String> {
         Ok(match args {
             ["pr", "list", ..] => "[]".into(),
             ["pr", "create", ..] => "https://github.com/x/y/pull/3".into(),
@@ -1889,7 +1890,7 @@ fn asset_directory_attaches_every_file_in_it() {
 
     let repo = Repo::load(root).unwrap();
     let calls = std::cell::RefCell::new(Vec::<String>::new());
-    let gh = Mock(|args: &[&str]| -> Result<String> {
+    let gh = MockClient(|args: &[&str]| -> Result<String> {
         calls.borrow_mut().push(args.join(" "));
         match args {
             ["release", "view", ..] => Err(anyhow!("not found")),
