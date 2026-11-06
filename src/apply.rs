@@ -139,7 +139,10 @@ pub fn apply(
     // Changelog, unless the package keeps none.
     if let Some(changelog) = &package.versioning.changelog {
         let path = root.join(changelog);
-        let before = fs::read_to_string(&path).unwrap_or_else(|_| "# Changelog\n".to_string());
+        let before = match fs::read_to_string(&path) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => "# Changelog\n".to_string(),
+            other => other.with_context(|| changelog.clone())?,
+        };
         let after = insert_entry(&before, &render_entry(release, changesets, plan));
         if after != before {
             fs::write(&path, after)?;
@@ -311,6 +314,20 @@ versioning.changelog = "CHANGELOG.md"
                 vec!["livekit-protocol".into()],
             ),
         ]
+    }
+
+    #[test]
+    fn unreadable_changelog_is_an_error_not_overwritten() {
+        let repo = Repo::new("bad-changelog");
+        let log = repo.0.join("livekit-protocol/CHANGELOG.md");
+        fs::write(&log, b"# Changelog\n\xff history\n").unwrap();
+        let config = Config::parse(CONFIG).unwrap();
+        let changesets =
+            [Changeset::parse("a.md", "---\nlivekit-protocol: patch\n---\nfix\n").unwrap()];
+        let p = plan(&state(), &changesets, BumpLevel::Patch);
+
+        assert!(apply(&repo.0, &config, &state(), &changesets, &p, &p[0]).is_err());
+        assert_eq!(fs::read(&log).unwrap(), b"# Changelog\n\xff history\n");
     }
 
     #[test]
