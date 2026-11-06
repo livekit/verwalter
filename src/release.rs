@@ -41,7 +41,7 @@ pub struct Options {
     pub dry_run: bool,
 }
 
-/// The GitHub release behind a tag, as `gh release view` reports it.
+/// The GitHub release behind a tag, as the `view` query returns it.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
 pub struct ReleaseState {
     #[serde(rename = "isDraft")]
@@ -55,10 +55,26 @@ pub struct Asset {
     pub name: String,
 }
 
-pub fn view(gh: Gh, tag: &str) -> Option<ReleaseState> {
-    gh(&["release", "view", tag, "--json", "isDraft,assets"])
-        .ok()
-        .and_then(|j| serde_json::from_str(&j).ok())
+pub fn view(gh: Gh, tag: &str) -> Result<Option<ReleaseState>> {
+    let json = gh(&[
+        "api",
+        "graphql",
+        "-F",
+        &format!("tag={tag}"),
+        "-F",
+        "owner={owner}",
+        "-F",
+        "repo={repo}",
+        "-f",
+        "query=query($owner:String!,$repo:String!,$tag:String!){repository(owner:$owner,name:$repo){release(tagName:$tag){isDraft releaseAssets(first:100){nodes{name}}}}}",
+        "--jq",
+        ".data.repository.release | if . then {isDraft, assets: .releaseAssets.nodes} else empty end",
+    ])?;
+    Ok(if json.is_empty() {
+        None
+    } else {
+        Some(serde_json::from_str(&json)?)
+    })
 }
 
 /// Finish every release that is not complete and report it. A package
