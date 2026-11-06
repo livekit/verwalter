@@ -4,8 +4,7 @@
 > **Work in progress.** verwalter is under active development and is not
 > ready for production use. Commands, configuration keys and behaviour can
 > change without notice between releases. Use it at your own risk, and
-> expect rough edges and breaking changes. Feedback and issues are
-> welcome.
+> expect rough edges and breaking changes.
 
 Changeset-based versioning for single packages and monorepos, in any
 language. Contributors describe their change in a changeset file. The tool
