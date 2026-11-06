@@ -59,7 +59,9 @@ pub fn view(gh: Gh, tag: &str) -> Result<Option<ReleaseState>> {
     let json = gh(&[
         "api",
         "graphql",
-        "-F",
+        // -f, not -F: -F reads a value that starts with `@` as a file,
+        // and npm tags such as `@scope/pkg@1.0.0` start with `@`.
+        "-f",
         &format!("tag={tag}"),
         "-F",
         "owner={owner}",
@@ -425,5 +427,20 @@ mod tests {
         assert_eq!(changelog_section(LOG, "9.9.9"), "");
         assert_eq!(previous_version(LOG, "0.4.0").as_deref(), Some("0.3.1"));
         assert_eq!(previous_version(LOG, "0.3.1"), None);
+    }
+
+    #[test]
+    fn view_passes_a_scoped_tag_as_a_raw_string() {
+        let mut args = Vec::new();
+        let mut gh = |a: &[&str]| -> Result<String> {
+            args = a.iter().map(|s| s.to_string()).collect();
+            Ok(String::new())
+        };
+        assert_eq!(view(&mut gh, "@scope/pkg@1.0.0").unwrap(), None);
+        let i = args
+            .iter()
+            .position(|a| a == "tag=@scope/pkg@1.0.0")
+            .unwrap();
+        assert_eq!(args[i - 1], "-f");
     }
 }

@@ -384,7 +384,7 @@ fn release_tags_and_creates_github_releases_resumably() {
         calls.push(args.join(" "));
         match args {
             // Older tags already have releases; the new one does not yet.
-            ["api", "graphql", "-F", tag, ..] if *tag != "tag=livekit-v0.8.0" => {
+            ["api", "graphql", "-f", tag, ..] if *tag != "tag=livekit-v0.8.0" => {
                 Ok(r#"{"isDraft":false,"assets":[]}"#.into())
             }
             ["api", "graphql", ..] => Ok(String::new()),
@@ -478,7 +478,7 @@ fn maintenance_release_is_not_marked_latest() {
     let mut gh = |args: &[&str]| -> Result<String> {
         calls.push(args.join(" "));
         match args {
-            ["api", "graphql", "-F", "tag=livekit-v0.7.1", ..] => Ok(String::new()),
+            ["api", "graphql", "-f", "tag=livekit-v0.7.1", ..] => Ok(String::new()),
             ["api", "graphql", ..] => Ok(r#"{"isDraft":false,"assets":[]}"#.into()),
             _ => Ok(String::new()),
         }
@@ -508,7 +508,7 @@ fn release_resumes_a_tag_without_github_release() {
     let mut gh = |args: &[&str]| -> Result<String> {
         calls.push(args.join(" "));
         match args {
-            ["api", "graphql", "-F", "tag=livekit-v0.7.0", ..] => Ok(String::new()),
+            ["api", "graphql", "-f", "tag=livekit-v0.7.0", ..] => Ok(String::new()),
             ["api", "graphql", ..] => Ok(r#"{"isDraft":false,"assets":[]}"#.into()),
             _ => Ok(String::new()),
         }
@@ -550,7 +550,7 @@ fn release_with_assets_then_abandon() {
         };
         calls.borrow_mut().push(args.join(" "));
         match args {
-            ["api", "graphql", "-F", "tag=livekit-v0.7.0", ..] if !exists => Ok(String::new()),
+            ["api", "graphql", "-f", "tag=livekit-v0.7.0", ..] if !exists => Ok(String::new()),
             ["api", "graphql", ..] => Ok(r#"{"isDraft":false,"assets":[]}"#.into()),
             _ => Ok(String::new()),
         }
@@ -878,7 +878,7 @@ fn release_finishes_a_partial_release_for_one_package() {
             .any(|c| c.starts_with("release edit livekit-v0.7.0 --draft=false"));
         calls.borrow_mut().push(args.join(" "));
         match args {
-            ["api", "graphql", "-F", "tag=livekit-v0.7.0", ..] => {
+            ["api", "graphql", "-f", "tag=livekit-v0.7.0", ..] => {
                 Ok(format!(r#"{{"isDraft":{},"assets":[]}}"#, !published))
             }
             ["api", "graphql", ..] => Ok(r#"{"isDraft":false,"assets":[{"name":"x"}]}"#.into()),
@@ -963,10 +963,10 @@ fn status_reports_state_and_next_step() {
             ["pr", "list", ..] => {
                 Ok(r#"[{"number":12,"headRefName":"release/main","baseRefName":"main"}]"#.into())
             }
-            ["api", "graphql", "-F", "tag=livekit-protocol-v0.3.1", ..] => {
+            ["api", "graphql", "-f", "tag=livekit-protocol-v0.3.1", ..] => {
                 Ok(r#"{"isDraft":false,"assets":[{"name":"a"},{"name":"b"}]}"#.into())
             }
-            ["api", "graphql", "-F", "tag=livekit-api-v0.4.3", ..] => {
+            ["api", "graphql", "-f", "tag=livekit-api-v0.4.3", ..] => {
                 Ok(r#"{"isDraft":true,"assets":[]}"#.into())
             }
             _ => Err(anyhow!("not found")),
@@ -1077,7 +1077,7 @@ fn hand_bumped_version_is_not_released() {
     let repo = Repo::load(root).unwrap();
     let mut gh = |args: &[&str]| -> Result<String> {
         match args {
-            ["api", "graphql", "-F", "tag=livekit-v0.7.1", ..] => Ok(String::new()),
+            ["api", "graphql", "-f", "tag=livekit-v0.7.1", ..] => Ok(String::new()),
             ["api", "graphql", ..] => Ok(r#"{"isDraft":false,"assets":[]}"#.into()),
             _ => Ok(String::new()),
         }
