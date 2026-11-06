@@ -137,6 +137,9 @@ entity Package {
     -- ReleaseNeedsChangelogEntry does not apply.
     changelog_file: String?
     version: Version
+    -- The in-repo packages this one depends on: the ones its versioned
+    -- manifests name, plus the configured `dependencies`, for a package
+    -- that links another at build time without naming it in a manifest.
     dependencies: Set<Package>
     -- Template for the tag name. Default: config.release.tag, else
     -- "v{version}" in a single-package repo, "{package}-v{version}" in a
