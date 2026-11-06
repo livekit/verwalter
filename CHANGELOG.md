@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.28.1
+
+### Patch Changes
+
+- Fix `verwalter release` and `verwalter status` failing on a tag that starts with `@`, such as `@scope/pkg@1.0.0`. - [#78](https://github.com/livekit/verwalter/pull/78) ([@lukasIO](https://github.com/lukasIO))
+- The check comment heads dependent and fixed-group bumps "Also bumped" instead of "Also released": the merge only adds them to the next release PR - [#76](https://github.com/livekit/verwalter/pull/76) ([@lukasIO](https://github.com/lukasIO))
+
 ## 0.28.0
 
 ### Minor Changes
