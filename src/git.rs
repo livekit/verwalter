@@ -13,6 +13,9 @@ fn output(root: &Path, args: &[&str]) -> Result<Output> {
         .arg("-C")
         .arg(root)
         .args(args)
+        // The tool only reads and edits text files. Keep `worktree add` from
+        // fetching LFS objects, which needs credentials CI does not have.
+        .env("GIT_LFS_SKIP_SMUDGE", "1")
         .output()
         .context("cannot run git")
 }
