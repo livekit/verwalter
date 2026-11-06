@@ -616,6 +616,8 @@ fn sync_comment(gh: &dyn github::Client, pr: &str, existing: &Result<Option<Stri
 
 #[cfg(test)]
 mod tests {
+    use std::cell::{Cell, RefCell};
+
     use super::*;
 
     const CONFIG: &str = r#"
@@ -698,22 +700,31 @@ versioning.changelog = "CHANGELOG.md"
     #[test]
     fn run_returns_the_check_when_the_comment_cannot_be_written() {
         let config = Config::parse(CONFIG).unwrap();
-        let mut writes = 0;
-        let mut body = String::new();
-        let mut gh = |args: &[&str]| -> Result<String> {
-            match args {
-                ["pr", "view", ..] => Ok(r#"{"title":"t","headRefName":"feat","headRepositoryOwner":{"login":"o"},"headRepository":{"name":"r"},"labels":[],"files":[{"path":"livekit-protocol/x.proto"}]}"#.into()),
-                ["api", path, ..] if path.ends_with("/comments") => Ok(String::new()),
-                _ => {
-                    writes += 1;
-                    body = args.last().unwrap_or(&"").to_string();
-                    Err(anyhow!("HTTP 403: Resource not accessible by integration"))
+
+        #[derive(Default)]
+        struct MockClient {
+            writes: Cell<u32>,
+            body: RefCell<String>,
+        }
+        impl github::Client for MockClient {
+            fn execute(&self, args: &[&str]) -> Result<String> {
+                match args {
+                    ["pr", "view", ..] => Ok(r#"{"title":"t","headRefName":"feat","headRepositoryOwner":{"login":"o"},"headRepository":{"name":"r"},"labels":[],"files":[{"path":"livekit-protocol/x.proto"}]}"#.into()),
+                    ["api", path, ..] if path.ends_with("/comments") => Ok(String::new()),
+                    _ => {
+                        self.writes.set(self.writes.get() + 1);
+                        *self.body.borrow_mut() = args.last().unwrap_or(&"").to_string();
+                        Err(anyhow!("HTTP 403: Resource not accessible by integration"))
+                    }
                 }
             }
-        };
-        let c = run(&std::env::temp_dir(), &config, 1, &mut gh).unwrap();
+        }
+
+        let gh = MockClient::default();
+        let c = run(&std::env::temp_dir(), &config, 1, &gh).unwrap();
         assert_eq!(c.status, Status::Failed);
-        assert_eq!(writes, 1);
+        assert_eq!(gh.writes.get(), 1);
+        let body = gh.body.into_inner();
         assert!(
             body.contains("https://github.com/o/r/new/feat?"),
             "link should open the new-file page on the PR head repo: {body}"
