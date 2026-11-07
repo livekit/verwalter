@@ -137,6 +137,9 @@ entity Package {
     -- ReleaseNeedsChangelogEntry does not apply.
     changelog_file: String?
     version: Version
+    -- The in-repo packages this one depends on: the ones its versioned
+    -- manifests name, plus the configured `dependencies`, for a package
+    -- that links another at build time without naming it in a manifest.
     dependencies: Set<Package>
     -- Template for the tag name. Default: config.release.tag, else
     -- "v{version}" in a single-package repo, "{package}-v{version}" in a
@@ -252,7 +255,7 @@ entity ChangesetCheck {
     -- a changeset of their own: dependents and fixed-group members. The
     -- comment names them with the reason, without a level or a version,
     -- because both can change before the merge.
-    also_released: Set<Package>
+    also_bumped: Set<Package>
     -- release_pull_request: the head branch carries the release prefix.
     -- A release PR consumes changesets rather than adding one.
     status: passed | failed | exempt | release_pull_request
@@ -821,7 +824,7 @@ surface ContributorPullRequestCheck {
         check.affected_packages
         check.covered_packages
         check.bumps
-        check.also_released
+        check.also_bumped
         check.missing_packages when check.status = failed
         check.api_findings when check.status = failed
         create_changeset_link(check.pull_request, check.missing_packages) when check.status = failed
@@ -862,7 +865,10 @@ surface PreReleaseRequest {
 -- a `for` clause, so `check` reports the other outcomes as unreachable.
 -- `releases`, when the workflow hands over the list from `release`, keeps
 -- the run to the packages it released: without it, every tagged package
--- runs its command again, and only a registry can tell that apart.
+-- runs its command again, and only a registry can tell that apart. An
+-- empty list counts as absent: it reaches publish only from a re-run
+-- by hand after a run that released nothing, and the re-run is for the
+-- versions a registry lacks.
 rule WorkflowPublishesInDependencyOrder {
     when: WorkflowRunsPublish(workflow, repository, releases?)
     let candidates = filter(Packages, p => p.repository = repository and p.release_mode != none and GitTags.any(t => t.package = p and t.version = p.version) and (releases = none or p in releases))

@@ -87,7 +87,7 @@ enum Command {
     },
     /// Run each package's publish command, dependencies first
     Publish {
-        /// The `releases` output of `release`: only these packages [default: every tagged package]
+        /// The `releases` output of `release`: only these packages. An empty list, from a re-run by hand after a run that released nothing, counts as absent [default: every tagged package]
         #[arg(long, value_name = "JSON", value_parser = releases)]
         releases: Option<BTreeSet<String>>,
         /// Packages to publish at once
@@ -113,6 +113,15 @@ fn checkout(arg: &str) -> Result<PathBuf, String> {
 
 /// A JSON list of objects with a `package`, or of names. Empty means
 /// nothing to publish.
+/// Spec: WorkflowRunsPublish.releases. An empty list reaches `publish`
+/// only from a re-run by hand after a run that released nothing, and
+/// then means: every tagged package, which the registry check narrows
+/// to the versions it lacks. Publishing nothing and exiting 0 would pass
+/// for a successful re-run.
+fn only(releases: Option<BTreeSet<String>>) -> Option<BTreeSet<String>> {
+    releases.filter(|r| !r.is_empty())
+}
+
 fn releases(text: &str) -> Result<BTreeSet<String>, serde_json::Error> {
     #[derive(serde::Deserialize)]
     #[serde(untagged)]
@@ -322,7 +331,7 @@ fn run(cli: Cli) -> Result<()> {
             let options = verwalter::publish::Options {
                 jobs,
                 dry_run,
-                only: releases,
+                only: only(releases),
             };
             let outcomes = verwalter::publish::run(&repo, &options, &verwalter::registry::curl)?;
             println!("{}", verwalter::publish::write_outputs(&outcomes)?);
@@ -410,5 +419,16 @@ mod tests {
     #[test]
     fn cli_definition() {
         Cli::command().debug_assert();
+    }
+
+    // Spec: WorkflowPublishesInDependencyOrder. An empty release list
+    // counts as absent: every tagged package.
+    #[test]
+    fn empty_releases_list_means_every_tagged_package() {
+        assert_eq!(only(Some(releases("[]").unwrap())), None);
+        assert_eq!(only(Some(releases("").unwrap())), None);
+        assert_eq!(only(None), None);
+        let one = releases(r#"[{"package":"a","version":"1.0.0"}]"#).unwrap();
+        assert_eq!(only(Some(one.clone())), Some(one));
     }
 }

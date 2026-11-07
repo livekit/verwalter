@@ -1,5 +1,11 @@
 # verwalter
 
+> [!WARNING]
+> **Work in progress.** verwalter is under active development and is not
+> ready for production use. Commands, configuration keys and behaviour can
+> change without notice between releases. Use it at your own risk, and
+> expect rough edges and breaking changes.
+
 Changeset-based versioning for single packages and monorepos, in any
 language. Contributors describe their change in a changeset file. The tool
 keeps one release PR open. Merging it bumps versions, writes changelogs,
@@ -15,12 +21,29 @@ The behaviour is specified in [specs/versioning.allium](specs/versioning.allium)
 
 ## Installation
 
+With [cargo binstall](https://github.com/cargo-bins/cargo-binstall), which
+downloads the binary of the latest release:
+
+```sh
+cargo binstall verwalter
+```
+
+Or build it from crates.io:
+
+```sh
+cargo install --locked verwalter
+```
+
+The binaries for Linux (x86_64, aarch64) and macOS (aarch64) are on the
+[releases page](https://github.com/livekit/verwalter/releases). In GitHub
+Actions use the action, see below.
+
 ### From source
 
 ```sh
 git clone https://github.com/livekit/verwalter
-cd verwalter 
-cargo install --path .
+cd verwalter
+cargo install --locked --path .
 verwalter --version  # Verify install
 ```
 

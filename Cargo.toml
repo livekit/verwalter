@@ -1,6 +1,6 @@
 [package]
 name = "verwalter"
-version = "0.27.0"
+version = "0.28.2"
 edition = "2024"
 description = "Changeset-based versioning for single packages and monorepos"
 license = "Apache-2.0"
@@ -8,8 +8,14 @@ repository = "https://github.com/livekit/verwalter"
 readme = "README.md"
 keywords = ["changesets", "versioning", "release", "monorepo", "semver"]
 categories = ["development-tools", "command-line-utilities"]
-# Distributed as release binaries and the action, not on crates.io.
-publish = false
+# The crate is the tool; the spec, the action and the workflows stay in git.
+include = ["/src/**", "/Cargo.toml", "/README.md", "/CHANGELOG.md"]
+
+# cargo binstall picks the binaries the release workflow attaches.
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/{ name }-{ target }.tar.gz"
+bin-dir = "{ bin }{ binary-ext }"
+pkg-fmt = "tgz"
 
 [dependencies]
 anyhow = "1"

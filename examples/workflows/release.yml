@@ -76,7 +76,9 @@ jobs:
   # packages this run released, dependencies first, independent packages
   # in parallel. A failure blocks the transitive dependents and nothing
   # else. A version the registry already has is skipped, so a re-run of
-  # this job is safe. Without `releases`, every tagged package is run.
+  # this job is safe. Without `releases`, or with the empty list a re-run
+  # by hand gets when the release step had nothing left to do, every
+  # tagged package is run, and the registry check skips what is there.
   publish:
     needs: release
     if: needs.release.outputs.released == 'true' || github.event_name == 'workflow_dispatch'
@@ -93,8 +95,10 @@ jobs:
         with:
           name: dist
           path: dist
-      # Set up the registry tooling the commands need: setup-node with
-      # registry-url for npm provenance, cargo login, twine, ...
+      # Set up the registry tooling the commands need: setup-node, cargo
+      # login, twine, ... With npm trusted publishing, give setup-node no
+      # registry-url: it writes a placeholder token that a publish falls
+      # back to, and fails with 404.
       # For packages with `release.draft = true`, the command also uploads the
       # assets built here and publishes the GitHub release:
       #   gh release upload "$VERWALTER_TAG" dist/* --clobber

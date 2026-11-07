@@ -4,3 +4,7 @@
 path = "."
 versioning.files = ["Cargo.toml", "Cargo.lock"]
 release.draft = false                          # release.yml builds first and attaches the binaries on creation
+
+[publish]
+registry = "crates"
+command = "cargo publish --locked"

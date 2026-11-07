@@ -394,10 +394,10 @@ fn release_tags_and_creates_github_releases_resumably() {
         calls.borrow_mut().push(args.join(" "));
         match args {
             // Older tags already have releases; the new one does not yet.
-            ["release", "view", tag, ..] if *tag != "livekit-v0.8.0" => {
+            ["api", "graphql", "-f", tag, ..] if *tag != "tag=livekit-v0.8.0" => {
                 Ok(r#"{"isDraft":false,"assets":[]}"#.into())
             }
-            ["release", "view", ..] => Err(anyhow!("release not found")),
+            ["api", "graphql", ..] => Ok(String::new()),
             _ => Ok(String::new()),
         }
     });
@@ -441,7 +441,7 @@ fn release_tags_and_creates_github_releases_resumably() {
     let before = calls.borrow().len();
     let gh2 = MockClient(|args: &[&str]| -> Result<String> {
         calls.borrow_mut().push(args.join(" "));
-        Ok(if args[2] == "livekit-v0.8.0" {
+        Ok(if args[3] == "tag=livekit-v0.8.0" {
             r#"{"isDraft":true,"assets":[]}"#.into()
         } else {
             r#"{"isDraft":false,"assets":[]}"#.into()
@@ -490,8 +490,8 @@ fn maintenance_release_is_not_marked_latest() {
     let gh = MockClient(|args: &[&str]| -> Result<String> {
         calls.borrow_mut().push(args.join(" "));
         match args {
-            ["release", "view", "livekit-v0.7.1", ..] => Err(anyhow!("release not found")),
-            ["release", "view", ..] => Ok(r#"{"isDraft":false,"assets":[]}"#.into()),
+            ["api", "graphql", "-f", "tag=livekit-v0.7.1", ..] => Ok(String::new()),
+            ["api", "graphql", ..] => Ok(r#"{"isDraft":false,"assets":[]}"#.into()),
             _ => Ok(String::new()),
         }
     });
@@ -522,8 +522,8 @@ fn release_resumes_a_tag_without_github_release() {
     let gh = MockClient(|args: &[&str]| -> Result<String> {
         calls.borrow_mut().push(args.join(" "));
         match args {
-            ["release", "view", "livekit-v0.7.0", ..] => Err(anyhow!("not found")),
-            ["release", "view", ..] => Ok(r#"{"isDraft":false,"assets":[]}"#.into()),
+            ["api", "graphql", "-f", "tag=livekit-v0.7.0", ..] => Ok(String::new()),
+            ["api", "graphql", ..] => Ok(r#"{"isDraft":false,"assets":[]}"#.into()),
             _ => Ok(String::new()),
         }
     });
@@ -566,8 +566,8 @@ fn release_with_assets_then_abandon() {
         };
         calls.borrow_mut().push(args.join(" "));
         match args {
-            ["release", "view", "livekit-v0.7.0", ..] if !exists => Err(anyhow!("not found")),
-            ["release", "view", ..] => Ok(r#"{"isDraft":false,"assets":[]}"#.into()),
+            ["api", "graphql", "-f", "tag=livekit-v0.7.0", ..] if !exists => Ok(String::new()),
+            ["api", "graphql", ..] => Ok(r#"{"isDraft":false,"assets":[]}"#.into()),
             _ => Ok(String::new()),
         }
     });
@@ -594,6 +594,14 @@ fn release_with_assets_then_abandon() {
         "{create}"
     );
     assert!(!create.contains("--draft"));
+
+    // A failed lookup (auth, network) stops abandon before it deletes the tag.
+    let broken =
+        MockClient(|_: &[&str]| -> Result<String> { Err(anyhow!("HTTP 401: Bad credentials")) });
+    assert!(
+        verwalter::release::abandon(&repo, "origin", "livekit-v0.7.0", false, &broken).is_err()
+    );
+    assert!(!git(root, &["tag", "--list", "livekit-v0.7.0"]).is_empty());
 
     let removed =
         verwalter::release::abandon(&repo, "origin", "livekit-v0.7.0", false, &gh).unwrap();
@@ -830,12 +838,12 @@ fn dry_run_writes_nothing() {
     let branch = branches::create(&repo, &plan, "main").unwrap();
     let writes = std::cell::Cell::new(0);
     let inner = MockClient(|args: &[&str]| -> Result<String> {
-        if !matches!(args, ["pr", "list", ..] | ["release", "view", ..]) {
+        if !matches!(args, ["pr", "list", ..] | ["api", "graphql", ..]) {
             writes.set(writes.get() + 1);
         }
         Ok(match args {
             ["pr", "list", ..] => "[]".into(),
-            ["release", "view", ..] => Err(anyhow!("not found"))?,
+            ["api", "graphql", ..] => String::new(),
             _ => String::new(),
         })
     });
@@ -883,10 +891,10 @@ fn release_finishes_a_partial_release_for_one_package() {
             .any(|c| c.starts_with("release edit livekit-v0.7.0 --draft=false"));
         calls.borrow_mut().push(args.join(" "));
         match args {
-            ["release", "view", "livekit-v0.7.0", ..] => {
+            ["api", "graphql", "-f", "tag=livekit-v0.7.0", ..] => {
                 Ok(format!(r#"{{"isDraft":{},"assets":[]}}"#, !published))
             }
-            ["release", "view", ..] => Ok(r#"{"isDraft":false,"assets":[{"name":"x"}]}"#.into()),
+            ["api", "graphql", ..] => Ok(r#"{"isDraft":false,"assets":[{"name":"x"}]}"#.into()),
             _ => Ok(String::new()),
         }
     });
@@ -968,10 +976,10 @@ fn status_reports_state_and_next_step() {
             ["pr", "list", ..] => {
                 Ok(r#"[{"number":12,"headRefName":"release/main","baseRefName":"main"}]"#.into())
             }
-            ["release", "view", "livekit-protocol-v0.3.1", ..] => {
+            ["api", "graphql", "-f", "tag=livekit-protocol-v0.3.1", ..] => {
                 Ok(r#"{"isDraft":false,"assets":[{"name":"a"},{"name":"b"}]}"#.into())
             }
-            ["release", "view", "livekit-api-v0.4.3", ..] => {
+            ["api", "graphql", "-f", "tag=livekit-api-v0.4.3", ..] => {
                 Ok(r#"{"isDraft":true,"assets":[]}"#.into())
             }
             _ => Err(anyhow!("not found")),
@@ -1024,7 +1032,7 @@ fn release_runs_in_dependency_order_and_stops_at_the_first_failure() {
     let gh = MockClient(|args: &[&str]| -> Result<String> {
         calls.borrow_mut().push(args.join(" "));
         match args {
-            ["release", "view", ..] => Err(anyhow!("not found")),
+            ["api", "graphql", ..] => Ok(String::new()),
             _ => Ok(String::new()),
         }
     });
@@ -1039,7 +1047,7 @@ fn release_runs_in_dependency_order_and_stops_at_the_first_failure() {
     let repo2 = Repo::load(root2).unwrap();
     let gh2 = MockClient(|args: &[&str]| -> Result<String> {
         match args {
-            ["release", "view", ..] => Err(anyhow!("not found")),
+            ["api", "graphql", ..] => Ok(String::new()),
             ["release", "create", tag, ..] if tag.starts_with("livekit-protocol") => {
                 Err(anyhow!("boom"))
             }
@@ -1082,8 +1090,8 @@ fn hand_bumped_version_is_not_released() {
     let repo = Repo::load(root).unwrap();
     let gh = MockClient(|args: &[&str]| -> Result<String> {
         match args {
-            ["release", "view", "livekit-v0.7.1", ..] => Err(anyhow!("not found")),
-            ["release", "view", ..] => Ok(r#"{"isDraft":false,"assets":[]}"#.into()),
+            ["api", "graphql", "-f", "tag=livekit-v0.7.1", ..] => Ok(String::new()),
+            ["api", "graphql", ..] => Ok(r#"{"isDraft":false,"assets":[]}"#.into()),
             _ => Ok(String::new()),
         }
     });
@@ -1525,7 +1533,7 @@ fn named_package_is_reported_even_when_complete() {
     let repo = Repo::load(root).unwrap();
     let gh = MockClient(|args: &[&str]| -> Result<String> {
         match args {
-            ["release", "view", ..] => Ok(r#"{"isDraft":false,"assets":[{"name":"a"}]}"#.into()),
+            ["api", "graphql", ..] => Ok(r#"{"isDraft":false,"assets":[{"name":"a"}]}"#.into()),
             other => panic!("unexpected write {other:?}"),
         }
     });
@@ -1893,7 +1901,7 @@ fn asset_directory_attaches_every_file_in_it() {
     let gh = MockClient(|args: &[&str]| -> Result<String> {
         calls.borrow_mut().push(args.join(" "));
         match args {
-            ["release", "view", ..] => Err(anyhow!("not found")),
+            ["api", "graphql", ..] => Ok(String::new()),
             _ => Ok(String::new()),
         }
     });
@@ -2013,4 +2021,121 @@ fn crates_on_the_workspace_version_release_together() {
     assert!(lock.contains("name = \"x\"\nversion = \"2.0.0\""));
     assert!(lock.contains("name = \"y\"\nversion = \"2.0.0\""));
     assert!(lock.contains("name = \"z\"\nversion = \"0.3.1\""));
+}
+
+// A release branch must not fetch LFS objects: CI has no LFS credentials
+// and the tool only edits text files. The pointer stays a pointer.
+#[test]
+fn release_branch_leaves_lfs_pointers_alone() {
+    if Command::new("git-lfs").arg("version").output().is_err() {
+        eprintln!("git-lfs not installed, skipping");
+        return;
+    }
+    let r = fixture("lfs");
+    let root = &r.0;
+    git(root, &["lfs", "install", "--local"]);
+    git(root, &["lfs", "track", "*.bin"]);
+    // A pointer whose object is nowhere: a smudge would fail.
+    let pointer = "version https://git-lfs.github.com/spec/v1\noid sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\nsize 3\n";
+    write(root, "blob.bin", pointer);
+    write(
+        root,
+        ".changeset/one.md",
+        "---\nlivekit-protocol: patch\n---\nOne\n",
+    );
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-q", "-m", "lfs pointer and changeset"]);
+
+    let repo = Repo::load(root).unwrap();
+    let plan = plan(
+        &repo.packages,
+        &repo.changesets,
+        repo.config.versioning.dependent_bump_level,
+    );
+    assert!(branches::create(&repo, &plan, "main").unwrap().is_some());
+    assert_eq!(
+        git(root, &["show", "release/main:blob.bin"]),
+        pointer.trim()
+    );
+}
+
+// Spec: Package.dependencies. A dependency the manifests do not name is
+// configured; a release of it bumps the dependent, whose manifest holds no
+// pin to move. The unpublished crate is a package with release.mode none.
+#[test]
+fn configured_dependency_fans_out_without_a_pin() {
+    let r = fixture("configured-dep");
+    let root = &r.0;
+    write(
+        root,
+        "verwalter.toml",
+        r#"
+[packages.krisp]
+path = "rust/krisp"
+versioning.files = ["Cargo.toml"]
+release.mode = "none"
+publish.registry = "none"
+
+[packages.noise-node]
+path = "nodejs"
+dependencies = ["krisp"]
+versioning.files = ["package.json"]
+
+[packages.noise-py]
+path = "python"
+dependencies = ["krisp"]
+versioning.files = ["pyproject.toml"]
+"#,
+    );
+    write(
+        root,
+        "rust/krisp/Cargo.toml",
+        "[package]\nname = \"krisp\"\nversion = \"0.1.0\"\n",
+    );
+    let package_json = "{\n  \"name\": \"noise-node\",\n  \"version\": \"0.3.0\",\n  \"peerDependencies\": {\n    \"@livekit/rtc-node\": \"^1.0.0\"\n  }\n}\n";
+    write(root, "nodejs/package.json", package_json);
+    write(
+        root,
+        "python/pyproject.toml",
+        "[project]\nname = \"noise-py\"\nversion = \"0.3.2\"\ndependencies = [\"livekit>=0.21.3\"]\n",
+    );
+    for p in ["rust/krisp", "nodejs", "python"] {
+        write(root, &format!("{p}/CHANGELOG.md"), "# Changelog\n");
+    }
+    write(
+        root,
+        ".changeset/krisp.md",
+        "---\nkrisp: minor\n---\nFaster filter\n",
+    );
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-q", "-m", "krisp change"]);
+
+    let repo = Repo::load(root).unwrap();
+    let by = |n: &str| repo.packages.iter().find(|p| p.name == n).unwrap();
+    assert_eq!(by("noise-node").dependencies, ["krisp"]);
+    assert_eq!(by("noise-py").dependencies, ["krisp"]);
+    let plan = plan(
+        &repo.packages,
+        &repo.changesets,
+        repo.config.versioning.dependent_bump_level,
+    );
+    branches::create(&repo, &plan, "main").unwrap();
+    assert_eq!(
+        git(root, &["log", "-1", "--format=%s", "release/main"]),
+        "release: krisp 0.2.0, noise-node 0.3.1, noise-py 0.3.3"
+    );
+    assert!(git(root, &["show", "release/main:rust/krisp/Cargo.toml"]).contains("0.2.0"));
+    // Only the version moved: there is no pin on krisp to write.
+    assert_eq!(
+        git(root, &["show", "release/main:nodejs/package.json"]),
+        package_json.replace("0.3.0", "0.3.1").trim()
+    );
+    assert!(
+        git(root, &["show", "release/main:python/pyproject.toml"])
+            .contains("version = \"0.3.3\"\ndependencies = [\"livekit>=0.21.3\"]")
+    );
+    assert!(
+        git(root, &["show", "release/main:nodejs/CHANGELOG.md"])
+            .contains("Updated dependencies: krisp@0.2.0")
+    );
 }

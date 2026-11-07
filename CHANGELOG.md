@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.28.2
+
+### Patch Changes
+
+- Publish verwalter to crates.io again: `cargo binstall verwalter` installs the release binary, `cargo install verwalter` builds it - [#80](https://github.com/livekit/verwalter/pull/80) ([@lukasIO](https://github.com/lukasIO))
+
+## 0.28.1
+
+### Patch Changes
+
+- Fix `verwalter release` and `verwalter status` failing on a tag that starts with `@`, such as `@scope/pkg@1.0.0`. - [#78](https://github.com/livekit/verwalter/pull/78) ([@lukasIO](https://github.com/lukasIO))
+- The check comment heads dependent and fixed-group bumps "Also bumped" instead of "Also released": the merge only adds them to the next release PR - [#76](https://github.com/livekit/verwalter/pull/76) ([@lukasIO](https://github.com/lukasIO))
+
+## 0.28.0
+
+### Minor Changes
+
+- Add a `dependencies` key to a package for in-repo dependencies its manifests do not name, such as an unpublished crate a Python or Node package links at build time - [#74](https://github.com/livekit/verwalter/pull/74) ([@lukasIO](https://github.com/lukasIO))
+
+## 0.27.1
+
+### Patch Changes
+
+- Adopt anyhow for error handling - [#64](https://github.com/livekit/verwalter/pull/64) ([@ladvoc](https://github.com/ladvoc))
+- Fix changeset silently overwritten - [#71](https://github.com/livekit/verwalter/pull/71) ([@ladvoc](https://github.com/ladvoc))
+- Fix `verwalter pr` failing in repositories that use Git LFS. The release worktree no longer downloads LFS objects. - [#73](https://github.com/livekit/verwalter/pull/73) ([@lukasIO](https://github.com/lukasIO))
+- Fix release view query swallows errors - [#72](https://github.com/livekit/verwalter/pull/72) ([@ladvoc](https://github.com/ladvoc))
+
 ## 0.27.0
 
 ### Minor Changes

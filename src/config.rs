@@ -66,6 +66,12 @@ pub struct Package {
     /// Overrides `[check]`.
     #[serde(default)]
     pub check: PackageCheck,
+    /// In-repo packages this one depends on that its manifests do not
+    /// name, for example a crate that a Python package links at build
+    /// time. Added to the dependencies read from the manifests: a release
+    /// of one of them bumps this package too.
+    #[serde(default)]
+    pub dependencies: Vec<String>,
     /// The module path when the first versioned file is a go.mod: Go
     /// names dependencies and proxy entries by it. Set by `Config::load`.
     #[serde(skip)]
@@ -567,6 +573,15 @@ impl Config {
                 None => fixed.push(shared),
             }
         }
+        for (name, p) in &config.packages {
+            for dep in &p.dependencies {
+                ensure!(dep != name, "{name}: depends on itself");
+                ensure!(
+                    config.packages.contains_key(dep),
+                    "{name}: dependencies names unknown package {dep}"
+                );
+            }
+        }
         let mut seen = std::collections::BTreeSet::new();
         for group in &config.versioning.fixed {
             for name in group {
@@ -883,6 +898,25 @@ release.mode = "tag_and_release"
         assert!(e.to_string().contains("unknown package x"));
         let e = with("[[\"livekit-protocol\"], [\"livekit-protocol\"]]").unwrap_err();
         assert!(e.to_string().contains("two fixed groups"));
+    }
+
+    // Spec: Package.dependencies. Configured ones must name another package.
+    #[test]
+    fn configured_dependencies_are_validated() {
+        let with = |deps: &str| {
+            Config::parse(&format!(
+                "[packages.a]\npath = \"a\"\nversioning.files = [\"Cargo.toml\"]\n[packages.b]\npath = \"b\"\ndependencies = {deps}\nversioning.files = [\"package.json\"]\n"
+            ))
+        };
+        assert_eq!(with("[\"a\"]").unwrap().packages["b"].dependencies, ["a"]);
+        assert!(with("[]").unwrap().packages["b"].dependencies.is_empty());
+        let e = with("[\"x\"]").unwrap_err();
+        assert!(
+            e.to_string()
+                .contains("b: dependencies names unknown package x")
+        );
+        let e = with("[\"b\"]").unwrap_err();
+        assert!(e.to_string().contains("b: depends on itself"));
     }
 
     #[test]

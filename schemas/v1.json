@@ -316,6 +316,14 @@
         "check": {
           "description": "Overrides `[check]`.",
           "$ref": "#/$defs/PackageCheck"
+        },
+        "dependencies": {
+          "description": "In-repo packages this one depends on that its manifests do not\nname, for example a crate that a Python package links at build\ntime. Added to the dependencies read from the manifests: a release\nof one of them bumps this package too.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
         }
       },
       "additionalProperties": false
