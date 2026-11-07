@@ -9,7 +9,12 @@ use std::{fs, path::Path};
 use anyhow::{Context, Result, anyhow, bail};
 use serde::Serialize;
 
-use crate::{config::ReleaseMode, git, github, repo::Repo};
+use crate::{
+    config::ReleaseMode,
+    git,
+    github::{self, Command as _},
+    repo::Repo,
+};
 
 /// One line of the handoff to the publish workflow.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -246,7 +251,11 @@ fn release_one(
                     fresh = true;
                 }
                 if draft && options.publish {
-                    gh.execute(&["release", "edit", &tag, "--draft=false"])?;
+                    github::ReleaseEdit {
+                        tag: &tag,
+                        draft: false,
+                    }
+                    .execute(gh)?;
                     draft = false;
                     fresh = true;
                 }
@@ -346,7 +355,7 @@ pub fn abandon(
     let root = repo.root.as_path();
     let mut removed = Vec::new();
     if view(gh, tag)?.is_some() {
-        gh.execute(&["release", "delete", tag, "--yes"])?;
+        github::ReleaseDelete { tag }.execute(gh)?;
         removed.push(format!("release {tag}"));
     }
     if remote_has_tag(root, remote, tag)? {

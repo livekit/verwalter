@@ -348,6 +348,48 @@ impl Command for PrView {
     }
 }
 
+/// Delete a release.
+pub struct ReleaseDelete<'a> {
+    pub tag: &'a str,
+}
+
+impl<'a> Command for ReleaseDelete<'a> {
+    type Output = ();
+
+    fn to_raw_args(&self) -> Result<Vec<String>> {
+        Ok(Vec::from(
+            ["release", "delete", self.tag, "--yes"].map(String::from),
+        ))
+    }
+
+    fn parse_raw_output(_output: &str) -> Result<Self::Output> {
+        Ok(())
+    }
+}
+
+/// Edit a release.
+pub struct ReleaseEdit<'a> {
+    pub tag: &'a str,
+    pub draft: bool,
+}
+
+impl<'a> Command for ReleaseEdit<'a> {
+    type Output = ();
+
+    fn to_raw_args(&self) -> Result<Vec<String>> {
+        Ok(vec![
+            "release".into(),
+            "edit".into(),
+            self.tag.into(),
+            format!("--draft={}", self.draft),
+        ])
+    }
+
+    fn parse_raw_output(_output: &str) -> Result<Self::Output> {
+        Ok(())
+    }
+}
+
 pub const MARKER: &str = "<!-- verwalter release -->";
 
 /// Push every branch and make GitHub match the plan.
