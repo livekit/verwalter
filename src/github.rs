@@ -285,6 +285,30 @@ impl<'a> Command for PrList<'a> {
     }
 }
 
+/// Close a pull request with a comment saying why.
+pub struct PrClose<'a> {
+    pub number: u64,
+    pub comment: &'a str,
+    pub delete_branch: bool,
+}
+
+impl<'a> Command for PrClose<'a> {
+    type Output = ();
+
+    fn to_raw_args(&self) -> Result<Vec<String>> {
+        let mut args = vec!["pr".into(), "close".into(), self.number.to_string()];
+        if self.delete_branch {
+            args.push("--delete-branch".into());
+        }
+        args.extend(["--comment".into(), self.comment.into()]);
+        Ok(args)
+    }
+
+    fn parse_raw_output(_output: &str) -> Result<Self::Output> {
+        Ok(())
+    }
+}
+
 pub const MARKER: &str = "<!-- verwalter release -->";
 
 /// Push every branch and make GitHub match the plan.
@@ -399,14 +423,12 @@ pub fn sync(
 
     // Spec: CloseReleasePullRequestWithNothingPending.
     if let Some(stale) = existing {
-        gh.execute(&[
-            "pr",
-            "close",
-            &stale.number.to_string(),
-            "--delete-branch",
-            "--comment",
-            "Nothing left to release.",
-        ])?;
+        PrClose {
+            number: stale.number,
+            comment: "Nothing left to release.",
+            delete_branch: true,
+        }
+        .execute(gh)?;
     }
     Ok(None)
 }
