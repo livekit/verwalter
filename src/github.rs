@@ -442,13 +442,7 @@ impl<'a> Command for ReleaseCreate<'a> {
 pub struct ReleaseState {
     #[serde(rename = "isDraft")]
     pub draft: bool,
-    #[serde(default)]
-    pub assets: Vec<Asset>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-pub struct Asset {
-    pub name: String,
+    pub asset_count: usize,
 }
 
 /// Look up the release behind a tag, drafts included, through `gh api
@@ -475,7 +469,7 @@ impl<'a> Command for ReleaseQuery<'a> {
             "-f".into(),
             "query=query($owner:String!,$repo:String!,$tag:String!){repository(owner:$owner,name:$repo){release(tagName:$tag){isDraft releaseAssets(first:100){nodes{name}}}}}".into(),
             "--jq".into(),
-            ".data.repository.release | if . then {isDraft, assets: .releaseAssets.nodes} else empty end".into(),
+            ".data.repository.release | if . then {isDraft, asset_count: (.releaseAssets.nodes | length)} else empty end".into(),
         ])
     }
 

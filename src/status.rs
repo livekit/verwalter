@@ -78,7 +78,7 @@ pub fn status(repo: &Repo, remote: &str, gh: &dyn github::Client) -> Result<Vec<
             match (github::ReleaseQuery { tag: &tag }).execute(gh) {
                 Ok(Some(r)) => (
                     if r.draft { "draft" } else { "published" }.to_string(),
-                    r.assets.len(),
+                    r.asset_count,
                 ),
                 Ok(None) => ("none".to_string(), 0),
                 Err(_) => ("unknown".to_string(), 0),
