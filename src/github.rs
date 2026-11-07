@@ -124,7 +124,7 @@ pub trait Command {
     type Output;
 
     /// Convert the typed command into raw arguments for the GitHub CLI.
-    fn to_raw_args(&self) -> Result<Vec<&str>>;
+    fn to_raw_args(&self) -> Result<Vec<String>>;
 
     /// Parse the raw string output from the GitHub CLI into [`Self::Output`].
     fn parse_raw_output(output: &str) -> Result<Self::Output>;
@@ -134,6 +134,7 @@ pub trait Command {
         let raw_args = self
             .to_raw_args()
             .context("invalid arguments for GitHub command")?;
+        let raw_args: Vec<&str> = raw_args.iter().map(String::as_str).collect();
         let raw_output = gh
             .execute(&raw_args)
             .context("failed to execute GitHub command")?;
@@ -152,12 +153,12 @@ pub struct LabelCreate<'a> {
 impl<'a> Command for LabelCreate<'a> {
     type Output = ();
 
-    fn to_raw_args(&self) -> Result<Vec<&str>> {
-        let mut args = vec!["label", "create", self.name];
+    fn to_raw_args(&self) -> Result<Vec<String>> {
+        let mut args = Vec::from(["label", "create", self.name].map(String::from));
         if self.force {
-            args.push("--force");
+            args.push("--force".into());
         }
-        args.extend(["--color", self.color, "--description", self.description]);
+        args.extend(["--color", self.color, "--description", self.description].map(String::from));
         Ok(args)
     }
 
@@ -174,8 +175,10 @@ pub struct LabelDelete<'a> {
 impl<'a> Command for LabelDelete<'a> {
     type Output = ();
 
-    fn to_raw_args(&self) -> Result<Vec<&str>> {
-        Ok(vec!["label", "delete", self.name, "--yes"])
+    fn to_raw_args(&self) -> Result<Vec<String>> {
+        Ok(Vec::from(
+            ["label", "delete", self.name, "--yes"].map(String::from),
+        ))
     }
 
     fn parse_raw_output(_output: &str) -> Result<Self::Output> {
