@@ -11,7 +11,7 @@ use crate::{
     git,
     github::{self, Command as _},
     plan::plan,
-    prerelease, release,
+    prerelease,
     repo::Repo,
 };
 
@@ -75,7 +75,7 @@ pub fn status(repo: &Repo, remote: &str, gh: &dyn github::Client) -> Result<Vec<
         } else if !local && !on_remote {
             ("none".to_string(), 0)
         } else {
-            match release::view(gh, &tag) {
+            match (github::ReleaseQuery { tag: &tag }).execute(gh) {
                 Ok(Some(r)) => (
                     if r.draft { "draft" } else { "published" }.to_string(),
                     r.assets.len(),
