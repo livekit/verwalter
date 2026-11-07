@@ -208,8 +208,14 @@ impl<'a> Command for PrCreate<'a> {
         ))
     }
 
+    /// Extract the PR number from the URL of the newly created PR.
     fn parse_raw_output(output: &str) -> Result<Self::Output> {
-        number_from_url(output)
+        output
+            .trim()
+            .rsplit('/')
+            .next()
+            .and_then(|n| n.parse().ok())
+            .with_context(|| "PR number expected in output: '{output}'")
     }
 }
 
@@ -385,14 +391,6 @@ pub fn upsert_pr(
     })
 }
 
-fn number_from_url(url: &str) -> Result<u64> {
-    url.trim()
-        .rsplit('/')
-        .next()
-        .and_then(|n| n.parse().ok())
-        .with_context(|| format!("unexpected `gh pr create` output: {url}"))
-}
-
 /// Append `key=value` lines to `$GITHUB_OUTPUT` when running in Actions.
 pub fn append_output(lines: &str) -> Result<()> {
     if let Ok(path) = std::env::var("GITHUB_OUTPUT") {
@@ -538,9 +536,9 @@ mod tests {
     #[test]
     fn number_from_create_output() {
         assert_eq!(
-            number_from_url("https://github.com/livekit/rust-sdks/pull/1312\n").unwrap(),
+            PrCreate::parse_raw_output("https://github.com/livekit/rust-sdks/pull/1312\n").unwrap(),
             1312
         );
-        assert!(number_from_url("nope").is_err());
+        assert!(PrCreate::parse_raw_output("nope").is_err());
     }
 }
