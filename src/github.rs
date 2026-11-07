@@ -606,6 +606,72 @@ impl Command for PrCommentDelete {
     }
 }
 
+/// A pull request reduced to what links it and its author, as
+/// [`PrFindByCommit`] returns it.
+#[derive(Debug, Deserialize)]
+pub struct PrSummary {
+    pub number: u64,
+    pub url: String,
+    /// `None` when the author has no GitHub account.
+    pub author: Option<String>,
+}
+
+/// Find the first pull request a commit belongs to.
+pub struct PrFindByCommit<'a> {
+    pub sha: &'a str,
+}
+
+impl<'a> Command for PrFindByCommit<'a> {
+    type Output = Option<PrSummary>;
+
+    fn to_raw_args(&self) -> Result<Vec<String>> {
+        Ok(vec![
+            "api".into(),
+            format!("repos/{{owner}}/{{repo}}/commits/{}/pulls", self.sha),
+            "--jq".into(),
+            ".[0] | select(. != null) | {number, url: .html_url, author: .user.login}".into(),
+        ])
+    }
+
+    fn parse_raw_output(output: &str) -> Result<Self::Output> {
+        Ok(if output.is_empty() {
+            None
+        } else {
+            Some(serde_json::from_str(output)?)
+        })
+    }
+}
+
+/// A commit, as [`CommitView`] returns it.
+#[derive(Debug, Deserialize)]
+pub struct Commit {
+    pub url: String,
+    /// `None` when the commit email is not on a GitHub account.
+    pub author: Option<String>,
+}
+
+/// View one commit.
+pub struct CommitView<'a> {
+    pub sha: &'a str,
+}
+
+impl<'a> Command for CommitView<'a> {
+    type Output = Commit;
+
+    fn to_raw_args(&self) -> Result<Vec<String>> {
+        Ok(vec![
+            "api".into(),
+            format!("repos/{{owner}}/{{repo}}/commits/{}", self.sha),
+            "--jq".into(),
+            "{url: .html_url, author: .author.login}".into(),
+        ])
+    }
+
+    fn parse_raw_output(output: &str) -> Result<Self::Output> {
+        Ok(serde_json::from_str(output)?)
+    }
+}
+
 pub const MARKER: &str = "<!-- verwalter release -->";
 
 /// Push every branch and make GitHub match the plan.
@@ -623,53 +689,21 @@ pub fn attribute(repo: &mut Repo, gh: &dyn Client) {
         ) else {
             continue;
         };
-        // gh output is trimmed, so a missing login (commit email not on
-        // GitHub) is "-" rather than an empty last field.
-        let user = |login: &str| {
-            if login == "-" {
-                String::new()
-            } else {
-                format!(" ([@{login}](https://github.com/{login}))")
-            }
+        let user = |login: Option<String>| {
+            login
+                .map(|l| format!(" ([@{l}](https://github.com/{l}))"))
+                .unwrap_or_default()
         };
-        let pulls = gh.execute(&[
-            "api",
-            &format!("repos/{{owner}}/{{repo}}/commits/{sha}/pulls"),
-            "--jq",
-            r#".[0] | select(. != null) | "\(.number)\t\(.html_url)\t\(.user.login // "-")""#,
-        ]);
-        let commit = || {
-            gh.execute(&[
-                "api",
-                &format!("repos/{{owner}}/{{repo}}/commits/{sha}"),
-                "--jq",
-                r#""\(.html_url)\t\(.author.login // "-")""#,
-            ])
-        };
-        c.attribution = match pulls
-            .ok()
-            .filter(|s| !s.is_empty())
-            .map(|s| s.splitn(3, '\t').map(String::from).collect::<Vec<_>>())
-        {
-            Some(parts) if parts.len() == 3 => Some(format!(
-                "- [#{}]({}){}",
-                parts[0],
-                parts[1],
-                user(&parts[2])
-            )),
-            _ => match commit()
-                .ok()
-                .filter(|s| !s.is_empty())
-                .map(|s| s.splitn(2, '\t').map(String::from).collect::<Vec<_>>())
-            {
-                Some(parts) if parts.len() == 2 => Some(format!(
+        c.attribution = match (PrFindByCommit { sha: &sha }).execute(gh) {
+            Ok(Some(pr)) => Some(format!("- [#{}]({}){}", pr.number, pr.url, user(pr.author))),
+            _ => CommitView { sha: &sha }.execute(gh).ok().map(|commit| {
+                format!(
                     "- [`{}`]({}){}",
                     &sha[..7.min(sha.len())],
-                    parts[0],
-                    user(&parts[1])
-                )),
-                _ => None,
-            },
+                    commit.url,
+                    user(commit.author)
+                )
+            }),
         };
     }
 }

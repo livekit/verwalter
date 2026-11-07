@@ -1588,9 +1588,9 @@ fn changesets_are_attributed_to_their_pr_or_commit() {
         let path = args.get(1).copied().unwrap_or("");
         Ok(
             if path == format!("repos/{{owner}}/{{repo}}/commits/{pr_sha}/pulls") {
-                "12\thttps://github.com/o/r/pull/12\tlukas".into()
+                r#"{"number":12,"url":"https://github.com/o/r/pull/12","author":"lukas"}"#.into()
             } else if path == format!("repos/{{owner}}/{{repo}}/commits/{push_sha}") {
-                format!("https://github.com/o/r/commit/{push_sha}\t-")
+                format!(r#"{{"url":"https://github.com/o/r/commit/{push_sha}","author":null}}"#)
             } else {
                 String::new()
             },
