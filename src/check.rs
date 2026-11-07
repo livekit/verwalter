@@ -9,7 +9,12 @@ use std::process::Command;
 use anyhow::{Context, Result, anyhow, ensure};
 
 use crate::{
-    Version, changeset::Changeset, config::Config, github, repo::CHANGESET_DIR, version::BumpLevel,
+    Version,
+    changeset::Changeset,
+    config::Config,
+    github::{self, Command as _},
+    repo::CHANGESET_DIR,
+    version::BumpLevel,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -462,44 +467,8 @@ fn urlencode(s: &str) -> String {
 /// returns the check. Changeset contents are read
 /// from the checkout, which CI has at the PR head.
 pub fn run(root: &Path, config: &Config, pr: u64, gh: &dyn github::Client) -> Result<Check> {
-    #[derive(serde::Deserialize)]
-    struct Pr {
-        title: String,
-        #[serde(rename = "headRefName")]
-        head: String,
-        #[serde(rename = "headRepositoryOwner")]
-        head_owner: Owner,
-        #[serde(rename = "headRepository")]
-        head_repo: Repo,
-        labels: Vec<Label>,
-        files: Vec<File>,
-    }
-    #[derive(serde::Deserialize)]
-    struct Owner {
-        login: String,
-    }
-    #[derive(serde::Deserialize)]
-    struct Repo {
-        name: String,
-    }
-    #[derive(serde::Deserialize)]
-    struct Label {
-        name: String,
-    }
-    #[derive(serde::Deserialize)]
-    struct File {
-        path: String,
-    }
     let n = pr.to_string();
-    let pr: Pr = serde_json::from_str(&gh.execute(&[
-        "pr",
-        "view",
-        &n,
-        "--json",
-        "title,headRefName,headRepositoryOwner,headRepository,labels,files",
-    ])?)?;
-    let labels: Vec<String> = pr.labels.into_iter().map(|l| l.name).collect();
-    let changed: Vec<String> = pr.files.into_iter().map(|f| f.path).collect();
+    let pr = github::PrView { number: pr }.execute(gh)?;
 
     let existing = gh
         .execute(&[
@@ -513,7 +482,7 @@ pub fn run(root: &Path, config: &Config, pr: u64, gh: &dyn github::Client) -> Re
 
     // A changeset the tool cannot use is the contributor's finding too:
     // it goes into the comment, not only into the workflow log.
-    let changesets = match read_changesets(root, config, &changed) {
+    let changesets = match read_changesets(root, config, &pr.files) {
         Ok(c) => c,
         Err(e) => {
             let body = format!("{MARKER}\n### Changeset invalid\n\n{e:#}\n");
@@ -522,7 +491,7 @@ pub fn run(root: &Path, config: &Config, pr: u64, gh: &dyn github::Client) -> Re
             return Err(e);
         }
     };
-    let mut check = evaluate(config, &pr.head, &labels, &changed, &changesets);
+    let mut check = evaluate(config, &pr.head, &pr.labels, &pr.files, &changesets);
     plan_also(root, config, &mut check, &changesets)?;
     api_check(root, config, &mut check, &changesets)?;
 
@@ -533,7 +502,7 @@ pub fn run(root: &Path, config: &Config, pr: u64, gh: &dyn github::Client) -> Re
         // The PR branch lives in the head repository: on a fork PR that is
         // the fork, where the contributor can push and the base repo's
         // new-file page would 404.
-        let slug = format!("{}/{}", pr.head_owner.login, pr.head_repo.name);
+        let slug = format!("{}/{}", pr.head_owner, pr.head_repo);
         let body = comment(&check, config, &slug, &pr.head, &pr.title);
         report(&body);
         let missing = check.missing();
@@ -714,7 +683,7 @@ versioning.changelog = "CHANGELOG.md"
         impl github::Client for MockClient {
             fn execute(&self, args: &[&str]) -> Result<String> {
                 match args {
-                    ["pr", "view", ..] => Ok(r#"{"title":"t","headRefName":"feat","headRepositoryOwner":{"login":"o"},"headRepository":{"name":"r"},"labels":[],"files":[{"path":"livekit-protocol/x.proto"}]}"#.into()),
+                    ["pr", "view", ..] => Ok(r#"{"title":"t","head":"feat","head_owner":"o","head_repo":"r","labels":[],"files":["livekit-protocol/x.proto"]}"#.into()),
                     ["api", path, ..] if path.ends_with("/comments") => Ok(String::new()),
                     _ => {
                         self.writes.set(self.writes.get() + 1);
