@@ -264,30 +264,27 @@ fn release_one(
             None => {
                 let notes = changelog_section(&changelog, &version.to_string());
                 let title = format!("{name} {version}");
-                let mut args = vec![
-                    "release",
-                    "create",
-                    &tag,
-                    "--title",
-                    &title,
-                    "--notes",
-                    &notes,
-                    "--verify-tag",
-                ];
-                args.extend(options.assets.iter().map(String::as_str));
                 let draft = repo.config.draft(name) && !options.publish;
-                if draft {
-                    args.push("--draft");
+                let prerelease = version.is_prerelease();
+                // A maintenance release must not take "Latest" from a newer line.
+                let latest = (!prerelease
+                    && crate::version::is_maintenance(
+                        version,
+                        &crate::prerelease::released_versions(repo, name)?,
+                    ))
+                .then_some(false);
+                let created = github::ReleaseCreate {
+                    tag: &tag,
+                    title: &title,
+                    notes: &notes,
+                    verify_tag: true,
+                    assets: &options.assets,
+                    draft,
+                    prerelease,
+                    latest,
                 }
-                if version.is_prerelease() {
-                    args.push("--prerelease");
-                } else if crate::version::is_maintenance(
-                    version,
-                    &crate::prerelease::released_versions(repo, name)?,
-                ) {
-                    args.push("--latest=false");
-                }
-                match gh.execute(&args) {
+                .execute(gh);
+                match created {
                     Ok(_) => {
                         fresh = true;
                         status = if draft { "drafted" } else { "published" };
