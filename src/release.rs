@@ -46,44 +46,6 @@ pub struct Options {
     pub dry_run: bool,
 }
 
-/// The GitHub release behind a tag, as the `view` query returns it.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
-pub struct ReleaseState {
-    #[serde(rename = "isDraft")]
-    pub draft: bool,
-    #[serde(default)]
-    pub assets: Vec<Asset>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
-pub struct Asset {
-    pub name: String,
-}
-
-pub fn view(gh: &dyn github::Client, tag: &str) -> Result<Option<ReleaseState>> {
-    let json = gh.execute(&[
-        "api",
-        "graphql",
-        // -f, not -F: -F reads a value that starts with `@` as a file,
-        // and npm tags such as `@scope/pkg@1.0.0` start with `@`.
-        "-f",
-        &format!("tag={tag}"),
-        "-F",
-        "owner={owner}",
-        "-F",
-        "repo={repo}",
-        "-f",
-        "query=query($owner:String!,$repo:String!,$tag:String!){repository(owner:$owner,name:$repo){release(tagName:$tag){isDraft releaseAssets(first:100){nodes{name}}}}}",
-        "--jq",
-        ".data.repository.release | if . then {isDraft, assets: .releaseAssets.nodes} else empty end",
-    ])?;
-    Ok(if json.is_empty() {
-        None
-    } else {
-        Some(serde_json::from_str(&json)?)
-    })
-}
-
 /// Finish every release that is not complete and report it. A package
 /// whose tag exists and whose GitHub release is published (or not wanted)
 /// is complete and not reported, unless assets were uploaded to it. A
@@ -238,7 +200,8 @@ fn release_one(
     // Spec: CreateGitHubRelease / ResumeTaggedReleasesWithoutGitHubRelease,
     // then WorkflowPublishesRelease for drafts.
     if package.release.mode == ReleaseMode::TagAndRelease {
-        match view(gh, &tag)? {
+        let existing = github::ReleaseQuery { tag: &tag }.execute(gh)?;
+        match existing {
             Some(existing) => {
                 let mut draft = existing.draft;
                 // Assets go to an existing release only when it is still a
@@ -291,7 +254,7 @@ fn release_one(
                     }
                     // Two release runs at once (two PRs merged together):
                     // the other one won the create, which is as good as done.
-                    Err(e) => match view(gh, &tag) {
+                    Err(e) => match (github::ReleaseQuery { tag: &tag }).execute(gh) {
                         Ok(Some(existing)) => {
                             status = if existing.draft {
                                 "drafted"
@@ -351,7 +314,8 @@ pub fn abandon(
 ) -> Result<Vec<String>> {
     let root = repo.root.as_path();
     let mut removed = Vec::new();
-    if view(gh, tag)?.is_some() {
+    let existing = github::ReleaseQuery { tag }.execute(gh)?;
+    if existing.is_some() {
         github::ReleaseDelete { tag }.execute(gh)?;
         removed.push(format!("release {tag}"));
     }
@@ -444,24 +408,5 @@ mod tests {
         assert_eq!(changelog_section(LOG, "9.9.9"), "");
         assert_eq!(previous_version(LOG, "0.4.0").as_deref(), Some("0.3.1"));
         assert_eq!(previous_version(LOG, "0.3.1"), None);
-    }
-
-    #[test]
-    fn view_passes_a_scoped_tag_as_a_raw_string() {
-        struct MockClient(std::cell::RefCell<Vec<String>>);
-        impl github::Client for MockClient {
-            fn execute(&self, a: &[&str]) -> Result<String> {
-                *self.0.borrow_mut() = a.iter().map(|s| s.to_string()).collect();
-                Ok(String::new())
-            }
-        }
-        let gh = MockClient(Default::default());
-        assert_eq!(view(&gh, "@scope/pkg@1.0.0").unwrap(), None);
-        let args = gh.0.into_inner();
-        let i = args
-            .iter()
-            .position(|a| a == "tag=@scope/pkg@1.0.0")
-            .unwrap();
-        assert_eq!(args[i - 1], "-f");
     }
 }
