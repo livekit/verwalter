@@ -390,6 +390,53 @@ impl<'a> Command for ReleaseEdit<'a> {
     }
 }
 
+/// Create a release for an existing tag.
+pub struct ReleaseCreate<'a> {
+    pub tag: &'a str,
+    pub title: &'a str,
+    pub notes: &'a str,
+    /// Abort unless the tag is already on the remote; without it gh
+    /// creates the tag from the default branch.
+    pub verify_tag: bool,
+    /// Files to attach.
+    pub assets: &'a [String],
+    pub draft: bool,
+    pub prerelease: bool,
+    /// `None` lets GitHub decide from date and version.
+    pub latest: Option<bool>,
+}
+
+impl<'a> Command for ReleaseCreate<'a> {
+    type Output = ();
+
+    fn to_raw_args(&self) -> Result<Vec<String>> {
+        let mut args = Vec::from(
+            [
+                "release", "create", self.tag, "--title", self.title, "--notes", self.notes,
+            ]
+            .map(String::from),
+        );
+        if self.verify_tag {
+            args.push("--verify-tag".into());
+        }
+        args.extend(self.assets.iter().cloned());
+        if self.draft {
+            args.push("--draft".into());
+        }
+        if self.prerelease {
+            args.push("--prerelease".into());
+        }
+        if let Some(latest) = self.latest {
+            args.push(format!("--latest={latest}"));
+        }
+        Ok(args)
+    }
+
+    fn parse_raw_output(_output: &str) -> Result<Self::Output> {
+        Ok(())
+    }
+}
+
 pub const MARKER: &str = "<!-- verwalter release -->";
 
 /// Push every branch and make GitHub match the plan.
