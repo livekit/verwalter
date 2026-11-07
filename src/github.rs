@@ -186,6 +186,33 @@ impl<'a> Command for LabelDelete<'a> {
     }
 }
 
+/// Open a pull request. Outputs its number.
+pub struct PrCreate<'a> {
+    pub head: &'a str,
+    pub base: &'a str,
+    pub title: &'a str,
+    pub body: &'a str,
+    pub label: &'a str,
+}
+
+impl<'a> Command for PrCreate<'a> {
+    type Output = u64;
+
+    fn to_raw_args(&self) -> Result<Vec<String>> {
+        Ok(Vec::from(
+            [
+                "pr", "create", "--head", self.head, "--base", self.base, "--title", self.title,
+                "--body", self.body, "--label", self.label,
+            ]
+            .map(String::from),
+        ))
+    }
+
+    fn parse_raw_output(output: &str) -> Result<Self::Output> {
+        number_from_url(output)
+    }
+}
+
 pub const MARKER: &str = "<!-- verwalter release -->";
 
 /// Push every branch and make GitHub match the plan.
@@ -342,10 +369,14 @@ pub fn upsert_pr(
             }
             existing.number
         }
-        None => number_from_url(&gh.execute(&[
-            "pr", "create", "--head", head, "--base", base, "--title", title, "--body", body,
-            "--label", label,
-        ])?)?,
+        None => PrCreate {
+            head,
+            base,
+            title,
+            body,
+            label,
+        }
+        .execute(gh)?,
     };
     Ok(PullRequest {
         number,
