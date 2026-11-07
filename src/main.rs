@@ -333,9 +333,8 @@ fn run(cli: Cli) -> Result<()> {
                 dry_run,
                 only: only(releases),
             };
-            let mut gh = gh(&repo.root, &remote, dry_run);
             let outcomes =
-                verwalter::publish::run(&repo, &options, &verwalter::registry::curl, &mut gh)?;
+                verwalter::publish::run(&repo, &options, &verwalter::registry::curl, gh)?;
             println!("{}", verwalter::publish::write_outputs(&outcomes)?);
             if verwalter::publish::failed(&outcomes) {
                 bail!("not every package was published");
