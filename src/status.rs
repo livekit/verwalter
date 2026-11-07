@@ -75,7 +75,7 @@ pub fn status(repo: &Repo, remote: &str, gh: &dyn github::Client) -> Result<Vec<
         } else if !local && !on_remote {
             ("none".to_string(), 0)
         } else {
-            match (github::ReleaseQuery { tag: &tag }).execute(gh) {
+            match (github::ReleaseView { tag: &tag }).execute(gh) {
                 Ok(Some(r)) => (
                     if r.draft { "draft" } else { "published" }.to_string(),
                     r.asset_count,

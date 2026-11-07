@@ -437,9 +437,9 @@ impl<'a> Command for ReleaseCreate<'a> {
     }
 }
 
-/// The GitHub release behind a tag, as [`ReleaseQuery`] returns it.
+/// The GitHub release behind a tag, as [`ReleaseView`] returns it.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-pub struct ReleaseState {
+pub struct Release {
     #[serde(rename = "isDraft")]
     pub draft: bool,
     pub asset_count: usize,
@@ -447,12 +447,12 @@ pub struct ReleaseState {
 
 /// Look up the release behind a tag, drafts included, through `gh api
 /// graphql`. Outputs `None` when the tag has no release.
-pub struct ReleaseQuery<'a> {
+pub struct ReleaseView<'a> {
     pub tag: &'a str,
 }
 
-impl<'a> Command for ReleaseQuery<'a> {
-    type Output = Option<ReleaseState>;
+impl<'a> Command for ReleaseView<'a> {
+    type Output = Option<Release>;
 
     fn to_raw_args(&self) -> Result<Vec<String>> {
         Ok(vec![
@@ -794,8 +794,8 @@ mod tests {
     }
 
     #[test]
-    fn release_query_passes_a_scoped_tag_as_a_raw_string() {
-        let args = ReleaseQuery {
+    fn release_view_passes_a_scoped_tag_as_a_raw_string() {
+        let args = ReleaseView {
             tag: "@scope/pkg@1.0.0",
         }
         .to_raw_args()
@@ -805,7 +805,7 @@ mod tests {
             .position(|a| a == "tag=@scope/pkg@1.0.0")
             .unwrap();
         assert_eq!(args[i - 1], "-f");
-        assert_eq!(ReleaseQuery::parse_raw_output("").unwrap(), None);
+        assert_eq!(ReleaseView::parse_raw_output("").unwrap(), None);
     }
 
     #[test]

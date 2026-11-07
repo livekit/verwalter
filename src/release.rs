@@ -200,7 +200,7 @@ fn release_one(
     // Spec: CreateGitHubRelease / ResumeTaggedReleasesWithoutGitHubRelease,
     // then WorkflowPublishesRelease for drafts.
     if package.release.mode == ReleaseMode::TagAndRelease {
-        let existing = github::ReleaseQuery { tag: &tag }.execute(gh)?;
+        let existing = github::ReleaseView { tag: &tag }.execute(gh)?;
         match existing {
             Some(existing) => {
                 let mut draft = existing.draft;
@@ -254,7 +254,7 @@ fn release_one(
                     }
                     // Two release runs at once (two PRs merged together):
                     // the other one won the create, which is as good as done.
-                    Err(e) => match (github::ReleaseQuery { tag: &tag }).execute(gh) {
+                    Err(e) => match (github::ReleaseView { tag: &tag }).execute(gh) {
                         Ok(Some(existing)) => {
                             status = if existing.draft {
                                 "drafted"
@@ -314,7 +314,7 @@ pub fn abandon(
 ) -> Result<Vec<String>> {
     let root = repo.root.as_path();
     let mut removed = Vec::new();
-    let existing = github::ReleaseQuery { tag }.execute(gh)?;
+    let existing = github::ReleaseView { tag }.execute(gh)?;
     if existing.is_some() {
         github::ReleaseDelete { tag }.execute(gh)?;
         removed.push(format!("release {tag}"));
