@@ -62,7 +62,11 @@ impl Client for SystemClient {
     }
 }
 
-/// Wrapper around another [`Client`] which rejects write operations.
+/// Wrapper around another [`Client`] which filters out write operations.
+///
+/// If the arguments to execute represent a write operation, the command
+/// will be printed to stdout rather than executed.
+///
 pub struct DryRunClient<C>(C);
 
 impl<C: Client> DryRunClient<C> {
