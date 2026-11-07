@@ -507,6 +507,105 @@ impl<'a> Command for ReleaseUpload<'a> {
     }
 }
 
+/// Find the first comment on a pull request whose body contains a string.
+/// Outputs its id.
+pub struct PrCommentFind<'a> {
+    pub number: u64,
+    pub containing: &'a str,
+}
+
+impl<'a> Command for PrCommentFind<'a> {
+    type Output = Option<u64>;
+
+    fn to_raw_args(&self) -> Result<Vec<String>> {
+        // A JSON string is a valid jq string literal, quotes and all.
+        let needle = serde_json::to_string(self.containing)?;
+        Ok(vec![
+            "api".into(),
+            format!("repos/{{owner}}/{{repo}}/issues/{}/comments", self.number),
+            // Every page: the comment may be past the first 30.
+            "--paginate".into(),
+            "--jq".into(),
+            format!(".[] | select(.body | contains({needle})) | .id"),
+        ])
+    }
+
+    fn parse_raw_output(output: &str) -> Result<Self::Output> {
+        Ok(output.lines().next().map(str::parse).transpose()?)
+    }
+}
+
+/// Add a comment to a pull request.
+pub struct PrCommentCreate<'a> {
+    pub number: u64,
+    pub body: &'a str,
+}
+
+impl<'a> Command for PrCommentCreate<'a> {
+    type Output = ();
+
+    fn to_raw_args(&self) -> Result<Vec<String>> {
+        Ok(vec![
+            "pr".into(),
+            "comment".into(),
+            self.number.to_string(),
+            "--body".into(),
+            self.body.into(),
+        ])
+    }
+
+    fn parse_raw_output(_output: &str) -> Result<Self::Output> {
+        Ok(())
+    }
+}
+
+/// Replace the body of a pull request comment.
+pub struct PrCommentEdit<'a> {
+    pub id: u64,
+    pub body: &'a str,
+}
+
+impl<'a> Command for PrCommentEdit<'a> {
+    type Output = ();
+
+    fn to_raw_args(&self) -> Result<Vec<String>> {
+        Ok(vec![
+            "api".into(),
+            "-X".into(),
+            "PATCH".into(),
+            format!("repos/{{owner}}/{{repo}}/issues/comments/{}", self.id),
+            "-f".into(),
+            format!("body={}", self.body),
+        ])
+    }
+
+    fn parse_raw_output(_output: &str) -> Result<Self::Output> {
+        Ok(())
+    }
+}
+
+/// Delete a pull request comment.
+pub struct PrCommentDelete {
+    pub id: u64,
+}
+
+impl Command for PrCommentDelete {
+    type Output = ();
+
+    fn to_raw_args(&self) -> Result<Vec<String>> {
+        Ok(vec![
+            "api".into(),
+            "-X".into(),
+            "DELETE".into(),
+            format!("repos/{{owner}}/{{repo}}/issues/comments/{}", self.id),
+        ])
+    }
+
+    fn parse_raw_output(_output: &str) -> Result<Self::Output> {
+        Ok(())
+    }
+}
+
 pub const MARKER: &str = "<!-- verwalter release -->";
 
 /// Push every branch and make GitHub match the plan.

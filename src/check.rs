@@ -467,18 +467,14 @@ fn urlencode(s: &str) -> String {
 /// returns the check. Changeset contents are read
 /// from the checkout, which CI has at the PR head.
 pub fn run(root: &Path, config: &Config, pr: u64, gh: &dyn github::Client) -> Result<Check> {
-    let n = pr.to_string();
-    let pr = github::PrView { number: pr }.execute(gh)?;
+    let number = pr;
+    let pr = github::PrView { number }.execute(gh)?;
 
-    let existing = gh
-        .execute(&[
-            "api",
-            &format!("repos/{{owner}}/{{repo}}/issues/{n}/comments"),
-            "--paginate",
-            "--jq",
-            &format!(".[] | select(.body | contains(\"{MARKER}\")) | .id"),
-        ])
-        .map(|out| out.lines().next().map(str::to_string));
+    let existing = github::PrCommentFind {
+        number,
+        containing: MARKER,
+    }
+    .execute(gh);
 
     // A changeset the tool cannot use is the contributor's finding too:
     // it goes into the comment, not only into the workflow log.
@@ -487,7 +483,7 @@ pub fn run(root: &Path, config: &Config, pr: u64, gh: &dyn github::Client) -> Re
         Err(e) => {
             let body = format!("{MARKER}\n### Changeset invalid\n\n{e:#}\n");
             report(&body);
-            sync_comment(gh, &n, &existing, Some(&body));
+            sync_comment(gh, number, &existing, Some(&body));
             return Err(e);
         }
     };
@@ -510,9 +506,9 @@ pub fn run(root: &Path, config: &Config, pr: u64, gh: &dyn github::Client) -> Re
             let link = changeset_link(&missing, &slug, &pr.head, &pr.title);
             println!("Create the missing changeset: {link}");
         }
-        sync_comment(gh, &n, &existing, Some(&body));
+        sync_comment(gh, number, &existing, Some(&body));
     } else {
-        sync_comment(gh, &n, &existing, None);
+        sync_comment(gh, number, &existing, None);
     }
     Ok(check)
 }
@@ -558,27 +554,15 @@ fn read_changesets(root: &Path, config: &Config, changed: &[String]) -> Result<V
 /// on its result, not on the comment.
 fn sync_comment(
     gh: &dyn github::Client,
-    pr: &str,
-    existing: &Result<Option<String>>,
+    pr: u64,
+    existing: &Result<Option<u64>>,
     body: Option<&str>,
 ) {
     let written = match (existing, body) {
         (Err(e), _) => Err(anyhow!("{e:#}")),
-        (Ok(Some(id)), Some(body)) => gh.execute(&[
-            "api",
-            "-X",
-            "PATCH",
-            &format!("repos/{{owner}}/{{repo}}/issues/comments/{id}"),
-            "-f",
-            &format!("body={body}"),
-        ]),
-        (Ok(None), Some(body)) => gh.execute(&["pr", "comment", pr, "--body", body]),
-        (Ok(Some(id)), None) => gh.execute(&[
-            "api",
-            "-X",
-            "DELETE",
-            &format!("repos/{{owner}}/{{repo}}/issues/comments/{id}"),
-        ]),
+        (Ok(Some(id)), Some(body)) => github::PrCommentEdit { id: *id, body }.execute(gh),
+        (Ok(None), Some(body)) => github::PrCommentCreate { number: pr, body }.execute(gh),
+        (Ok(Some(id)), None) => github::PrCommentDelete { id: *id }.execute(gh),
         (Ok(None), None) => return,
     };
     if let Err(e) = written {
