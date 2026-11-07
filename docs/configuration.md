@@ -53,7 +53,7 @@ branch_prefix = "release/"       # default
 label = "release"                # default
 tag = "{package}/v{version}"     # default: v{version} with one package, {package}-v{version} otherwise, <path>/v{version} for a go.mod
 mode = "tag_and_release"         # default. none | tag | tag_and_release
-draft = false                    # default
+draft = true                     # default: a package `publish` handles is a draft until the registry has it; a package with nothing to publish is released on creation
 
 [publish]                        # for `verwalter publish`
 jobs = 4                         # default: independent packages published at once
@@ -72,7 +72,7 @@ versioning.files = ["Cargo.toml", "../livekit-ffi-node/package.json"]   # the fi
 versioning.changelog = false
 release.tag = "ffi/v{version}"
 release.mode = "tag"
-release.draft = true
+release.draft = false            # public on creation, before the publish
 publish.registry = "npm"         # "none" with no command: released on GitHub only
 publish.command = "pnpm publish --no-git-checks"   # else the built-in one for the registry
 publish.exists_url = "https://r/{name}/{version}"

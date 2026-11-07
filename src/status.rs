@@ -128,7 +128,7 @@ pub fn status(repo: &Repo, remote: &str, gh: &dyn github::Client) -> Result<Vec<
             )
         } else if release_state == "draft" {
             format!(
-                "draft release waits for assets: verwalter release --package {} --asset <file>... --publish",
+                "draft release waits for the publish: verwalter publish, or with assets built later: verwalter release --package {} --asset <file>... --publish",
                 p.name
             )
         } else if let Some(n) = release_pr {

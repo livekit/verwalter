@@ -693,7 +693,7 @@ mod tests {
         let c = load("[\"skip\", \"packages/docs\"]").unwrap();
         assert_eq!(c.packages.keys().collect::<Vec<_>>(), ["rtc", "sdk", "x"]);
         assert_eq!(c.packages["rtc"].path, "packages/rtc");
-        assert!(c.packages["rtc"].release.draft);
+        assert_eq!(c.packages["rtc"].release.draft, Some(true));
         assert_eq!(
             c.packages["sdk"].versioning.files[0].path(),
             "packages/sdk/package.json"

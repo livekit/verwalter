@@ -113,7 +113,11 @@ pub struct PackageRelease {
     /// module tag "<path>/v{version}" when the first file is a go.mod.
     pub tag: Option<String>,
     pub mode: ReleaseMode,
-    pub draft: bool,
+    /// The GitHub release is created as a draft, and `publish` flips it
+    /// once the registry has the version. Unset: a draft when the tool
+    /// publishes the package (`Config::draft`), else published on
+    /// creation.
+    pub draft: Option<bool>,
 }
 
 /// The package keys of `[publish]`. Unlike the other tables, these hold
@@ -276,7 +280,8 @@ pub struct Release {
     /// Default for `release.mode` of every package: none | tag |
     /// tag_and_release. Default: tag_and_release.
     pub mode: Option<ReleaseMode>,
-    /// Default for `release.draft` of every package. Default: false.
+    /// Default for `release.draft` of every package. Unset: a package
+    /// the tool publishes is a draft until `publish` confirms it.
     pub draft: Option<bool>,
 }
 
@@ -623,6 +628,32 @@ impl Config {
             .or(self.publish.exists_url.as_deref())
     }
 
+    /// Spec: Package.release_as_draft. The package's own `release.draft`,
+    /// else `[release].draft`, else whether `publish` handles the package:
+    /// a draft stays hidden until the registry has the version, and a
+    /// package with nothing to publish has nothing to wait for.
+    pub fn draft(&self, package: &str) -> bool {
+        self.packages[package]
+            .release
+            .draft
+            .unwrap_or_else(|| self.published_by_tool(package))
+    }
+
+    /// Whether `publish` runs for the package: it has a publish command,
+    /// a workspace command covers it, or the Go proxy fetch is its
+    /// publish. `registry = "none"` on the package with no command is a
+    /// GitHub-release-only package.
+    pub fn published_by_tool(&self, package: &str) -> bool {
+        use crate::registry::Registry;
+        let p = &self.packages[package].publish;
+        if p.registry == Some(Registry::None) && p.command.is_none() {
+            return false;
+        }
+        self.in_workspace_publish(package)
+            || self.registry_of(package) == Registry::Goproxy
+            || self.publish_command(package, false, None).is_some()
+    }
+
     /// Spec: Package.in_workspace_publish. Covered by `[publish].workspace`.
     pub fn in_workspace_publish(&self, package: &str) -> bool {
         let p = &self.packages[package].publish;
@@ -805,10 +836,48 @@ release.mode = "tag"
         let c = Config::parse(MONO).unwrap();
         let protocol = &c.packages["livekit-protocol"];
         assert_eq!(protocol.release.mode, ReleaseMode::TagAndRelease);
-        assert!(!protocol.release.draft);
+        assert_eq!(protocol.release.draft, None);
+        assert!(
+            !c.draft("livekit-protocol"),
+            "nothing to publish: released on creation"
+        );
         let ffi = &c.packages["livekit-ffi"];
-        assert!(ffi.release.draft);
+        assert_eq!(ffi.release.draft, Some(true));
+        assert!(c.draft("livekit-ffi"));
         assert_eq!(ffi.versioning.files.len(), 2);
+    }
+
+    // Spec: Package.release_as_draft. Unset, a package the tool publishes
+    // is a draft until publish confirms it; a package with nothing to
+    // publish is released on creation; an explicit value wins.
+    #[test]
+    fn draft_defaults_to_whether_the_tool_publishes() {
+        let with = |extra: &str| {
+            Config::parse(&format!(
+                "[packages.a]\npath = \"a\"\nversioning.files = [\"Cargo.toml\"]\n[packages.b]\npath = \"b\"\nversioning.files = [\"Cargo.toml\"]\n{extra}"
+            ))
+            .unwrap()
+        };
+        let c = with("");
+        assert!(
+            !c.draft("a") && !c.draft("b"),
+            "no registry: released on creation"
+        );
+        let c = with("[publish]\nregistry = \"crates\"\n");
+        assert!(c.draft("a") && c.draft("b"));
+        let c =
+            with("[publish]\nregistry = \"crates\"\n[packages.b.publish]\nregistry = \"none\"\n");
+        assert!(c.draft("a") && !c.draft("b"), "GitHub-release-only package");
+        let c = with("[publish]\nregistry = \"crates\"\n[packages.b.release]\ndraft = false\n");
+        assert!(c.draft("a") && !c.draft("b"), "explicit false wins");
+        let c = with("[release]\ndraft = false\n[publish]\nregistry = \"crates\"\n");
+        assert!(!c.draft("a") && !c.draft("b"), "the table default wins");
+        let c = with("[packages.b.publish]\ncommand = \"./publish.sh\"\n");
+        assert!(!c.draft("a") && c.draft("b"), "a command of its own");
+        let c = with("[publish]\nregistry = \"goproxy\"\n");
+        assert!(c.draft("a"), "the proxy fetch is the publish");
+        let c = with("[publish]\nregistry = \"npm\"\nworkspace = \"pnpm -r publish\"\n");
+        assert!(c.draft("a"), "covered by the workspace command");
     }
 
     // Spec: config.versioning and config.release hold defaults for every

@@ -150,9 +150,13 @@ entity Package {
     tag_template: String
     -- Default: config.release.mode.
     release_mode: none | tag | tag_and_release
-    -- When true the GitHub release stays a draft until the repo workflow
-    -- has attached its assets and publishes it. Default:
-    -- config.release.draft.
+    -- When true the GitHub release stays a draft until `publish` has the
+    -- version on the registry and flips it (PublishFlipsDrafts), or the
+    -- repo workflow attaches its assets and publishes it. Default:
+    -- config.release.draft, else true when the tool publishes the
+    -- package (publish_command != null, in_workspace_publish, or
+    -- registry = goproxy), else false: a package with nothing to publish
+    -- has nothing to wait for.
     release_as_draft: Boolean
     -- Where the package is published: crates | npm | pypi | pubdev |
     -- goproxy | custom (an exists_url with {name} and {version}) | none. Defaults
@@ -393,7 +397,7 @@ config {
     -- gate them (approvals, registry checks). Gating itself is a workflow
     -- concern, not the tool's. tag, mode and draft are the defaults for
     -- Package.tag_template, release_mode and release_as_draft.
-    release: { branch_prefix: String = "release/", label: String = "release", tag: String?, mode: none | tag | tag_and_release = tag_and_release, draft: Boolean = false }
+    release: { branch_prefix: String = "release/", label: String = "release", tag: String?, mode: none | tag | tag_and_release = tag_and_release, draft: Boolean? }
     -- Defaults for `verwalter publish`: how many independent packages run
     -- at once, the registry and the command every package takes unless
     -- it sets its own.
@@ -892,6 +896,22 @@ rule WorkflowPublishesInDependencyOrder {
 entity PublishOutcome {
     package: Package
     status: published | `exists` | failed | blocked
+}
+
+-- A package is finished when the registry has it and its GitHub release
+-- is public. After the commands, every outcome of published or `exists`
+-- whose release is a draft flips it. A flip that fails is a failed
+-- outcome: the job fails, and a re-run finds the version on the registry
+-- and tries the flip again.
+rule PublishFlipsDrafts {
+    when: WorkflowRunsPublish(workflow, repository, releases?)
+    for o in PublishOutcomes where o.status in {published, `exists`}:
+        for release in Releases where release.package = o.package and release.status = drafted:
+            ensures:
+                if github_release_published(release.github_release):
+                    release.status = published
+                else:
+                    o.status = failed
 }
 
 invariant DependentsNeverPublishBeforeDependencies {

@@ -67,8 +67,8 @@ jobs:
           command: release
           # Every file in dist/ is attached to the GitHub release when it
           # is created. Not a glob: `dist/*` would expand to several
-          # arguments. Leave out for packages with `release.draft = true`,
-          # whose assets are built later.
+          # arguments. Leave out for packages whose assets are built after
+          # the release, in the publish job.
           args: --asset dist ${{ inputs.package && format('--package {0}', inputs.package) || '' }}
 
   # `publish` runs each package's publish command from verwalter.toml
@@ -84,7 +84,7 @@ jobs:
     if: needs.release.outputs.released == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     permissions:
-      contents: write   # drafts: gh release upload and edit
+      contents: write   # drafts: the tool flips them; gh release upload for assets built here
       id-token: write   # trusted publishing
     steps:
       - uses: actions/checkout@v7
@@ -99,10 +99,10 @@ jobs:
       # login, twine, ... With npm trusted publishing, give setup-node no
       # registry-url: it writes a placeholder token that a publish falls
       # back to, and fails with 404.
-      # For packages with `release.draft = true`, the command also uploads the
-      # assets built here and publishes the GitHub release:
+      # A package the tool publishes is a draft release until the registry
+      # has the version; `publish` flips it after the command succeeds.
+      # A command that builds assets here uploads them before that:
       #   gh release upload "$VERWALTER_TAG" dist/* --clobber
-      #   gh release edit "$VERWALTER_TAG" --draft=false
       # cargo, pip and pub keep pre-releases away from default resolution
       # by the version alone. npm does not: publish an rc with a dist-tag
       # (`--tag next` when VERWALTER_PRERELEASE is true).
