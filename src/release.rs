@@ -208,9 +208,12 @@ fn release_one(
                 // draft or the package was named: in a monorepo, `--asset`
                 // must not land on every complete release.
                 if !options.assets.is_empty() && (draft || options.package.is_some()) {
-                    let mut args = vec!["release", "upload", tag.as_str(), "--clobber"];
-                    args.extend(options.assets.iter().map(String::as_str));
-                    gh.execute(&args)?;
+                    github::ReleaseUpload {
+                        tag: &tag,
+                        assets: &options.assets,
+                        clobber: true,
+                    }
+                    .execute(gh)?;
                     fresh = true;
                 }
                 if draft && options.publish {

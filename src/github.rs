@@ -482,6 +482,31 @@ impl<'a> Command for ReleaseView<'a> {
     }
 }
 
+/// Attach files to a release.
+pub struct ReleaseUpload<'a> {
+    pub tag: &'a str,
+    pub assets: &'a [String],
+    /// Replace an existing asset of the same name instead of failing.
+    pub clobber: bool,
+}
+
+impl<'a> Command for ReleaseUpload<'a> {
+    type Output = ();
+
+    fn to_raw_args(&self) -> Result<Vec<String>> {
+        let mut args = Vec::from(["release", "upload", self.tag].map(String::from));
+        if self.clobber {
+            args.push("--clobber".into());
+        }
+        args.extend(self.assets.iter().cloned());
+        Ok(args)
+    }
+
+    fn parse_raw_output(_output: &str) -> Result<Self::Output> {
+        Ok(())
+    }
+}
+
 pub const MARKER: &str = "<!-- verwalter release -->";
 
 /// Push every branch and make GitHub match the plan.
