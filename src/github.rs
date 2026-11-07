@@ -5,41 +5,50 @@
 //! ponytail: GitHub access goes through the `gh` CLI, which CI has and
 //! which carries the token; no HTTP client.
 
-use std::{path::Path, process::Command};
+use std::{
+    path::{Path, PathBuf},
+    process::Command,
+};
 
 use anyhow::{Context, Result, anyhow, ensure};
 use serde::Deserialize;
 
 use crate::{apply::render_entry, branches, git, plan::PlannedRelease, repo::Repo};
 
-/// Runs `gh` with the given arguments and returns stdout. Injected so
-/// tests can fake GitHub.
-pub type Gh<'a> = &'a mut dyn FnMut(&[&str]) -> Result<String>;
-
-/// `owner/repo` of a GitHub remote URL (ssh or https), if it is one.
-pub fn repo_slug(url: &str) -> Option<String> {
-    let rest = url.trim().strip_suffix(".git").unwrap_or(url.trim());
-    let after = rest
-        .split_once("github.com")
-        .map(|(_, a)| a.trim_start_matches([':', '/']))?;
-    let mut parts = after.split('/');
-    Some(format!("{}/{}", parts.next()?, parts.next()?))
+/// GitHub CLI client.
+pub trait Client {
+    /// Execute a raw command using the client.
+    fn execute(&self, args: &[&str]) -> Result<String>;
 }
 
-/// Runs gh pinned to the repository behind `remote` (`GH_REPO`), so a
-/// clone with an `upstream` remote never resolves PR numbers against the
-/// parent repository.
-pub fn gh_cli<'a>(
-    root: &'a Path,
-    remote: &str,
-) -> impl FnMut(&[&str]) -> Result<String> + 'a + use<'a> {
-    let slug = crate::git::run(root, &["remote", "get-url", remote])
-        .ok()
-        .and_then(|u| repo_slug(&u));
-    move |args: &[&str]| {
+/// GitHub CLI client using the system's installation.
+pub struct SystemClient {
+    slug: Option<String>,
+    root: PathBuf,
+}
+
+impl SystemClient {
+    /// A missing remote leaves `GH_REPO` unset, so commands that never
+    /// call gh still work in a checkout without it.
+    pub fn new(root: &Path, remote: &str) -> Self {
+        let slug = crate::git::run(root, &["remote", "get-url", remote])
+            .ok()
+            .and_then(|u| repo_slug(&u));
+        Self {
+            slug,
+            root: root.to_path_buf(),
+        }
+    }
+}
+
+impl Client for SystemClient {
+    fn execute(&self, args: &[&str]) -> Result<String> {
         let mut cmd = Command::new("gh");
-        cmd.current_dir(root).args(args);
-        if let Some(slug) = &slug {
+        cmd.current_dir(&self.root).args(args);
+        // Runs gh pinned to the repository behind `remote` (`GH_REPO`), so a
+        // clone with an `upstream` remote never resolves PR numbers against the
+        // parent repository.
+        if let Some(slug) = &self.slug {
             cmd.env("GH_REPO", slug);
         }
         let out = cmd.output().context("cannot run gh")?;
@@ -53,24 +62,21 @@ pub fn gh_cli<'a>(
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-pub struct PullRequest {
-    pub number: u64,
-    #[serde(rename = "headRefName")]
-    pub head: String,
-    #[serde(rename = "baseRefName")]
-    pub base: String,
+/// Wrapper around another [`Client`] which filters out write operations.
+///
+/// If the arguments to execute represent a write operation, the command
+/// will be printed to stdout rather than executed.
+///
+pub struct DryRunClient<C>(C);
+
+impl<C: Client> DryRunClient<C> {
+    pub fn new(inner: C) -> Self {
+        Self(inner)
+    }
 }
 
-pub const MARKER: &str = "<!-- verwalter release -->";
-
-/// Wraps a gh runner so that every write (`pr create|edit|close|comment`,
-/// `release create|delete|edit`, `label create`, `api -X ...`) is printed
-/// and faked, while reads go through.
-pub fn dry_run_gh(
-    mut inner: impl FnMut(&[&str]) -> Result<String>,
-) -> impl FnMut(&[&str]) -> Result<String> {
-    move |args: &[&str]| {
+impl<C: Client> Client for DryRunClient<C> {
+    fn execute(&self, args: &[&str]) -> Result<String> {
         let is_write = matches!(
             args,
             ["pr", "create" | "edit" | "close" | "comment", ..]
@@ -79,7 +85,7 @@ pub fn dry_run_gh(
                 | ["api", "-X", ..]
         );
         if !is_write {
-            return inner(args);
+            return self.0.execute(args);
         }
         let shown: Vec<&str> = args
             .iter()
@@ -93,12 +99,33 @@ pub fn dry_run_gh(
     }
 }
 
+/// `owner/repo` of a GitHub remote URL (ssh or https), if it is one.
+pub fn repo_slug(url: &str) -> Option<String> {
+    let rest = url.trim().strip_suffix(".git").unwrap_or(url.trim());
+    let after = rest
+        .split_once("github.com")
+        .map(|(_, a)| a.trim_start_matches([':', '/']))?;
+    let mut parts = after.split('/');
+    Some(format!("{}/{}", parts.next()?, parts.next()?))
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct PullRequest {
+    pub number: u64,
+    #[serde(rename = "headRefName")]
+    pub head: String,
+    #[serde(rename = "baseRefName")]
+    pub base: String,
+}
+
+pub const MARKER: &str = "<!-- verwalter release -->";
+
 /// Push every branch and make GitHub match the plan.
 /// Spec: ChangelogUpdated, "PR link and author". For each changeset, the
 /// commit that added it names the PR (via `commits/{sha}/pulls`) and its
 /// author; a commit without a PR links the commit itself. Lookups that
 /// fail leave the line without a suffix rather than block the release.
-pub fn attribute(repo: &mut Repo, gh: Gh) {
+pub fn attribute(repo: &mut Repo, gh: &dyn Client) {
     let root = repo.root.clone();
     for c in &mut repo.changesets {
         let Some(sha) = git::added_in(
@@ -117,14 +144,14 @@ pub fn attribute(repo: &mut Repo, gh: Gh) {
                 format!(" ([@{login}](https://github.com/{login}))")
             }
         };
-        let pulls = gh(&[
+        let pulls = gh.execute(&[
             "api",
             &format!("repos/{{owner}}/{{repo}}/commits/{sha}/pulls"),
             "--jq",
             r#".[0] | select(. != null) | "\(.number)\t\(.html_url)\t\(.user.login // "-")""#,
         ]);
-        let mut commit = || {
-            gh(&[
+        let commit = || {
+            gh.execute(&[
                 "api",
                 &format!("repos/{{owner}}/{{repo}}/commits/{sha}"),
                 "--jq",
@@ -168,10 +195,10 @@ pub fn sync(
     branch: Option<&str>,
     remote: &str,
     dry_run: bool,
-    gh: Gh,
+    gh: &dyn Client,
 ) -> Result<Option<PullRequest>> {
     let label = repo.config.release.label.as_str();
-    gh(&[
+    gh.execute(&[
         "label",
         "create",
         label,
@@ -207,7 +234,7 @@ pub fn sync(
 
     // Spec: CloseReleasePullRequestWithNothingPending.
     if let Some(stale) = existing {
-        gh(&[
+        gh.execute(&[
             "pr",
             "close",
             &stale.number.to_string(),
@@ -222,7 +249,7 @@ pub fn sync(
 /// Open a PR for `head` against `base`, or bring `existing` (the open PR
 /// on `head`) up to date: title, body, label and base.
 pub fn upsert_pr(
-    gh: Gh,
+    gh: &dyn Client,
     existing: Option<&PullRequest>,
     head: &str,
     base: &str,
@@ -233,7 +260,7 @@ pub fn upsert_pr(
     let number = match existing {
         Some(existing) => {
             let n = existing.number.to_string();
-            gh(&[
+            gh.execute(&[
                 "pr",
                 "edit",
                 &n,
@@ -245,11 +272,11 @@ pub fn upsert_pr(
                 label,
             ])?;
             if existing.base != base {
-                gh(&["pr", "edit", &n, "--base", base])?;
+                gh.execute(&["pr", "edit", &n, "--base", base])?;
             }
             existing.number
         }
-        None => number_from_url(&gh(&[
+        None => number_from_url(&gh.execute(&[
             "pr", "create", "--head", head, "--base", base, "--title", title, "--body", body,
             "--label", label,
         ])?)?,
@@ -283,8 +310,8 @@ pub fn append_output(lines: &str) -> Result<()> {
 }
 
 /// The open PR whose head is `head`, if any.
-pub fn open_pr(gh: Gh, head: &str) -> Result<Option<PullRequest>> {
-    let open: Vec<PullRequest> = serde_json::from_str(&gh(&[
+pub fn open_pr(gh: &dyn Client, head: &str) -> Result<Option<PullRequest>> {
+    let open: Vec<PullRequest> = serde_json::from_str(&gh.execute(&[
         "pr",
         "list",
         "--state",

@@ -161,6 +161,13 @@ fn run(cli: Cli) -> Result<()> {
         .canonicalize()
         .with_context(|| root.display().to_string())?;
     let config_path = config.unwrap_or_else(|| root.join(verwalter::repo::CONFIG_FILE));
+    // Under `--dry-run`, every gh write is printed instead of run.
+    let client = github::SystemClient::new(&root, &remote);
+    let gh: &dyn github::Client = if dry_run {
+        &github::DryRunClient::new(client)
+    } else {
+        &client
+    };
     // Spec: ChangesetCheckOnContributorPullRequest. `check` reads the
     // config only: a broken changeset on the PR is its finding, not a
     // reason to fail before it runs.
@@ -170,8 +177,7 @@ fn run(cli: Cli) -> Result<()> {
         if !findings.is_empty() {
             return Err(workspace_error(&findings));
         }
-        let mut gh = gh(&root, &remote, dry_run);
-        let c = check::run(&root, &config, *pr, &mut gh)?;
+        let c = check::run(&root, &config, *pr, gh)?;
         println!(
             "{:?}: affected {:?}, covered {:?}",
             c.status, c.affected, c.covered
@@ -259,10 +265,9 @@ fn run(cli: Cli) -> Result<()> {
         }
         Command::Pr { base } => {
             let base = base.unwrap_or_else(|| format!("{remote}/{}", repo.config.git.base_branch));
-            github::attribute(&mut repo, &mut gh(&root, &remote, dry_run));
+            github::attribute(&mut repo, gh);
             let branch = branches::create(&repo, &releases, &base)?;
-            let mut gh = gh(&repo.root, &remote, dry_run);
-            let pr = github::sync(&repo, &releases, branch.as_deref(), &remote, dry_run, &mut gh)
+            let pr = github::sync(&repo, &releases, branch.as_deref(), &remote, dry_run, gh)
                 .map_err(|e| anyhow!("{e:#}\nresume with: verwalter pr  (the branch is regenerated, the PR updated in place; --dry-run shows the steps)"))?;
             match pr {
                 Some(pr) => println!("#{}  {}  on {}", pr.number, pr.head, pr.base),
@@ -271,8 +276,7 @@ fn run(cli: Cli) -> Result<()> {
             Ok(())
         }
         Command::Status => {
-            let mut gh = gh(&repo.root, &remote, dry_run);
-            let rows = status::status(&repo, &remote, &mut gh)?;
+            let rows = status::status(&repo, &remote, gh)?;
             let w = rows.iter().map(|r| r.package.len()).max().unwrap_or(0);
             for r in &rows {
                 let pending = if r.pending_changesets.is_empty() {
@@ -312,9 +316,8 @@ fn run(cli: Cli) -> Result<()> {
         }
         Command::PreRelease { target } => {
             let target = target.unwrap_or_else(|| repo.config.git.base_branch.clone());
-            github::attribute(&mut repo, &mut gh(&root, &remote, dry_run));
-            let mut gh = gh(&repo.root, &remote, dry_run);
-            let (releases, pr) = prerelease::open(&repo, &target, &remote, dry_run, &mut gh)
+            github::attribute(&mut repo, gh);
+            let (releases, pr) = prerelease::open(&repo, &target, &remote, dry_run, gh)
                 .map_err(|e| anyhow!("{e:#}\nresume with: verwalter pre-release --target {target}  (the rc branch and PR are updated in place)"))?;
             for r in &releases {
                 println!(
@@ -343,9 +346,8 @@ fn run(cli: Cli) -> Result<()> {
             publish,
             abandon,
         } => {
-            let mut gh = gh(&repo.root, &remote, dry_run);
             if let Some(tag) = abandon {
-                for r in release::abandon(&repo, &remote, &tag, dry_run, &mut gh)? {
+                for r in release::abandon(&repo, &remote, &tag, dry_run, gh)? {
                     println!("removed {r}");
                 }
                 return Ok(());
@@ -356,7 +358,7 @@ fn run(cli: Cli) -> Result<()> {
                 publish,
                 dry_run,
             };
-            let released = release::run(&repo, &remote, &options, &mut gh)?;
+            let released = release::run(&repo, &remote, &options, gh)?;
             for r in &released {
                 println!("{}  {}  {}  {}", r.package, r.version, r.tag, r.status);
             }
@@ -376,18 +378,6 @@ fn workspace_error(findings: &[workspace::Finding]) -> anyhow::Error {
             .collect::<Vec<_>>()
             .join("\n  ")
     )
-}
-
-type GhRunner<'a> = Box<dyn FnMut(&[&str]) -> Result<String> + 'a>;
-
-/// The gh runner, with every write printed instead of run under `--dry-run`.
-fn gh<'a>(root: &'a Path, remote: &str, dry_run: bool) -> GhRunner<'a> {
-    let inner = github::gh_cli(root, remote);
-    if dry_run {
-        Box::new(github::dry_run_gh(inner))
-    } else {
-        Box::new(inner)
-    }
 }
 
 fn print_plan(repo: &Repo, releases: &[verwalter::plan::PlannedRelease]) {

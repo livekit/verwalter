@@ -6,14 +6,7 @@ use std::collections::BTreeSet;
 
 use anyhow::Result;
 
-use crate::{
-    config::ReleaseMode,
-    git,
-    github::{Gh, PullRequest},
-    plan::plan,
-    prerelease, release,
-    repo::Repo,
-};
+use crate::{config::ReleaseMode, git, github, plan::plan, prerelease, release, repo::Repo};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PackageStatus {
@@ -35,7 +28,7 @@ pub struct PackageStatus {
     pub next_step: String,
 }
 
-pub fn status(repo: &Repo, remote: &str, gh: Gh) -> Result<Vec<PackageStatus>> {
+pub fn status(repo: &Repo, remote: &str, gh: &dyn github::Client) -> Result<Vec<PackageStatus>> {
     let root = repo.root.as_path();
     let remote_tags: BTreeSet<String> = git::run(root, &["ls-remote", "--tags", remote])
         .map(|out| {
@@ -45,21 +38,22 @@ pub fn status(repo: &Repo, remote: &str, gh: Gh) -> Result<Vec<PackageStatus>> {
                 .collect()
         })
         .unwrap_or_default();
-    let open: Vec<PullRequest> = gh(&[
-        "pr",
-        "list",
-        "--state",
-        "open",
-        "--label",
-        &repo.config.release.label,
-        "--limit",
-        "200",
-        "--json",
-        "number,headRefName,baseRefName",
-    ])
-    .ok()
-    .and_then(|j| serde_json::from_str(&j).ok())
-    .unwrap_or_default();
+    let open: Vec<github::PullRequest> = gh
+        .execute(&[
+            "pr",
+            "list",
+            "--state",
+            "open",
+            "--label",
+            &repo.config.release.label,
+            "--limit",
+            "200",
+            "--json",
+            "number,headRefName,baseRefName",
+        ])
+        .ok()
+        .and_then(|j| serde_json::from_str(&j).ok())
+        .unwrap_or_default();
     let planned = plan(
         &repo.packages,
         &repo.changesets,

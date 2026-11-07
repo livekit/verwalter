@@ -11,7 +11,7 @@ use anyhow::{Result, bail, ensure};
 
 use crate::{
     Version, apply, branches, git,
-    github::{Gh, MARKER, PullRequest, open_pr, section, upsert_pr},
+    github::{self, MARKER, PullRequest, open_pr, section, upsert_pr},
     plan::PlannedRelease,
     repo::Repo,
     version::{BumpLevel, next_prerelease_version},
@@ -122,7 +122,7 @@ pub fn open(
     target: &str,
     remote: &str,
     dry_run: bool,
-    gh: Gh,
+    gh: &dyn github::Client,
 ) -> Result<(Vec<PlannedRelease>, PullRequest)> {
     let releases = plan(repo)?;
     let branch = branch_name(repo, target);

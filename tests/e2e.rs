@@ -8,7 +8,17 @@ use std::{
 };
 
 use anyhow::{Result, anyhow};
-use verwalter::{branches, plan::plan, repo::Repo};
+use verwalter::{branches, github::Client, plan::plan, repo::Repo};
+
+/// Fake GitHub: answers each gh call with the wrapped closure.
+struct MockClient<F>(F);
+
+/// Blanket implementation for closures.
+impl<F: Fn(&[&str]) -> Result<String>> Client for MockClient<F> {
+    fn execute(&self, args: &[&str]) -> Result<String> {
+        (self.0)(args)
+    }
+}
 
 struct Repo_(PathBuf);
 
@@ -276,15 +286,15 @@ fn pr_sync_pushes_and_creates_updates_closes() {
     let has = |prefix: &str| calls.borrow().iter().any(|c| c.starts_with(prefix));
     // #40 is the open PR on the release branch, with a wrong base.
     let open = r#"[{"number":40,"headRefName":"release/main","baseRefName":"next"}]"#;
-    let mut gh = |args: &[&str]| -> Result<String> {
+    let gh = MockClient(|args: &[&str]| -> Result<String> {
         calls.borrow_mut().push(args.join(" "));
         Ok(match args {
             ["pr", "list", ..] => open.into(),
             ["pr", "create", ..] => "https://github.com/livekit/x/pull/100".into(),
             _ => String::new(),
         })
-    };
-    let pr = verwalter::github::sync(&repo, &plan, branch.as_deref(), "origin", false, &mut gh)
+    });
+    let pr = verwalter::github::sync(&repo, &plan, branch.as_deref(), "origin", false, &gh)
         .unwrap()
         .unwrap();
 
@@ -324,7 +334,7 @@ fn pr_sync_pushes_and_creates_updates_closes() {
     // Nothing planned: the release PR is closed.
     calls.borrow_mut().clear();
     assert!(
-        verwalter::github::sync(&repo, &[], None, "origin", false, &mut gh)
+        verwalter::github::sync(&repo, &[], None, "origin", false, &gh)
             .unwrap()
             .is_none()
     );
@@ -332,15 +342,15 @@ fn pr_sync_pushes_and_creates_updates_closes() {
 
     // A fresh repo gets a new PR.
     calls.borrow_mut().clear();
-    let mut gh = |args: &[&str]| -> Result<String> {
+    let gh = MockClient(|args: &[&str]| -> Result<String> {
         calls.borrow_mut().push(args.join(" "));
         Ok(match args {
             ["pr", "list", ..] => "[]".into(),
             ["pr", "create", ..] => "https://github.com/livekit/x/pull/100".into(),
             _ => String::new(),
         })
-    };
-    let pr = verwalter::github::sync(&repo, &plan, branch.as_deref(), "origin", false, &mut gh)
+    });
+    let pr = verwalter::github::sync(&repo, &plan, branch.as_deref(), "origin", false, &gh)
         .unwrap()
         .unwrap();
     assert_eq!(pr.number, 100);
@@ -379,9 +389,9 @@ fn release_tags_and_creates_github_releases_resumably() {
     git(root, &["commit", "-qam", "release: livekit 0.8.0"]);
 
     let repo = Repo::load(root).unwrap();
-    let mut calls: Vec<String> = Vec::new();
-    let mut gh = |args: &[&str]| -> Result<String> {
-        calls.push(args.join(" "));
+    let calls = std::cell::RefCell::new(Vec::<String>::new());
+    let gh = MockClient(|args: &[&str]| -> Result<String> {
+        calls.borrow_mut().push(args.join(" "));
         match args {
             // Older tags already have releases; the new one does not yet.
             ["api", "graphql", "-f", tag, ..] if *tag != "tag=livekit-v0.8.0" => {
@@ -390,8 +400,8 @@ fn release_tags_and_creates_github_releases_resumably() {
             ["api", "graphql", ..] => Ok(String::new()),
             _ => Ok(String::new()),
         }
-    };
-    let released = verwalter::release::run(&repo, "origin", &Default::default(), &mut gh).unwrap();
+    });
+    let released = verwalter::release::run(&repo, "origin", &Default::default(), &gh).unwrap();
 
     assert!(
         git(root, &["ls-remote", "--tags", "origin"]).contains("livekit-v0.8.0"),
@@ -402,9 +412,11 @@ fn release_tags_and_creates_github_releases_resumably() {
         git(root, &["rev-parse", "HEAD"])
     );
     let create = calls
+        .borrow()
         .iter()
         .find(|c| c.starts_with("release create livekit-v0.8.0"))
-        .unwrap();
+        .unwrap()
+        .clone();
     assert!(create.contains("--draft"), "draft mode from config");
     assert!(
         create.contains("- Negotiated data channels"),
@@ -426,18 +438,18 @@ fn release_tags_and_creates_github_releases_resumably() {
     assert_eq!(released.len(), 1, "complete releases are not reported");
 
     // Second run: nothing to tag, nothing to create.
-    let before = calls.len();
-    let mut gh2 = |args: &[&str]| -> Result<String> {
-        calls.push(args.join(" "));
+    let before = calls.borrow().len();
+    let gh2 = MockClient(|args: &[&str]| -> Result<String> {
+        calls.borrow_mut().push(args.join(" "));
         Ok(if args[3] == "tag=livekit-v0.8.0" {
             r#"{"isDraft":true,"assets":[]}"#.into()
         } else {
             r#"{"isDraft":false,"assets":[]}"#.into()
         })
-    };
-    let again = verwalter::release::run(&repo, "origin", &Default::default(), &mut gh2).unwrap();
+    });
+    let again = verwalter::release::run(&repo, "origin", &Default::default(), &gh2).unwrap();
     assert!(
-        !calls[before..]
+        !calls.borrow()[before..]
             .iter()
             .any(|c| c.starts_with("release create"))
     );
@@ -474,20 +486,22 @@ fn maintenance_release_is_not_marked_latest() {
     git(root, &["commit", "-qam", "release: livekit 0.7.1"]);
 
     let repo = Repo::load(root).unwrap();
-    let mut calls: Vec<String> = Vec::new();
-    let mut gh = |args: &[&str]| -> Result<String> {
-        calls.push(args.join(" "));
+    let calls = std::cell::RefCell::new(Vec::<String>::new());
+    let gh = MockClient(|args: &[&str]| -> Result<String> {
+        calls.borrow_mut().push(args.join(" "));
         match args {
             ["api", "graphql", "-f", "tag=livekit-v0.7.1", ..] => Ok(String::new()),
             ["api", "graphql", ..] => Ok(r#"{"isDraft":false,"assets":[]}"#.into()),
             _ => Ok(String::new()),
         }
-    };
-    verwalter::release::run(&repo, "origin", &Default::default(), &mut gh).unwrap();
+    });
+    verwalter::release::run(&repo, "origin", &Default::default(), &gh).unwrap();
     let create = calls
+        .borrow()
         .iter()
         .find(|c| c.starts_with("release create livekit-v0.7.1"))
-        .unwrap();
+        .unwrap()
+        .clone();
     assert!(create.contains("--latest=false"), "{create}");
 }
 
@@ -504,16 +518,16 @@ fn release_resumes_a_tag_without_github_release() {
     git(root, &["add", "-A"]);
     git(root, &["commit", "-qm", "later"]);
     let repo = Repo::load(root).unwrap();
-    let mut calls: Vec<String> = Vec::new();
-    let mut gh = |args: &[&str]| -> Result<String> {
-        calls.push(args.join(" "));
+    let calls = std::cell::RefCell::new(Vec::<String>::new());
+    let gh = MockClient(|args: &[&str]| -> Result<String> {
+        calls.borrow_mut().push(args.join(" "));
         match args {
             ["api", "graphql", "-f", "tag=livekit-v0.7.0", ..] => Ok(String::new()),
             ["api", "graphql", ..] => Ok(r#"{"isDraft":false,"assets":[]}"#.into()),
             _ => Ok(String::new()),
         }
-    };
-    let released = verwalter::release::run(&repo, "origin", &Default::default(), &mut gh).unwrap();
+    });
+    let released = verwalter::release::run(&repo, "origin", &Default::default(), &gh).unwrap();
     assert_eq!(released.len(), 1);
     assert_eq!(
         (released[0].package.as_str(), released[0].status),
@@ -521,11 +535,13 @@ fn release_resumes_a_tag_without_github_release() {
     );
     assert!(
         calls
+            .borrow()
             .iter()
             .any(|c| c.starts_with("release create livekit-v0.7.0"))
     );
     assert!(
         !calls
+            .borrow()
             .iter()
             .any(|c| c.starts_with("release create livekit-api"))
     );
@@ -542,7 +558,7 @@ fn release_with_assets_then_abandon() {
 
     let repo = Repo::load(root).unwrap();
     let calls = std::cell::RefCell::new(Vec::<String>::new());
-    let mut gh = |args: &[&str]| -> Result<String> {
+    let gh = MockClient(|args: &[&str]| -> Result<String> {
         let exists = {
             let calls = calls.borrow();
             calls.iter().any(|c| c.starts_with("release create"))
@@ -554,7 +570,7 @@ fn release_with_assets_then_abandon() {
             ["api", "graphql", ..] => Ok(r#"{"isDraft":false,"assets":[]}"#.into()),
             _ => Ok(String::new()),
         }
-    };
+    });
     let assets = ["dist/a.tar.gz".to_string(), "dist/b.tar.gz".to_string()];
     let released = verwalter::release::run(
         &repo,
@@ -563,7 +579,7 @@ fn release_with_assets_then_abandon() {
             assets: assets.to_vec(),
             ..Default::default()
         },
-        &mut gh,
+        &gh,
     )
     .unwrap();
     assert_eq!(released.len(), 1);
@@ -580,14 +596,15 @@ fn release_with_assets_then_abandon() {
     assert!(!create.contains("--draft"));
 
     // A failed lookup (auth, network) stops abandon before it deletes the tag.
-    let mut broken = |_: &[&str]| -> Result<String> { Err(anyhow!("HTTP 401: Bad credentials")) };
+    let broken =
+        MockClient(|_: &[&str]| -> Result<String> { Err(anyhow!("HTTP 401: Bad credentials")) });
     assert!(
-        verwalter::release::abandon(&repo, "origin", "livekit-v0.7.0", false, &mut broken).is_err()
+        verwalter::release::abandon(&repo, "origin", "livekit-v0.7.0", false, &broken).is_err()
     );
     assert!(!git(root, &["tag", "--list", "livekit-v0.7.0"]).is_empty());
 
     let removed =
-        verwalter::release::abandon(&repo, "origin", "livekit-v0.7.0", false, &mut gh).unwrap();
+        verwalter::release::abandon(&repo, "origin", "livekit-v0.7.0", false, &gh).unwrap();
     assert_eq!(
         removed,
         [
@@ -606,8 +623,7 @@ fn release_with_assets_then_abandon() {
     assert!(git(root, &["tag", "--list", "livekit-v0.7.0"]).is_empty());
 
     // Abandoning again finds nothing and does not fail.
-    let again =
-        verwalter::release::abandon(&repo, "origin", "livekit-v0.7.0", false, &mut gh).unwrap();
+    let again = verwalter::release::abandon(&repo, "origin", "livekit-v0.7.0", false, &gh).unwrap();
     assert!(again.is_empty());
 }
 
@@ -628,17 +644,16 @@ fn prerelease_opens_an_rc_pr_without_consuming_changesets() {
     git(root, &["push", "-q", "origin", "main", "--tags"]);
 
     let repo = Repo::load(root).unwrap();
-    let mut calls: Vec<String> = Vec::new();
-    let mut gh = |args: &[&str]| -> Result<String> {
-        calls.push(args.join(" "));
+    let calls = std::cell::RefCell::new(Vec::<String>::new());
+    let gh = MockClient(|args: &[&str]| -> Result<String> {
+        calls.borrow_mut().push(args.join(" "));
         Ok(match args {
             ["pr", "list", ..] => "[]".into(),
             ["pr", "create", ..] => "https://github.com/x/y/pull/9".into(),
             _ => String::new(),
         })
-    };
-    let (releases, pr) =
-        verwalter::prerelease::open(&repo, "main", "origin", false, &mut gh).unwrap();
+    });
+    let (releases, pr) = verwalter::prerelease::open(&repo, "main", "origin", false, &gh).unwrap();
     // Both pending packages are in the rc, dependencies first, each at
     // the level its changeset names.
     let got: Vec<(&str, String, String)> = releases
@@ -656,7 +671,7 @@ fn prerelease_opens_an_rc_pr_without_consuming_changesets() {
         (pr.number, pr.head.as_str(), pr.base.as_str()),
         (9, "release/main-rc", "main")
     );
-    assert!(calls.iter().any(|c| c.starts_with("pr create --head release/main-rc --base main --title pre-release: livekit-protocol 0.4.0-rc.1, livekit 0.8.0-rc.1")), "{calls:?}");
+    assert!(calls.borrow().iter().any(|c| c.starts_with("pr create --head release/main-rc --base main --title pre-release: livekit-protocol 0.4.0-rc.1, livekit 0.8.0-rc.1")), "{calls:?}");
 
     // Branch content: own version and lock, changelog; no pin in api, changeset kept.
     assert!(
@@ -737,15 +752,14 @@ fn prerelease_of_a_fixed_group_member_covers_the_group() {
         1,
         "0.3.1 and 0.4.3 differ"
     );
-    let mut gh = |args: &[&str]| -> Result<String> {
+    let gh = MockClient(|args: &[&str]| -> Result<String> {
         Ok(match args {
             ["pr", "list", ..] => "[]".into(),
             ["pr", "create", ..] => "https://github.com/x/y/pull/9".into(),
             _ => String::new(),
         })
-    };
-    let (releases, pr) =
-        verwalter::prerelease::open(&repo, "main", "origin", false, &mut gh).unwrap();
+    });
+    let (releases, pr) = verwalter::prerelease::open(&repo, "main", "origin", false, &gh).unwrap();
     // api was asked for, protocol comes along; the version moves from the
     // group's highest (0.4.3) by the level of protocol's changeset.
     let got: Vec<(&str, &str, &str)> = releases
@@ -823,7 +837,7 @@ fn dry_run_writes_nothing() {
     );
     let branch = branches::create(&repo, &plan, "main").unwrap();
     let writes = std::cell::Cell::new(0);
-    let inner = |args: &[&str]| -> Result<String> {
+    let inner = MockClient(|args: &[&str]| -> Result<String> {
         if !matches!(args, ["pr", "list", ..] | ["api", "graphql", ..]) {
             writes.set(writes.get() + 1);
         }
@@ -832,10 +846,9 @@ fn dry_run_writes_nothing() {
             ["api", "graphql", ..] => String::new(),
             _ => String::new(),
         })
-    };
-    let mut gh = verwalter::github::dry_run_gh(inner);
-    let pr =
-        verwalter::github::sync(&repo, &plan, branch.as_deref(), "origin", true, &mut gh).unwrap();
+    });
+    let gh = verwalter::github::DryRunClient::new(inner);
+    let pr = verwalter::github::sync(&repo, &plan, branch.as_deref(), "origin", true, &gh).unwrap();
     assert!(pr.is_some());
     let released = verwalter::release::run(
         &repo,
@@ -844,7 +857,7 @@ fn dry_run_writes_nothing() {
             dry_run: true,
             ..Default::default()
         },
-        &mut gh,
+        &gh,
     )
     .unwrap();
     assert_eq!(released.len(), 3, "reported as if tagged and created");
@@ -871,7 +884,7 @@ fn release_finishes_a_partial_release_for_one_package() {
 
     let repo = Repo::load(root).unwrap();
     let calls = std::cell::RefCell::new(Vec::<String>::new());
-    let mut gh = |args: &[&str]| -> Result<String> {
+    let gh = MockClient(|args: &[&str]| -> Result<String> {
         let published = calls
             .borrow()
             .iter()
@@ -884,14 +897,14 @@ fn release_finishes_a_partial_release_for_one_package() {
             ["api", "graphql", ..] => Ok(r#"{"isDraft":false,"assets":[{"name":"x"}]}"#.into()),
             _ => Ok(String::new()),
         }
-    };
+    });
     let options = verwalter::release::Options {
         assets: vec!["dist/a.tar.gz".into()],
         package: Some("livekit".into()),
         publish: true,
         ..Default::default()
     };
-    let released = verwalter::release::run(&repo, "origin", &options, &mut gh).unwrap();
+    let released = verwalter::release::run(&repo, "origin", &options, &gh).unwrap();
     assert_eq!(released.len(), 1);
     assert_eq!(
         (released[0].package.as_str(), released[0].status),
@@ -925,7 +938,7 @@ fn release_error_names_the_resume_command() {
     let root = &r.0;
     // No remote: the tag push fails.
     let repo = Repo::load(root).unwrap();
-    let mut gh = |_: &[&str]| -> Result<String> { Ok(String::new()) };
+    let gh = MockClient(|_: &[&str]| -> Result<String> { Ok(String::new()) });
     let err = verwalter::release::run(
         &repo,
         "origin",
@@ -933,7 +946,7 @@ fn release_error_names_the_resume_command() {
             assets: vec!["dist/x".into()],
             ..Default::default()
         },
-        &mut gh,
+        &gh,
     )
     .unwrap_err()
     .to_string();
@@ -958,7 +971,7 @@ fn status_reports_state_and_next_step() {
     git(root, &["commit", "-q", "-m", "cs"]);
 
     let repo = Repo::load(root).unwrap();
-    let mut gh = |args: &[&str]| -> Result<String> {
+    let gh = MockClient(|args: &[&str]| -> Result<String> {
         match args {
             ["pr", "list", ..] => {
                 Ok(r#"[{"number":12,"headRefName":"release/main","baseRefName":"main"}]"#.into())
@@ -971,8 +984,8 @@ fn status_reports_state_and_next_step() {
             }
             _ => Err(anyhow!("not found")),
         }
-    };
-    let rows = verwalter::status::status(&repo, "origin", &mut gh).unwrap();
+    });
+    let rows = verwalter::status::status(&repo, "origin", &gh).unwrap();
     let by = |n: &str| rows.iter().find(|r| r.package == n).unwrap();
 
     let protocol = by("livekit-protocol");
@@ -1016,14 +1029,14 @@ fn release_runs_in_dependency_order_and_stops_at_the_first_failure() {
     // All three untagged: protocol first, then its dependents by name.
     let repo = Repo::load(root).unwrap();
     let calls = std::cell::RefCell::new(Vec::<String>::new());
-    let mut gh = |args: &[&str]| -> Result<String> {
+    let gh = MockClient(|args: &[&str]| -> Result<String> {
         calls.borrow_mut().push(args.join(" "));
         match args {
             ["api", "graphql", ..] => Ok(String::new()),
             _ => Ok(String::new()),
         }
-    };
-    let released = verwalter::release::run(&repo, "origin", &Default::default(), &mut gh).unwrap();
+    });
+    let released = verwalter::release::run(&repo, "origin", &Default::default(), &gh).unwrap();
     let order: Vec<&str> = released.iter().map(|r| r.package.as_str()).collect();
     assert_eq!(order, ["livekit-protocol", "livekit", "livekit-api"]);
     assert!(released.iter().all(|r| r.first_release), "no earlier tags");
@@ -1032,7 +1045,7 @@ fn release_runs_in_dependency_order_and_stops_at_the_first_failure() {
     let r2 = fixture("order-fail");
     let root2 = &r2.0;
     let repo2 = Repo::load(root2).unwrap();
-    let mut gh2 = |args: &[&str]| -> Result<String> {
+    let gh2 = MockClient(|args: &[&str]| -> Result<String> {
         match args {
             ["api", "graphql", ..] => Ok(String::new()),
             ["release", "create", tag, ..] if tag.starts_with("livekit-protocol") => {
@@ -1040,10 +1053,10 @@ fn release_runs_in_dependency_order_and_stops_at_the_first_failure() {
             }
             _ => Ok(String::new()),
         }
-    };
+    });
     // Give it a remote so the tag push works and the gh failure is the first error.
     let _remote2 = remote(root2, "order-fail");
-    let err = verwalter::release::run(&repo2, "origin", &Default::default(), &mut gh2)
+    let err = verwalter::release::run(&repo2, "origin", &Default::default(), &gh2)
         .unwrap_err()
         .to_string();
     assert!(err.starts_with("livekit-protocol: "), "{err}");
@@ -1075,14 +1088,14 @@ fn hand_bumped_version_is_not_released() {
     );
     git(root, &["commit", "-q", "-am", "bump by hand"]);
     let repo = Repo::load(root).unwrap();
-    let mut gh = |args: &[&str]| -> Result<String> {
+    let gh = MockClient(|args: &[&str]| -> Result<String> {
         match args {
             ["api", "graphql", "-f", "tag=livekit-v0.7.1", ..] => Ok(String::new()),
             ["api", "graphql", ..] => Ok(r#"{"isDraft":false,"assets":[]}"#.into()),
             _ => Ok(String::new()),
         }
-    };
-    let released = verwalter::release::run(&repo, "origin", &Default::default(), &mut gh).unwrap();
+    });
+    let released = verwalter::release::run(&repo, "origin", &Default::default(), &gh).unwrap();
     assert!(released.is_empty(), "{released:?}");
     assert!(git(root, &["tag", "--list", "livekit-v0.7.1"]).is_empty());
 
@@ -1093,7 +1106,7 @@ fn hand_bumped_version_is_not_released() {
             package: Some("livekit".into()),
             ..Default::default()
         },
-        &mut gh,
+        &gh,
     )
     .unwrap();
     assert_eq!(released.len(), 1);
@@ -1518,17 +1531,17 @@ fn named_package_is_reported_even_when_complete() {
     git(root, &["tag", "livekit-api-v0.4.3"]);
     git(root, &["push", "-q", "origin", "--tags"]);
     let repo = Repo::load(root).unwrap();
-    let mut gh = |args: &[&str]| -> Result<String> {
+    let gh = MockClient(|args: &[&str]| -> Result<String> {
         match args {
             ["api", "graphql", ..] => Ok(r#"{"isDraft":false,"assets":[{"name":"a"}]}"#.into()),
             other => panic!("unexpected write {other:?}"),
         }
-    };
+    });
     let options = verwalter::release::Options {
         package: Some("livekit-api".into()),
         ..Default::default()
     };
-    let released = verwalter::release::run(&repo, "origin", &options, &mut gh).unwrap();
+    let released = verwalter::release::run(&repo, "origin", &options, &gh).unwrap();
     assert_eq!(released.len(), 1);
     assert_eq!(
         (released[0].package.as_str(), released[0].status),
@@ -1560,7 +1573,7 @@ fn changesets_are_attributed_to_their_pr_or_commit() {
     let push_sha = git(root, &["rev-parse", "HEAD"]);
 
     let mut repo = Repo::load(root).unwrap();
-    let mut gh = |args: &[&str]| -> Result<String> {
+    let gh = MockClient(|args: &[&str]| -> Result<String> {
         let path = args.get(1).copied().unwrap_or("");
         Ok(
             if path == format!("repos/{{owner}}/{{repo}}/commits/{pr_sha}/pulls") {
@@ -1571,8 +1584,8 @@ fn changesets_are_attributed_to_their_pr_or_commit() {
                 String::new()
             },
         )
-    };
-    verwalter::github::attribute(&mut repo, &mut gh);
+    });
+    verwalter::github::attribute(&mut repo, &gh);
     let by_file = |f: &str| {
         repo.changesets
             .iter()
@@ -1714,15 +1727,14 @@ fn prerelease_of_a_dependent_carries_pending_dependencies() {
         ]
     );
 
-    let mut gh = |args: &[&str]| -> Result<String> {
+    let gh = MockClient(|args: &[&str]| -> Result<String> {
         Ok(match args {
             ["pr", "list", ..] => "[]".into(),
             ["pr", "create", ..] => "https://github.com/x/y/pull/3".into(),
             _ => String::new(),
         })
-    };
-    let (releases, pr) =
-        verwalter::prerelease::open(&repo, "main", "origin", false, &mut gh).unwrap();
+    });
+    let (releases, pr) = verwalter::prerelease::open(&repo, "main", "origin", false, &gh).unwrap();
     assert_eq!(releases.len(), 2);
     assert_eq!(pr.head, "release/main-rc");
     let show = |f: &str| git(root, &["show", &format!("release/main-rc:{f}")]);
@@ -1886,26 +1898,26 @@ fn asset_directory_attaches_every_file_in_it() {
 
     let repo = Repo::load(root).unwrap();
     let calls = std::cell::RefCell::new(Vec::<String>::new());
-    let mut gh = |args: &[&str]| -> Result<String> {
+    let gh = MockClient(|args: &[&str]| -> Result<String> {
         calls.borrow_mut().push(args.join(" "));
         match args {
             ["api", "graphql", ..] => Ok(String::new()),
             _ => Ok(String::new()),
         }
-    };
+    });
     let options = |assets: &[&str]| verwalter::release::Options {
         assets: assets.iter().map(|a| a.to_string()).collect(),
         dry_run: true,
         ..Default::default()
     };
-    let err = verwalter::release::run(&repo, "origin", &options(&["empty"]), &mut gh).unwrap_err();
+    let err = verwalter::release::run(&repo, "origin", &options(&["empty"]), &gh).unwrap_err();
     assert!(
         err.to_string()
             .contains("--asset empty: the directory has no files"),
         "{err}"
     );
 
-    verwalter::release::run(&repo, "origin", &options(&["dist/", "notes.txt"]), &mut gh).unwrap();
+    verwalter::release::run(&repo, "origin", &options(&["dist/", "notes.txt"]), &gh).unwrap();
     let create = calls
         .borrow()
         .iter()

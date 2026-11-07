@@ -9,8 +9,7 @@ use std::process::Command;
 use anyhow::{Context, Result, anyhow, ensure};
 
 use crate::{
-    Version, changeset::Changeset, config::Config, github::Gh, repo::CHANGESET_DIR,
-    version::BumpLevel,
+    Version, changeset::Changeset, config::Config, github, repo::CHANGESET_DIR, version::BumpLevel,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -462,7 +461,7 @@ fn urlencode(s: &str) -> String {
 /// the comment when it has something to say, deletes it otherwise,
 /// returns the check. Changeset contents are read
 /// from the checkout, which CI has at the PR head.
-pub fn run(root: &Path, config: &Config, pr: u64, gh: Gh) -> Result<Check> {
+pub fn run(root: &Path, config: &Config, pr: u64, gh: &dyn github::Client) -> Result<Check> {
     #[derive(serde::Deserialize)]
     struct Pr {
         title: String,
@@ -492,7 +491,7 @@ pub fn run(root: &Path, config: &Config, pr: u64, gh: Gh) -> Result<Check> {
         path: String,
     }
     let n = pr.to_string();
-    let pr: Pr = serde_json::from_str(&gh(&[
+    let pr: Pr = serde_json::from_str(&gh.execute(&[
         "pr",
         "view",
         &n,
@@ -502,14 +501,15 @@ pub fn run(root: &Path, config: &Config, pr: u64, gh: Gh) -> Result<Check> {
     let labels: Vec<String> = pr.labels.into_iter().map(|l| l.name).collect();
     let changed: Vec<String> = pr.files.into_iter().map(|f| f.path).collect();
 
-    let existing = gh(&[
-        "api",
-        &format!("repos/{{owner}}/{{repo}}/issues/{n}/comments"),
-        "--paginate",
-        "--jq",
-        &format!(".[] | select(.body | contains(\"{MARKER}\")) | .id"),
-    ])
-    .map(|out| out.lines().next().map(str::to_string));
+    let existing = gh
+        .execute(&[
+            "api",
+            &format!("repos/{{owner}}/{{repo}}/issues/{n}/comments"),
+            "--paginate",
+            "--jq",
+            &format!(".[] | select(.body | contains(\"{MARKER}\")) | .id"),
+        ])
+        .map(|out| out.lines().next().map(str::to_string));
 
     // A changeset the tool cannot use is the contributor's finding too:
     // it goes into the comment, not only into the workflow log.
@@ -587,10 +587,15 @@ fn read_changesets(root: &Path, config: &Config, changed: &[String]) -> Result<V
 /// Writes the comment (`body`) or deletes it (None). Best effort: the
 /// token of a PR from a fork cannot write, and the check passes or fails
 /// on its result, not on the comment.
-fn sync_comment(gh: Gh, pr: &str, existing: &Result<Option<String>>, body: Option<&str>) {
+fn sync_comment(
+    gh: &dyn github::Client,
+    pr: &str,
+    existing: &Result<Option<String>>,
+    body: Option<&str>,
+) {
     let written = match (existing, body) {
         (Err(e), _) => Err(anyhow!("{e:#}")),
-        (Ok(Some(id)), Some(body)) => gh(&[
+        (Ok(Some(id)), Some(body)) => gh.execute(&[
             "api",
             "-X",
             "PATCH",
@@ -598,8 +603,8 @@ fn sync_comment(gh: Gh, pr: &str, existing: &Result<Option<String>>, body: Optio
             "-f",
             &format!("body={body}"),
         ]),
-        (Ok(None), Some(body)) => gh(&["pr", "comment", pr, "--body", body]),
-        (Ok(Some(id)), None) => gh(&[
+        (Ok(None), Some(body)) => gh.execute(&["pr", "comment", pr, "--body", body]),
+        (Ok(Some(id)), None) => gh.execute(&[
             "api",
             "-X",
             "DELETE",
@@ -616,6 +621,8 @@ fn sync_comment(gh: Gh, pr: &str, existing: &Result<Option<String>>, body: Optio
 
 #[cfg(test)]
 mod tests {
+    use std::cell::{Cell, RefCell};
+
     use super::*;
 
     const CONFIG: &str = r#"
@@ -698,22 +705,31 @@ versioning.changelog = "CHANGELOG.md"
     #[test]
     fn run_returns_the_check_when_the_comment_cannot_be_written() {
         let config = Config::parse(CONFIG).unwrap();
-        let mut writes = 0;
-        let mut body = String::new();
-        let mut gh = |args: &[&str]| -> Result<String> {
-            match args {
-                ["pr", "view", ..] => Ok(r#"{"title":"t","headRefName":"feat","headRepositoryOwner":{"login":"o"},"headRepository":{"name":"r"},"labels":[],"files":[{"path":"livekit-protocol/x.proto"}]}"#.into()),
-                ["api", path, ..] if path.ends_with("/comments") => Ok(String::new()),
-                _ => {
-                    writes += 1;
-                    body = args.last().unwrap_or(&"").to_string();
-                    Err(anyhow!("HTTP 403: Resource not accessible by integration"))
+
+        #[derive(Default)]
+        struct MockClient {
+            writes: Cell<u32>,
+            body: RefCell<String>,
+        }
+        impl github::Client for MockClient {
+            fn execute(&self, args: &[&str]) -> Result<String> {
+                match args {
+                    ["pr", "view", ..] => Ok(r#"{"title":"t","headRefName":"feat","headRepositoryOwner":{"login":"o"},"headRepository":{"name":"r"},"labels":[],"files":[{"path":"livekit-protocol/x.proto"}]}"#.into()),
+                    ["api", path, ..] if path.ends_with("/comments") => Ok(String::new()),
+                    _ => {
+                        self.writes.set(self.writes.get() + 1);
+                        *self.body.borrow_mut() = args.last().unwrap_or(&"").to_string();
+                        Err(anyhow!("HTTP 403: Resource not accessible by integration"))
+                    }
                 }
             }
-        };
-        let c = run(&std::env::temp_dir(), &config, 1, &mut gh).unwrap();
+        }
+
+        let gh = MockClient::default();
+        let c = run(&std::env::temp_dir(), &config, 1, &gh).unwrap();
         assert_eq!(c.status, Status::Failed);
-        assert_eq!(writes, 1);
+        assert_eq!(gh.writes.get(), 1);
+        let body = gh.body.into_inner();
         assert!(
             body.contains("https://github.com/o/r/new/feat?"),
             "link should open the new-file page on the PR head repo: {body}"
