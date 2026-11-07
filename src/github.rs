@@ -7,7 +7,7 @@
 
 use std::{
     path::{Path, PathBuf},
-    process::Command,
+    process,
 };
 
 use anyhow::{Context, Result, anyhow, ensure};
@@ -43,7 +43,7 @@ impl SystemClient {
 
 impl Client for SystemClient {
     fn execute(&self, args: &[&str]) -> Result<String> {
-        let mut cmd = Command::new("gh");
+        let mut cmd = process::Command::new("gh");
         cmd.current_dir(&self.root).args(args);
         // Runs gh pinned to the repository behind `remote` (`GH_REPO`), so a
         // clone with an `upstream` remote never resolves PR numbers against the
@@ -118,6 +118,541 @@ pub struct PullRequest {
     pub base: String,
 }
 
+/// Typed GitHub CLI subcommand.
+pub trait Command {
+    /// Typed output the command returns when successful.
+    type Output;
+
+    /// Convert the typed command into raw arguments for the GitHub CLI.
+    fn to_raw_args(&self) -> Result<Vec<String>>;
+
+    /// Parse the raw string output from the GitHub CLI into [`Self::Output`].
+    fn parse_raw_output(output: &str) -> Result<Self::Output>;
+
+    /// Execute the command using the given client.
+    fn execute(&self, gh: &dyn Client) -> Result<Self::Output> {
+        let raw_args = self
+            .to_raw_args()
+            .context("invalid arguments for GitHub command")?;
+        let raw_args: Vec<&str> = raw_args.iter().map(String::as_str).collect();
+        let raw_output = gh
+            .execute(&raw_args)
+            .context("failed to execute GitHub command")?;
+        Self::parse_raw_output(&raw_output).context("failed to parse GitHub command output")
+    }
+}
+
+/// Create a label, or update it when `force` is set and it exists.
+pub struct LabelCreate<'a> {
+    pub name: &'a str,
+    pub color: &'a str,
+    pub description: &'a str,
+    pub force: bool,
+}
+
+impl<'a> Command for LabelCreate<'a> {
+    type Output = ();
+
+    fn to_raw_args(&self) -> Result<Vec<String>> {
+        let mut args = Vec::from(["label", "create", self.name].map(String::from));
+        if self.force {
+            args.push("--force".into());
+        }
+        args.extend(["--color", self.color, "--description", self.description].map(String::from));
+        Ok(args)
+    }
+
+    fn parse_raw_output(_output: &str) -> Result<Self::Output> {
+        Ok(())
+    }
+}
+
+/// Open a pull request. Outputs its number.
+pub struct PrCreate<'a> {
+    pub head: &'a str,
+    pub base: &'a str,
+    pub title: &'a str,
+    pub body: &'a str,
+    pub label: &'a str,
+}
+
+impl<'a> Command for PrCreate<'a> {
+    type Output = u64;
+
+    fn to_raw_args(&self) -> Result<Vec<String>> {
+        Ok(Vec::from(
+            [
+                "pr", "create", "--head", self.head, "--base", self.base, "--title", self.title,
+                "--body", self.body, "--label", self.label,
+            ]
+            .map(String::from),
+        ))
+    }
+
+    /// Extract the PR number from the URL of the newly created PR.
+    fn parse_raw_output(output: &str) -> Result<Self::Output> {
+        output
+            .trim()
+            .rsplit('/')
+            .next()
+            .and_then(|n| n.parse().ok())
+            .with_context(|| "PR number expected in output: '{output}'")
+    }
+}
+
+/// Edit a pull request. Fields left `None` are not changed.
+pub struct PrEdit<'a> {
+    pub number: u64,
+    pub title: Option<&'a str>,
+    pub body: Option<&'a str>,
+    pub add_label: Option<&'a str>,
+    pub base: Option<&'a str>,
+}
+
+impl<'a> Command for PrEdit<'a> {
+    type Output = ();
+
+    fn to_raw_args(&self) -> Result<Vec<String>> {
+        let mut args = vec!["pr".into(), "edit".into(), self.number.to_string()];
+        for (flag, value) in [
+            ("--title", self.title),
+            ("--body", self.body),
+            ("--add-label", self.add_label),
+            ("--base", self.base),
+        ] {
+            if let Some(value) = value {
+                args.extend([flag.into(), value.into()]);
+            }
+        }
+        Ok(args)
+    }
+
+    fn parse_raw_output(_output: &str) -> Result<Self::Output> {
+        Ok(())
+    }
+}
+
+/// List open pull requests.
+pub struct PrList<'a> {
+    /// Only PRs whose head branch is this.
+    pub head: Option<&'a str>,
+    /// Only PRs carrying this label.
+    pub label: Option<&'a str>,
+    /// Required: gh silently stops at 30 when omitted.
+    pub limit: u32,
+}
+
+impl<'a> Command for PrList<'a> {
+    type Output = Vec<PullRequest>;
+
+    fn to_raw_args(&self) -> Result<Vec<String>> {
+        let mut args = Vec::from(["pr", "list", "--state", "open"].map(String::from));
+        for (flag, value) in [("--head", self.head), ("--label", self.label)] {
+            if let Some(value) = value {
+                args.extend([flag.into(), value.into()]);
+            }
+        }
+        args.extend([
+            "--limit".into(),
+            self.limit.to_string(),
+            "--json".into(),
+            "number,headRefName,baseRefName".into(),
+        ]);
+        Ok(args)
+    }
+
+    fn parse_raw_output(output: &str) -> Result<Self::Output> {
+        Ok(serde_json::from_str(output)?)
+    }
+}
+
+/// Close a pull request with a comment saying why.
+pub struct PrClose<'a> {
+    pub number: u64,
+    pub comment: &'a str,
+    pub delete_branch: bool,
+}
+
+impl<'a> Command for PrClose<'a> {
+    type Output = ();
+
+    fn to_raw_args(&self) -> Result<Vec<String>> {
+        let mut args = vec!["pr".into(), "close".into(), self.number.to_string()];
+        if self.delete_branch {
+            args.push("--delete-branch".into());
+        }
+        args.extend(["--comment".into(), self.comment.into()]);
+        Ok(args)
+    }
+
+    fn parse_raw_output(_output: &str) -> Result<Self::Output> {
+        Ok(())
+    }
+}
+
+/// The fields of a pull request [`PrView`] reads, flattened by its `--jq`.
+#[derive(Deserialize)]
+pub struct PrDetails {
+    pub title: String,
+    pub head: String,
+    pub head_owner: String,
+    pub head_repo: String,
+    pub labels: Vec<String>,
+    pub files: Vec<String>,
+}
+
+/// View one pull request.
+pub struct PrView {
+    pub number: u64,
+}
+
+impl Command for PrView {
+    type Output = PrDetails;
+
+    fn to_raw_args(&self) -> Result<Vec<String>> {
+        Ok(vec![
+            "pr".into(),
+            "view".into(),
+            self.number.to_string(),
+            "--json".into(),
+            "title,headRefName,headRepositoryOwner,headRepository,labels,files".into(),
+            // Flatten API response
+            "--jq".into(),
+            "{title, head: .headRefName, head_owner: .headRepositoryOwner.login, \
+             head_repo: .headRepository.name, labels: [.labels[].name], files: [.files[].path]}"
+                .into(),
+        ])
+    }
+
+    fn parse_raw_output(output: &str) -> Result<Self::Output> {
+        Ok(serde_json::from_str(output)?)
+    }
+}
+
+/// Delete a release.
+pub struct ReleaseDelete<'a> {
+    pub tag: &'a str,
+}
+
+impl<'a> Command for ReleaseDelete<'a> {
+    type Output = ();
+
+    fn to_raw_args(&self) -> Result<Vec<String>> {
+        Ok(Vec::from(
+            ["release", "delete", self.tag, "--yes"].map(String::from),
+        ))
+    }
+
+    fn parse_raw_output(_output: &str) -> Result<Self::Output> {
+        Ok(())
+    }
+}
+
+/// Edit a release.
+pub struct ReleaseEdit<'a> {
+    pub tag: &'a str,
+    pub draft: bool,
+}
+
+impl<'a> Command for ReleaseEdit<'a> {
+    type Output = ();
+
+    fn to_raw_args(&self) -> Result<Vec<String>> {
+        Ok(vec![
+            "release".into(),
+            "edit".into(),
+            self.tag.into(),
+            format!("--draft={}", self.draft),
+        ])
+    }
+
+    fn parse_raw_output(_output: &str) -> Result<Self::Output> {
+        Ok(())
+    }
+}
+
+/// Create a release for an existing tag.
+pub struct ReleaseCreate<'a> {
+    pub tag: &'a str,
+    pub title: &'a str,
+    pub notes: &'a str,
+    /// Abort unless the tag is already on the remote; without it gh
+    /// creates the tag from the default branch.
+    pub verify_tag: bool,
+    /// Files to attach.
+    pub assets: &'a [String],
+    pub draft: bool,
+    pub prerelease: bool,
+    /// `None` lets GitHub decide from date and version.
+    pub latest: Option<bool>,
+}
+
+impl<'a> Command for ReleaseCreate<'a> {
+    type Output = ();
+
+    fn to_raw_args(&self) -> Result<Vec<String>> {
+        let mut args = Vec::from(
+            [
+                "release", "create", self.tag, "--title", self.title, "--notes", self.notes,
+            ]
+            .map(String::from),
+        );
+        if self.verify_tag {
+            args.push("--verify-tag".into());
+        }
+        args.extend(self.assets.iter().cloned());
+        if self.draft {
+            args.push("--draft".into());
+        }
+        if self.prerelease {
+            args.push("--prerelease".into());
+        }
+        if let Some(latest) = self.latest {
+            args.push(format!("--latest={latest}"));
+        }
+        Ok(args)
+    }
+
+    fn parse_raw_output(_output: &str) -> Result<Self::Output> {
+        Ok(())
+    }
+}
+
+/// The GitHub release behind a tag, as [`ReleaseView`] returns it.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct Release {
+    #[serde(rename = "isDraft")]
+    pub draft: bool,
+    pub asset_count: usize,
+}
+
+/// Look up the release behind a tag, drafts included, through `gh api
+/// graphql`. Outputs `None` when the tag has no release.
+pub struct ReleaseView<'a> {
+    pub tag: &'a str,
+}
+
+impl<'a> Command for ReleaseView<'a> {
+    type Output = Option<Release>;
+
+    fn to_raw_args(&self) -> Result<Vec<String>> {
+        Ok(vec![
+            "api".into(),
+            "graphql".into(),
+            // -f, not -F: -F reads a value that starts with `@` as a file,
+            // and npm tags such as `@scope/pkg@1.0.0` start with `@`.
+            "-f".into(),
+            format!("tag={}", self.tag),
+            "-F".into(),
+            "owner={owner}".into(),
+            "-F".into(),
+            "repo={repo}".into(),
+            "-f".into(),
+            "query=query($owner:String!,$repo:String!,$tag:String!){repository(owner:$owner,name:$repo){release(tagName:$tag){isDraft releaseAssets(first:100){nodes{name}}}}}".into(),
+            "--jq".into(),
+            ".data.repository.release | if . then {isDraft, asset_count: (.releaseAssets.nodes | length)} else empty end".into(),
+        ])
+    }
+
+    fn parse_raw_output(output: &str) -> Result<Self::Output> {
+        Ok(if output.is_empty() {
+            None
+        } else {
+            Some(serde_json::from_str(output)?)
+        })
+    }
+}
+
+/// Attach files to a release.
+pub struct ReleaseUpload<'a> {
+    pub tag: &'a str,
+    pub assets: &'a [String],
+    /// Replace an existing asset of the same name instead of failing.
+    pub clobber: bool,
+}
+
+impl<'a> Command for ReleaseUpload<'a> {
+    type Output = ();
+
+    fn to_raw_args(&self) -> Result<Vec<String>> {
+        let mut args = Vec::from(["release", "upload", self.tag].map(String::from));
+        if self.clobber {
+            args.push("--clobber".into());
+        }
+        args.extend(self.assets.iter().cloned());
+        Ok(args)
+    }
+
+    fn parse_raw_output(_output: &str) -> Result<Self::Output> {
+        Ok(())
+    }
+}
+
+/// Find the first comment on a pull request whose body contains a string.
+/// Outputs its id.
+pub struct PrCommentFind<'a> {
+    pub number: u64,
+    pub containing: &'a str,
+}
+
+impl<'a> Command for PrCommentFind<'a> {
+    type Output = Option<u64>;
+
+    fn to_raw_args(&self) -> Result<Vec<String>> {
+        // A JSON string is a valid jq string literal, quotes and all.
+        let needle = serde_json::to_string(self.containing)?;
+        Ok(vec![
+            "api".into(),
+            format!("repos/{{owner}}/{{repo}}/issues/{}/comments", self.number),
+            // Every page: the comment may be past the first 30.
+            "--paginate".into(),
+            "--jq".into(),
+            format!(".[] | select(.body | contains({needle})) | .id"),
+        ])
+    }
+
+    fn parse_raw_output(output: &str) -> Result<Self::Output> {
+        Ok(output.lines().next().map(str::parse).transpose()?)
+    }
+}
+
+/// Add a comment to a pull request.
+pub struct PrCommentCreate<'a> {
+    pub number: u64,
+    pub body: &'a str,
+}
+
+impl<'a> Command for PrCommentCreate<'a> {
+    type Output = ();
+
+    fn to_raw_args(&self) -> Result<Vec<String>> {
+        Ok(vec![
+            "pr".into(),
+            "comment".into(),
+            self.number.to_string(),
+            "--body".into(),
+            self.body.into(),
+        ])
+    }
+
+    fn parse_raw_output(_output: &str) -> Result<Self::Output> {
+        Ok(())
+    }
+}
+
+/// Replace the body of a pull request comment.
+pub struct PrCommentEdit<'a> {
+    pub id: u64,
+    pub body: &'a str,
+}
+
+impl<'a> Command for PrCommentEdit<'a> {
+    type Output = ();
+
+    fn to_raw_args(&self) -> Result<Vec<String>> {
+        Ok(vec![
+            "api".into(),
+            "-X".into(),
+            "PATCH".into(),
+            format!("repos/{{owner}}/{{repo}}/issues/comments/{}", self.id),
+            "-f".into(),
+            format!("body={}", self.body),
+        ])
+    }
+
+    fn parse_raw_output(_output: &str) -> Result<Self::Output> {
+        Ok(())
+    }
+}
+
+/// Delete a pull request comment.
+pub struct PrCommentDelete {
+    pub id: u64,
+}
+
+impl Command for PrCommentDelete {
+    type Output = ();
+
+    fn to_raw_args(&self) -> Result<Vec<String>> {
+        Ok(vec![
+            "api".into(),
+            "-X".into(),
+            "DELETE".into(),
+            format!("repos/{{owner}}/{{repo}}/issues/comments/{}", self.id),
+        ])
+    }
+
+    fn parse_raw_output(_output: &str) -> Result<Self::Output> {
+        Ok(())
+    }
+}
+
+/// A pull request reduced to what links it and its author, as
+/// [`PrFindByCommit`] returns it.
+#[derive(Debug, Deserialize)]
+pub struct PrSummary {
+    pub number: u64,
+    pub url: String,
+    /// `None` when the author has no GitHub account.
+    pub author: Option<String>,
+}
+
+/// Find the first pull request a commit belongs to.
+pub struct PrFindByCommit<'a> {
+    pub sha: &'a str,
+}
+
+impl<'a> Command for PrFindByCommit<'a> {
+    type Output = Option<PrSummary>;
+
+    fn to_raw_args(&self) -> Result<Vec<String>> {
+        Ok(vec![
+            "api".into(),
+            format!("repos/{{owner}}/{{repo}}/commits/{}/pulls", self.sha),
+            "--jq".into(),
+            ".[0] | select(. != null) | {number, url: .html_url, author: .user.login}".into(),
+        ])
+    }
+
+    fn parse_raw_output(output: &str) -> Result<Self::Output> {
+        Ok(if output.is_empty() {
+            None
+        } else {
+            Some(serde_json::from_str(output)?)
+        })
+    }
+}
+
+/// A commit, as [`CommitView`] returns it.
+#[derive(Debug, Deserialize)]
+pub struct Commit {
+    pub url: String,
+    /// `None` when the commit email is not on a GitHub account.
+    pub author: Option<String>,
+}
+
+/// View one commit.
+pub struct CommitView<'a> {
+    pub sha: &'a str,
+}
+
+impl<'a> Command for CommitView<'a> {
+    type Output = Commit;
+
+    fn to_raw_args(&self) -> Result<Vec<String>> {
+        Ok(vec![
+            "api".into(),
+            format!("repos/{{owner}}/{{repo}}/commits/{}", self.sha),
+            "--jq".into(),
+            "{url: .html_url, author: .author.login}".into(),
+        ])
+    }
+
+    fn parse_raw_output(output: &str) -> Result<Self::Output> {
+        Ok(serde_json::from_str(output)?)
+    }
+}
+
 pub const MARKER: &str = "<!-- verwalter release -->";
 
 /// Push every branch and make GitHub match the plan.
@@ -135,53 +670,21 @@ pub fn attribute(repo: &mut Repo, gh: &dyn Client) {
         ) else {
             continue;
         };
-        // gh output is trimmed, so a missing login (commit email not on
-        // GitHub) is "-" rather than an empty last field.
-        let user = |login: &str| {
-            if login == "-" {
-                String::new()
-            } else {
-                format!(" ([@{login}](https://github.com/{login}))")
-            }
+        let user = |login: Option<String>| {
+            login
+                .map(|l| format!(" ([@{l}](https://github.com/{l}))"))
+                .unwrap_or_default()
         };
-        let pulls = gh.execute(&[
-            "api",
-            &format!("repos/{{owner}}/{{repo}}/commits/{sha}/pulls"),
-            "--jq",
-            r#".[0] | select(. != null) | "\(.number)\t\(.html_url)\t\(.user.login // "-")""#,
-        ]);
-        let commit = || {
-            gh.execute(&[
-                "api",
-                &format!("repos/{{owner}}/{{repo}}/commits/{sha}"),
-                "--jq",
-                r#""\(.html_url)\t\(.author.login // "-")""#,
-            ])
-        };
-        c.attribution = match pulls
-            .ok()
-            .filter(|s| !s.is_empty())
-            .map(|s| s.splitn(3, '\t').map(String::from).collect::<Vec<_>>())
-        {
-            Some(parts) if parts.len() == 3 => Some(format!(
-                "- [#{}]({}){}",
-                parts[0],
-                parts[1],
-                user(&parts[2])
-            )),
-            _ => match commit()
-                .ok()
-                .filter(|s| !s.is_empty())
-                .map(|s| s.splitn(2, '\t').map(String::from).collect::<Vec<_>>())
-            {
-                Some(parts) if parts.len() == 2 => Some(format!(
+        c.attribution = match (PrFindByCommit { sha: &sha }).execute(gh) {
+            Ok(Some(pr)) => Some(format!("- [#{}]({}){}", pr.number, pr.url, user(pr.author))),
+            _ => CommitView { sha: &sha }.execute(gh).ok().map(|commit| {
+                format!(
                     "- [`{}`]({}){}",
                     &sha[..7.min(sha.len())],
-                    parts[0],
-                    user(&parts[1])
-                )),
-                _ => None,
-            },
+                    commit.url,
+                    user(commit.author)
+                )
+            }),
         };
     }
 }
@@ -197,17 +700,15 @@ pub fn sync(
     dry_run: bool,
     gh: &dyn Client,
 ) -> Result<Option<PullRequest>> {
-    let label = repo.config.release.label.as_str();
-    gh.execute(&[
-        "label",
-        "create",
-        label,
-        "--force",
-        "--color",
-        "0E8A16",
-        "--description",
-        "Release PR managed by verwalter",
-    ])?;
+    let label = &repo.config.release.label;
+
+    LabelCreate {
+        name: label,
+        color: "0E8A16",
+        description: "Release PR managed by verwalter",
+        force: true,
+    }
+    .execute(gh)?;
 
     let existing = open_pr(gh, &branches::branch_name(repo))?;
     let existing = existing.as_ref();
@@ -234,14 +735,12 @@ pub fn sync(
 
     // Spec: CloseReleasePullRequestWithNothingPending.
     if let Some(stale) = existing {
-        gh.execute(&[
-            "pr",
-            "close",
-            &stale.number.to_string(),
-            "--delete-branch",
-            "--comment",
-            "Nothing left to release.",
-        ])?;
+        PrClose {
+            number: stale.number,
+            comment: "Nothing left to release.",
+            delete_branch: true,
+        }
+        .execute(gh)?;
     }
     Ok(None)
 }
@@ -259,41 +758,40 @@ pub fn upsert_pr(
 ) -> Result<PullRequest> {
     let number = match existing {
         Some(existing) => {
-            let n = existing.number.to_string();
-            gh.execute(&[
-                "pr",
-                "edit",
-                &n,
-                "--title",
-                title,
-                "--body",
-                body,
-                "--add-label",
-                label,
-            ])?;
+            PrEdit {
+                number: existing.number,
+                title: Some(title),
+                body: Some(body),
+                add_label: Some(label),
+                base: None,
+            }
+            .execute(gh)?;
             if existing.base != base {
-                gh.execute(&["pr", "edit", &n, "--base", base])?;
+                PrEdit {
+                    number: existing.number,
+                    title: None,
+                    body: None,
+                    add_label: None,
+                    base: Some(base),
+                }
+                .execute(gh)?;
             }
             existing.number
         }
-        None => number_from_url(&gh.execute(&[
-            "pr", "create", "--head", head, "--base", base, "--title", title, "--body", body,
-            "--label", label,
-        ])?)?,
+        None => PrCreate {
+            head,
+            base,
+            title,
+            body,
+            label,
+        }
+        .execute(gh)?,
     };
     Ok(PullRequest {
         number,
         head: head.to_string(),
         base: base.to_string(),
     })
-}
-
-fn number_from_url(url: &str) -> Result<u64> {
-    url.trim()
-        .rsplit('/')
-        .next()
-        .and_then(|n| n.parse().ok())
-        .with_context(|| format!("unexpected `gh pr create` output: {url}"))
 }
 
 /// Append `key=value` lines to `$GITHUB_OUTPUT` when running in Actions.
@@ -311,16 +809,12 @@ pub fn append_output(lines: &str) -> Result<()> {
 
 /// The open PR whose head is `head`, if any.
 pub fn open_pr(gh: &dyn Client, head: &str) -> Result<Option<PullRequest>> {
-    let open: Vec<PullRequest> = serde_json::from_str(&gh.execute(&[
-        "pr",
-        "list",
-        "--state",
-        "open",
-        "--head",
-        head,
-        "--json",
-        "number,headRefName,baseRefName",
-    ])?)?;
+    let open = PrList {
+        head: Some(head),
+        label: None,
+        limit: 1,
+    }
+    .execute(gh)?;
     Ok(open.into_iter().next())
 }
 
@@ -439,11 +933,26 @@ mod tests {
     }
 
     #[test]
+    fn release_view_passes_a_scoped_tag_as_a_raw_string() {
+        let args = ReleaseView {
+            tag: "@scope/pkg@1.0.0",
+        }
+        .to_raw_args()
+        .unwrap();
+        let i = args
+            .iter()
+            .position(|a| a == "tag=@scope/pkg@1.0.0")
+            .unwrap();
+        assert_eq!(args[i - 1], "-f");
+        assert_eq!(ReleaseView::parse_raw_output("").unwrap(), None);
+    }
+
+    #[test]
     fn number_from_create_output() {
         assert_eq!(
-            number_from_url("https://github.com/livekit/rust-sdks/pull/1312\n").unwrap(),
+            PrCreate::parse_raw_output("https://github.com/livekit/rust-sdks/pull/1312\n").unwrap(),
             1312
         );
-        assert!(number_from_url("nope").is_err());
+        assert!(PrCreate::parse_raw_output("nope").is_err());
     }
 }
