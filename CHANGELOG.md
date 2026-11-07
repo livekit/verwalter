@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.29.0
+
+### Minor Changes
+
+- A package that `publish` handles is released as a draft by default, and `publish` flips it once the registry has the version: no public GitHub release before the package is there. A package with nothing to publish is released on creation. `release.draft = false` restores the old behaviour - [#85](https://github.com/livekit/verwalter/pull/85) ([@lukasIO](https://github.com/lukasIO))
+
+### Patch Changes
+
+- Fix upload executed during dry run - [#88](https://github.com/livekit/verwalter/pull/88) ([@ladvoc](https://github.com/ladvoc))
+- Move to trait-based GitHub client - [#70](https://github.com/livekit/verwalter/pull/70) ([@ladvoc](https://github.com/ladvoc))
+- `publish --releases '[]'` publishes every tagged package the registries lack, like no list at all: a re-run by hand after a run that released nothing no longer passes as a success with nothing published - [#83](https://github.com/livekit/verwalter/pull/83) ([@lukasIO](https://github.com/lukasIO))
+
 ## 0.28.2
 
 ### Patch Changes
