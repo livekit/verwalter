@@ -141,47 +141,41 @@ pub trait Command {
     }
 }
 
-/// Create or update a label.
-pub enum LabelCommand<'a> {
-    Create {
-        name: &'a str,
-        color: &'a str,
-        description: &'a str,
-        force: bool,
-    },
-    Delete {
-        name: &'a str,
-    },
+/// Create a label, or update it when `force` is set and it exists.
+pub struct LabelCreate<'a> {
+    pub name: &'a str,
+    pub color: &'a str,
+    pub description: &'a str,
+    pub force: bool,
 }
 
-impl<'a> Command for LabelCommand<'a> {
+impl<'a> Command for LabelCreate<'a> {
     type Output = ();
 
     fn to_raw_args(&self) -> Result<Vec<&str>> {
-        const SUBCOMMAND: &str = "label";
-        Ok(match self {
-            Self::Create {
-                name,
-                color,
-                description,
-                force,
-            } => {
-                let mut args = vec![
-                    SUBCOMMAND,
-                    "create",
-                    name,
-                    "--color",
-                    color,
-                    "--description",
-                    description,
-                ];
-                if *force {
-                    args.push("--force");
-                }
-                args
-            }
-            Self::Delete { name } => vec![SUBCOMMAND, "delete", name, "--yes"],
-        })
+        let mut args = vec!["label", "create", self.name];
+        if self.force {
+            args.push("--force");
+        }
+        args.extend(["--color", self.color, "--description", self.description]);
+        Ok(args)
+    }
+
+    fn parse_raw_output(_output: &str) -> Result<Self::Output> {
+        Ok(())
+    }
+}
+
+/// Delete a label.
+pub struct LabelDelete<'a> {
+    pub name: &'a str,
+}
+
+impl<'a> Command for LabelDelete<'a> {
+    type Output = ();
+
+    fn to_raw_args(&self) -> Result<Vec<&str>> {
+        Ok(vec!["label", "delete", self.name, "--yes"])
     }
 
     fn parse_raw_output(_output: &str) -> Result<Self::Output> {
@@ -270,7 +264,7 @@ pub fn sync(
 ) -> Result<Option<PullRequest>> {
     let label = &repo.config.release.label;
 
-    LabelCommand::Create {
+    LabelCreate {
         name: label,
         color: "0E8A16",
         description: "Release PR managed by verwalter",
