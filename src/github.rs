@@ -219,6 +219,38 @@ impl<'a> Command for PrCreate<'a> {
     }
 }
 
+/// Edit a pull request. Fields left `None` are not changed.
+pub struct PrEdit<'a> {
+    pub number: u64,
+    pub title: Option<&'a str>,
+    pub body: Option<&'a str>,
+    pub add_label: Option<&'a str>,
+    pub base: Option<&'a str>,
+}
+
+impl<'a> Command for PrEdit<'a> {
+    type Output = ();
+
+    fn to_raw_args(&self) -> Result<Vec<String>> {
+        let mut args = vec!["pr".into(), "edit".into(), self.number.to_string()];
+        for (flag, value) in [
+            ("--title", self.title),
+            ("--body", self.body),
+            ("--add-label", self.add_label),
+            ("--base", self.base),
+        ] {
+            if let Some(value) = value {
+                args.extend([flag.into(), value.into()]);
+            }
+        }
+        Ok(args)
+    }
+
+    fn parse_raw_output(_output: &str) -> Result<Self::Output> {
+        Ok(())
+    }
+}
+
 pub const MARKER: &str = "<!-- verwalter release -->";
 
 /// Push every branch and make GitHub match the plan.
@@ -358,20 +390,23 @@ pub fn upsert_pr(
 ) -> Result<PullRequest> {
     let number = match existing {
         Some(existing) => {
-            let n = existing.number.to_string();
-            gh.execute(&[
-                "pr",
-                "edit",
-                &n,
-                "--title",
-                title,
-                "--body",
-                body,
-                "--add-label",
-                label,
-            ])?;
+            PrEdit {
+                number: existing.number,
+                title: Some(title),
+                body: Some(body),
+                add_label: Some(label),
+                base: None,
+            }
+            .execute(gh)?;
             if existing.base != base {
-                gh.execute(&["pr", "edit", &n, "--base", base])?;
+                PrEdit {
+                    number: existing.number,
+                    title: None,
+                    body: None,
+                    add_label: None,
+                    base: Some(base),
+                }
+                .execute(gh)?;
             }
             existing.number
         }
