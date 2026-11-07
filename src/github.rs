@@ -251,6 +251,40 @@ impl<'a> Command for PrEdit<'a> {
     }
 }
 
+/// List open pull requests.
+pub struct PrList<'a> {
+    /// Only PRs whose head branch is this.
+    pub head: Option<&'a str>,
+    /// Only PRs carrying this label.
+    pub label: Option<&'a str>,
+    /// Required: gh silently stops at 30 when omitted.
+    pub limit: u32,
+}
+
+impl<'a> Command for PrList<'a> {
+    type Output = Vec<PullRequest>;
+
+    fn to_raw_args(&self) -> Result<Vec<String>> {
+        let mut args = Vec::from(["pr", "list", "--state", "open"].map(String::from));
+        for (flag, value) in [("--head", self.head), ("--label", self.label)] {
+            if let Some(value) = value {
+                args.extend([flag.into(), value.into()]);
+            }
+        }
+        args.extend([
+            "--limit".into(),
+            self.limit.to_string(),
+            "--json".into(),
+            "number,headRefName,baseRefName".into(),
+        ]);
+        Ok(args)
+    }
+
+    fn parse_raw_output(output: &str) -> Result<Self::Output> {
+        Ok(serde_json::from_str(output)?)
+    }
+}
+
 pub const MARKER: &str = "<!-- verwalter release -->";
 
 /// Push every branch and make GitHub match the plan.
@@ -441,16 +475,12 @@ pub fn append_output(lines: &str) -> Result<()> {
 
 /// The open PR whose head is `head`, if any.
 pub fn open_pr(gh: &dyn Client, head: &str) -> Result<Option<PullRequest>> {
-    let open: Vec<PullRequest> = serde_json::from_str(&gh.execute(&[
-        "pr",
-        "list",
-        "--state",
-        "open",
-        "--head",
-        head,
-        "--json",
-        "number,headRefName,baseRefName",
-    ])?)?;
+    let open = PrList {
+        head: Some(head),
+        label: None,
+        limit: 1,
+    }
+    .execute(gh)?;
     Ok(open.into_iter().next())
 }
 
