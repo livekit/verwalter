@@ -309,6 +309,45 @@ impl<'a> Command for PrClose<'a> {
     }
 }
 
+/// The fields of a pull request [`PrView`] reads, flattened by its `--jq`.
+#[derive(Deserialize)]
+pub struct PrDetails {
+    pub title: String,
+    pub head: String,
+    pub head_owner: String,
+    pub head_repo: String,
+    pub labels: Vec<String>,
+    pub files: Vec<String>,
+}
+
+/// View one pull request.
+pub struct PrView {
+    pub number: u64,
+}
+
+impl Command for PrView {
+    type Output = PrDetails;
+
+    fn to_raw_args(&self) -> Result<Vec<String>> {
+        Ok(vec![
+            "pr".into(),
+            "view".into(),
+            self.number.to_string(),
+            "--json".into(),
+            "title,headRefName,headRepositoryOwner,headRepository,labels,files".into(),
+            // Flatten API response
+            "--jq".into(),
+            "{title, head: .headRefName, head_owner: .headRepositoryOwner.login, \
+             head_repo: .headRepository.name, labels: [.labels[].name], files: [.files[].path]}"
+                .into(),
+        ])
+    }
+
+    fn parse_raw_output(output: &str) -> Result<Self::Output> {
+        Ok(serde_json::from_str(output)?)
+    }
+}
+
 pub const MARKER: &str = "<!-- verwalter release -->";
 
 /// Push every branch and make GitHub match the plan.
