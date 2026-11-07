@@ -167,25 +167,6 @@ impl<'a> Command for LabelCreate<'a> {
     }
 }
 
-/// Delete a label.
-pub struct LabelDelete<'a> {
-    pub name: &'a str,
-}
-
-impl<'a> Command for LabelDelete<'a> {
-    type Output = ();
-
-    fn to_raw_args(&self) -> Result<Vec<String>> {
-        Ok(Vec::from(
-            ["label", "delete", self.name, "--yes"].map(String::from),
-        ))
-    }
-
-    fn parse_raw_output(_output: &str) -> Result<Self::Output> {
-        Ok(())
-    }
-}
-
 /// Open a pull request. Outputs its number.
 pub struct PrCreate<'a> {
     pub head: &'a str,
