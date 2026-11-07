@@ -7,7 +7,7 @@
 
 use std::{
     path::{Path, PathBuf},
-    process::Command,
+    process,
 };
 
 use anyhow::{Context, Result, anyhow, ensure};
@@ -43,7 +43,7 @@ impl SystemClient {
 
 impl Client for SystemClient {
     fn execute(&self, args: &[&str]) -> Result<String> {
-        let mut cmd = Command::new("gh");
+        let mut cmd = process::Command::new("gh");
         cmd.current_dir(&self.root).args(args);
         // Runs gh pinned to the repository behind `remote` (`GH_REPO`), so a
         // clone with an `upstream` remote never resolves PR numbers against the
@@ -116,6 +116,77 @@ pub struct PullRequest {
     pub head: String,
     #[serde(rename = "baseRefName")]
     pub base: String,
+}
+
+/// Typed GitHub CLI subcommand.
+pub trait Command {
+    /// Typed output the command returns when successful.
+    type Output;
+
+    /// Convert the typed command into raw arguments for the GitHub CLI.
+    fn to_raw_args(&self) -> Result<Vec<&str>>;
+
+    /// Parse the raw string output from the GitHub CLI into [`Self::Output`].
+    fn parse_raw_output(output: &str) -> Result<Self::Output>;
+
+    /// Execute the command using the given client.
+    fn execute(&self, gh: &dyn Client) -> Result<Self::Output> {
+        let raw_args = self
+            .to_raw_args()
+            .context("invalid arguments for GitHub command")?;
+        let raw_output = gh
+            .execute(&raw_args)
+            .context("failed to execute GitHub command")?;
+        Self::parse_raw_output(&raw_output).context("failed to parse GitHub command output")
+    }
+}
+
+/// Create or update a label.
+pub enum LabelCommand<'a> {
+    Create {
+        name: &'a str,
+        color: &'a str,
+        description: &'a str,
+        force: bool,
+    },
+    Delete {
+        name: &'a str,
+    },
+}
+
+impl<'a> Command for LabelCommand<'a> {
+    type Output = ();
+
+    fn to_raw_args(&self) -> Result<Vec<&str>> {
+        const SUBCOMMAND: &str = "label";
+        Ok(match self {
+            Self::Create {
+                name,
+                color,
+                description,
+                force,
+            } => {
+                let mut args = vec![
+                    SUBCOMMAND,
+                    "create",
+                    name,
+                    "--color",
+                    color,
+                    "--description",
+                    description,
+                ];
+                if *force {
+                    args.push("--force");
+                }
+                args
+            }
+            Self::Delete { name } => vec![SUBCOMMAND, "delete", name, "--yes"],
+        })
+    }
+
+    fn parse_raw_output(_output: &str) -> Result<Self::Output> {
+        Ok(())
+    }
 }
 
 pub const MARKER: &str = "<!-- verwalter release -->";
@@ -197,17 +268,15 @@ pub fn sync(
     dry_run: bool,
     gh: &dyn Client,
 ) -> Result<Option<PullRequest>> {
-    let label = repo.config.release.label.as_str();
-    gh.execute(&[
-        "label",
-        "create",
-        label,
-        "--force",
-        "--color",
-        "0E8A16",
-        "--description",
-        "Release PR managed by verwalter",
-    ])?;
+    let label = &repo.config.release.label;
+
+    LabelCommand::Create {
+        name: label,
+        color: "0E8A16",
+        description: "Release PR managed by verwalter",
+        force: true,
+    }
+    .execute(gh)?;
 
     let existing = open_pr(gh, &branches::branch_name(repo))?;
     let existing = existing.as_ref();
