@@ -395,7 +395,7 @@ fn release_tags_and_creates_github_releases_resumably() {
         match args {
             // Older tags already have releases; the new one does not yet.
             ["api", "graphql", "-f", tag, ..] if *tag != "tag=livekit-v0.8.0" => {
-                Ok(r#"{"isDraft":false,"assets":[]}"#.into())
+                Ok(r#"{"isDraft":false,"asset_count":0}"#.into())
             }
             ["api", "graphql", ..] => Ok(String::new()),
             _ => Ok(String::new()),
@@ -442,9 +442,9 @@ fn release_tags_and_creates_github_releases_resumably() {
     let gh2 = MockClient(|args: &[&str]| -> Result<String> {
         calls.borrow_mut().push(args.join(" "));
         Ok(if args[3] == "tag=livekit-v0.8.0" {
-            r#"{"isDraft":true,"assets":[]}"#.into()
+            r#"{"isDraft":true,"asset_count":0}"#.into()
         } else {
-            r#"{"isDraft":false,"assets":[]}"#.into()
+            r#"{"isDraft":false,"asset_count":0}"#.into()
         })
     });
     let again = verwalter::release::run(&repo, "origin", &Default::default(), &gh2).unwrap();
@@ -491,7 +491,7 @@ fn maintenance_release_is_not_marked_latest() {
         calls.borrow_mut().push(args.join(" "));
         match args {
             ["api", "graphql", "-f", "tag=livekit-v0.7.1", ..] => Ok(String::new()),
-            ["api", "graphql", ..] => Ok(r#"{"isDraft":false,"assets":[]}"#.into()),
+            ["api", "graphql", ..] => Ok(r#"{"isDraft":false,"asset_count":0}"#.into()),
             _ => Ok(String::new()),
         }
     });
@@ -523,7 +523,7 @@ fn release_resumes_a_tag_without_github_release() {
         calls.borrow_mut().push(args.join(" "));
         match args {
             ["api", "graphql", "-f", "tag=livekit-v0.7.0", ..] => Ok(String::new()),
-            ["api", "graphql", ..] => Ok(r#"{"isDraft":false,"assets":[]}"#.into()),
+            ["api", "graphql", ..] => Ok(r#"{"isDraft":false,"asset_count":0}"#.into()),
             _ => Ok(String::new()),
         }
     });
@@ -567,7 +567,7 @@ fn release_with_assets_then_abandon() {
         calls.borrow_mut().push(args.join(" "));
         match args {
             ["api", "graphql", "-f", "tag=livekit-v0.7.0", ..] if !exists => Ok(String::new()),
-            ["api", "graphql", ..] => Ok(r#"{"isDraft":false,"assets":[]}"#.into()),
+            ["api", "graphql", ..] => Ok(r#"{"isDraft":false,"asset_count":0}"#.into()),
             _ => Ok(String::new()),
         }
     });
@@ -892,9 +892,9 @@ fn release_finishes_a_partial_release_for_one_package() {
         calls.borrow_mut().push(args.join(" "));
         match args {
             ["api", "graphql", "-f", "tag=livekit-v0.7.0", ..] => {
-                Ok(format!(r#"{{"isDraft":{},"assets":[]}}"#, !published))
+                Ok(format!(r#"{{"isDraft":{},"asset_count":0}}"#, !published))
             }
-            ["api", "graphql", ..] => Ok(r#"{"isDraft":false,"assets":[{"name":"x"}]}"#.into()),
+            ["api", "graphql", ..] => Ok(r#"{"isDraft":false,"asset_count":1}"#.into()),
             _ => Ok(String::new()),
         }
     });
@@ -977,10 +977,10 @@ fn status_reports_state_and_next_step() {
                 Ok(r#"[{"number":12,"headRefName":"release/main","baseRefName":"main"}]"#.into())
             }
             ["api", "graphql", "-f", "tag=livekit-protocol-v0.3.1", ..] => {
-                Ok(r#"{"isDraft":false,"assets":[{"name":"a"},{"name":"b"}]}"#.into())
+                Ok(r#"{"isDraft":false,"asset_count":2}"#.into())
             }
             ["api", "graphql", "-f", "tag=livekit-api-v0.4.3", ..] => {
-                Ok(r#"{"isDraft":true,"assets":[]}"#.into())
+                Ok(r#"{"isDraft":true,"asset_count":0}"#.into())
             }
             _ => Err(anyhow!("not found")),
         }
@@ -1091,7 +1091,7 @@ fn hand_bumped_version_is_not_released() {
     let gh = MockClient(|args: &[&str]| -> Result<String> {
         match args {
             ["api", "graphql", "-f", "tag=livekit-v0.7.1", ..] => Ok(String::new()),
-            ["api", "graphql", ..] => Ok(r#"{"isDraft":false,"assets":[]}"#.into()),
+            ["api", "graphql", ..] => Ok(r#"{"isDraft":false,"asset_count":0}"#.into()),
             _ => Ok(String::new()),
         }
     });
@@ -1533,7 +1533,7 @@ fn named_package_is_reported_even_when_complete() {
     let repo = Repo::load(root).unwrap();
     let gh = MockClient(|args: &[&str]| -> Result<String> {
         match args {
-            ["api", "graphql", ..] => Ok(r#"{"isDraft":false,"assets":[{"name":"a"}]}"#.into()),
+            ["api", "graphql", ..] => Ok(r#"{"isDraft":false,"asset_count":1}"#.into()),
             other => panic!("unexpected write {other:?}"),
         }
     });
