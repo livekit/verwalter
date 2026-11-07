@@ -80,7 +80,7 @@ impl<C: Client> Client for DryRunClient<C> {
         let is_write = matches!(
             args,
             ["pr", "create" | "edit" | "close" | "comment", ..]
-                | ["release", "create" | "delete" | "edit", ..]
+                | ["release", "create" | "delete" | "edit" | "upload", ..]
                 | ["label", "create", ..]
                 | ["api", "-X", ..]
         );
