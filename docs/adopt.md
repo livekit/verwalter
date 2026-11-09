@@ -191,7 +191,7 @@ maintainer:
 - Add the `internal` label to the migration PR itself, or write a
   changeset for it if it touched a package's files.
 - The API check as a follow-up: `[check].api` with cargo-semver-checks
-  for Rust, griffe for Python, break-check for TypeScript, as described
+  for Rust, griffe for Python, break-check for JavaScript, as described
   in [api-check.md](api-check.md). The migration PR leaves it off.
 - Every item of the tool's "Different afterwards" list under
   [Per tooling](#per-tooling): what contributors do differently, and

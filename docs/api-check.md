@@ -32,7 +32,19 @@ tool's own report there.
 |---|---|---|
 | cargo-semver-checks | `cargo semver-checks --baseline-rev $VERWALTER_BASELINE_TAG 2>&1 \| tee /dev/stderr \| sed -n 's/.*requires new \([a-z]*\) version.*/\1/p'` | `major`, `minor` |
 | griffe | `griffe check <module> -a $VERWALTER_BASELINE_TAG >/dev/null \|\| echo major` | `major` |
-| break-check | `break-check detect --baseline <dir> --format json \| jq -r .recommendedBump` | `major`, `minor`, `patch` |
+| break-check | `break-check --tagPattern="refs/tags/$VERWALTER_PACKAGE@" --pattern='tests/public/**/*' --testCommand='node --test tests/public/**/*.test.js' --certifyCommand=false 1>&2 \|\| echo major` | `major` |
+
+break-check compares behaviour, not types: it restores the files that
+match `--pattern` from the newest release tag that matches `--tagPattern`
+and runs `--testCommand` against the current source. A restored test that
+fails is a break. The tag pattern is a regular expression, so `@` after
+the package name keeps `@play/core@` from matching `@play/core-extra@`.
+When the baseline release has no public tests yet, break-check exits 2 and
+`|| echo major` would claim a break. Skip it in that case:
+
+```sh
+git ls-tree -r --name-only "$VERWALTER_BASELINE_TAG" -- tests/public | grep -q . || exit 0
+```
 
 The tool must be on the runner before the action runs, and the checkout
 needs the baseline tag:
