@@ -50,6 +50,10 @@ struct Candidate {
     /// Spec: Package.publish_command, resolved; the directory it runs in.
     command: String,
     path: String,
+    /// The npm dist-tag the version belongs under: `next`, `latest-1`,
+    /// else `latest`. Set for every registry as `VERWALTER_NPM_TAG`; only an
+    /// npm command has a use for it.
+    dist_tag: String,
     /// The packages a `[publish].workspace` command covers; empty for a
     /// package of its own.
     members: Vec<(String, crate::Version, String)>,
@@ -95,6 +99,9 @@ fn candidates(repo: &Repo, only: Option<&BTreeSet<String>>) -> Result<BTreeMap<S
         if !git::ref_exists(&repo.root, &tag) {
             continue;
         }
+        let released = crate::prerelease::released_versions(repo, &p.name)?;
+        let npm_tag = crate::version::npm_dist_tag(&p.version, &released);
+        let dist_tag = npm_tag.clone().unwrap_or_else(|| "latest".into());
         if repo.config.in_workspace_publish(&p.name) {
             let ws = out
                 .entry(WORKSPACE.to_string())
@@ -104,14 +111,14 @@ fn candidates(repo: &Repo, only: Option<&BTreeSet<String>>) -> Result<BTreeMap<S
                     deps: Vec::new(),
                     command: repo.config.publish.workspace.clone().unwrap_or_default(),
                     path: ".".into(),
+                    // ponytail: the first member decides; an rc PR moves every member.
+                    dist_tag: dist_tag.clone(),
                     members: Vec::new(),
                 });
             ws.deps.extend(p.dependencies.iter().cloned());
             ws.members.push((p.name.clone(), p.version.clone(), tag));
             continue;
         }
-        let released = crate::prerelease::released_versions(repo, &p.name)?;
-        let npm_tag = crate::version::npm_dist_tag(&p.version, &released);
         // Spec: Registry goproxy. The proxy request is the publish: an
         // empty command marks it.
         let goproxy = repo.config.registry_of(&p.name) == registry::Registry::Goproxy;
@@ -126,6 +133,7 @@ fn candidates(repo: &Repo, only: Option<&BTreeSet<String>>) -> Result<BTreeMap<S
                 deps: p.dependencies.clone(),
                 command,
                 path: cfg.path.clone(),
+                dist_tag,
                 members: Vec::new(),
             },
         );
@@ -196,7 +204,8 @@ fn run_command(repo: &Repo, name: &str, c: &Candidate, first: bool) -> (bool, St
         .command
         .replace("{package}", name)
         .replace("{version}", &c.version.to_string())
-        .replace("{tag}", &c.tag);
+        .replace("{tag}", &c.tag)
+        .replace("{npm_tag}", &c.dist_tag);
     let registry = format!(
         "{:?}",
         if name == WORKSPACE {
@@ -215,6 +224,7 @@ fn run_command(repo: &Repo, name: &str, c: &Candidate, first: bool) -> (bool, St
         .env("VERWALTER_ROOT", &repo.root)
         .env("VERWALTER_VERSION", c.version.to_string())
         .env("VERWALTER_TAG", &c.tag)
+        .env("VERWALTER_NPM_TAG", &c.dist_tag)
         .env(
             "VERWALTER_PRERELEASE",
             c.version.is_prerelease().to_string(),

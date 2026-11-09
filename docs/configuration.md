@@ -108,13 +108,14 @@ built-in command for its registry: `cargo publish`,
 publish: verwalter asks the Go module proxy for the version, which makes
 the proxy fetch the tag, and no command runs. The built-in npm command adds `--tag next` for
 a pre-release and `--tag latest-1` for a maintenance release, a final
-version below one already tagged (`latest-0.4` for 0.4.x). A package with
-none fails `publish` before
-anything runs. The command runs in the package's `path` with
+version below one already tagged (`latest-0.4` for 0.4.x). A custom npm command
+reads the same tag from `VERWALTER_NPM_TAG` or `{npm_tag}`, `latest` when
+neither applies. The variable is set on every registry and means nothing
+outside npm. A package with none fails `publish` before anything runs. The command runs in the package's `path` with
 `VERWALTER_PACKAGE`, `VERWALTER_VERSION`, `VERWALTER_TAG`,
-`VERWALTER_REGISTRY`, `VERWALTER_PRERELEASE`, `VERWALTER_FIRST_RELEASE` and
-`VERWALTER_ROOT` set. `{package}`, `{version}` and `{tag}` in the command
-are replaced.
+`VERWALTER_REGISTRY`, `VERWALTER_NPM_TAG`, `VERWALTER_PRERELEASE`,
+`VERWALTER_FIRST_RELEASE` and `VERWALTER_ROOT` set. `{package}`, `{version}`,
+`{tag}` and `{npm_tag}` in the command are replaced.
 
 `[publish].workspace` hands the packages on the default registry to the
 ecosystem's recursive publish instead: `pnpm -r publish`,
