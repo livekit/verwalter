@@ -1326,7 +1326,7 @@ fn publish_runs_dependencies_first_and_blocks_dependents_of_a_failure() {
 
     // Everything succeeds: the order file shows protocol before the others.
     let repo = with_command(
-        "echo $VERWALTER_PACKAGE $VERWALTER_VERSION $VERWALTER_TAG $VERWALTER_REGISTRY first=$VERWALTER_FIRST_RELEASE $(pwd | xargs basename) >> $VERWALTER_ROOT/order",
+        "echo $VERWALTER_PACKAGE $VERWALTER_VERSION $VERWALTER_TAG $VERWALTER_REGISTRY first=$VERWALTER_FIRST_RELEASE npm=$VERWALTER_NPM_TAG {npm_tag} $(pwd | xargs basename) >> $VERWALTER_ROOT/order",
     );
     let outcomes = verwalter::publish::run(&repo, &opts, &no_registry, &no_gh).unwrap();
     assert!(
@@ -1337,7 +1337,8 @@ fn publish_runs_dependencies_first_and_blocks_dependents_of_a_failure() {
     let lines: Vec<&str> = order.lines().collect();
     assert_eq!(lines.len(), 3);
     assert_eq!(
-        lines[0], "livekit-protocol 0.3.1 livekit-protocol-v0.3.1 none first=true livekit-protocol",
+        lines[0],
+        "livekit-protocol 0.3.1 livekit-protocol-v0.3.1 none first=true npm=latest latest livekit-protocol",
         "{order}"
     );
     fs::remove_file(root.join("order")).unwrap();
