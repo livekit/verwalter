@@ -1,5 +1,5 @@
 ---
-verwalter: patch
+verwalter: minor
 ---
 
 Typed GitHub operations
