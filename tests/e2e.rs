@@ -2185,9 +2185,9 @@ fn publish_flips_the_draft_release_once_the_registry_has_it() {
         calls.borrow_mut().push(args.join(" "));
         match args {
             ["api", "graphql", "-f", "tag=livekit-v0.7.0", ..] => {
-                Ok(r#"{"isDraft":false,"assets":[]}"#.into())
+                Ok(r#"{"isDraft":false,"asset_count":0}"#.into())
             }
-            ["api", "graphql", ..] => Ok(r#"{"isDraft":true,"assets":[]}"#.into()),
+            ["api", "graphql", ..] => Ok(r#"{"isDraft":true,"asset_count":0}"#.into()),
             ["release", "edit", "livekit-api-v0.4.3", "--draft=false"] => Err(anyhow!("HTTP 502")),
             _ => Ok(String::new()),
         }
