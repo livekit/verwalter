@@ -55,6 +55,7 @@ between packages are read from the manifests. Every package is tagged
 and gets a GitHub release unless `release.mode` says otherwise.
 
 ```toml
+#:schema https://raw.githubusercontent.com/livekit/verwalter/refs/heads/main/schemas/v1.json
 [versioning]
 files = ["Cargo.toml"]             # for every package; a package can set its own
 
