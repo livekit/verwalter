@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.30.0
+
+### Minor Changes
+
+- A custom `publish.command` for an npm package gets the dist-tag the built-in command would use, `next` for a pre-release and `latest-1` for a maintenance release, as `VERWALTER_NPM_TAG` and `{npm_tag}`. Before, only the built-in npm command knew it, and a custom command published every version under `latest`. - [#90](https://github.com/livekit/verwalter/pull/90) ([@lukasIO](https://github.com/lukasIO))
+- Typed GitHub operations - [#86](https://github.com/livekit/verwalter/pull/86) ([@ladvoc](https://github.com/ladvoc))
+
 ## 0.29.0
 
 ### Minor Changes
