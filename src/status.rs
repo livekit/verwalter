@@ -6,7 +6,14 @@ use std::collections::BTreeSet;
 
 use anyhow::Result;
 
-use crate::{config::ReleaseMode, git, github, plan::plan, prerelease, release, repo::Repo};
+use crate::{
+    config::ReleaseMode,
+    git,
+    github::{self, Command as _},
+    plan::plan,
+    prerelease,
+    repo::Repo,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PackageStatus {
@@ -38,22 +45,13 @@ pub fn status(repo: &Repo, remote: &str, gh: &dyn github::Client) -> Result<Vec<
                 .collect()
         })
         .unwrap_or_default();
-    let open: Vec<github::PullRequest> = gh
-        .execute(&[
-            "pr",
-            "list",
-            "--state",
-            "open",
-            "--label",
-            &repo.config.release.label,
-            "--limit",
-            "200",
-            "--json",
-            "number,headRefName,baseRefName",
-        ])
-        .ok()
-        .and_then(|j| serde_json::from_str(&j).ok())
-        .unwrap_or_default();
+    let open = github::PrList {
+        head: None,
+        label: Some(&repo.config.release.label),
+        limit: 200,
+    }
+    .execute(gh)
+    .unwrap_or_default();
     let planned = plan(
         &repo.packages,
         &repo.changesets,
@@ -77,10 +75,10 @@ pub fn status(repo: &Repo, remote: &str, gh: &dyn github::Client) -> Result<Vec<
         } else if !local && !on_remote {
             ("none".to_string(), 0)
         } else {
-            match release::view(gh, &tag) {
+            match (github::ReleaseView { tag: &tag }).execute(gh) {
                 Ok(Some(r)) => (
                     if r.draft { "draft" } else { "published" }.to_string(),
-                    r.assets.len(),
+                    r.asset_count,
                 ),
                 Ok(None) => ("none".to_string(), 0),
                 Err(_) => ("unknown".to_string(), 0),

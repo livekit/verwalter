@@ -16,7 +16,8 @@ use serde::Serialize;
 
 use crate::{
     config::ReleaseMode,
-    git, github,
+    git,
+    github::{self, Command as _},
     registry::{self, Http},
     repo::Repo,
 };
@@ -251,7 +252,7 @@ fn finish(repo: &Repo, gh: &dyn github::Client, o: &mut Outcome) {
     {
         return;
     }
-    let draft = match crate::release::view(gh, &o.tag) {
+    let draft = match (github::ReleaseView { tag: &o.tag }).execute(gh) {
         Ok(state) => state.is_some_and(|s| s.draft),
         Err(e) => {
             o.status = "failed";
