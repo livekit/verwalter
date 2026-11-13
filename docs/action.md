@@ -41,18 +41,25 @@ per registry for `verwalter.toml`:
 |---|---|---|
 | `changeset-check.yml` | `pull_request` on `main` | `check` |
 | `release-pr.yml` | `push` to `main` | `pr` |
-| `release.yml` | `pull_request` closed, merged, head `release/*`, author `verwalter-release[bot]`, body with the verwalter marker | `release`, then `publish` |
+| `release.yml` | `pull_request` closed on any base branch, merged, head `release/*`, author `verwalter-release[bot]`, body with the verwalter marker | `release`, then `publish` |
 | `pre-release.yml` | `workflow_dispatch` | `pre-release --target ${{ github.ref_name }}`, with `fetch-depth: 0` because the tags number the rc. The pending changesets decide what is in it and how far it moves. |
 
 To ship releases from a maintenance branch such as `v1` next to `main`:
 
 1. On `v1`, set `[git] base_branch = "v1"` in `verwalter.toml`.
-2. On `v1`, add `v1` to the `branches` filter of `changeset-check.yml`, `release-pr.yml` and `release.yml`.
+2. On `v1`, add `v1` to the `branches` filter of `changeset-check.yml` and `release-pr.yml`. `release.yml` has no such filter.
 3. If a package publishes to npm with its own command, add `--tag latest-1` to that command on `v1`.
 
 verwalter then keeps a `release/v1` PR into `v1`. A release from `v1` below
 a version already tagged does not take GitHub's Latest badge, and the
 built-in npm command keeps it off npm's `latest` dist-tag.
+
+`release.yml` has no `branches` filter, because an rc PR targets the
+branch that `pre-release.yml` was run on. With `branches: [main]`, an rc
+PR merged into another branch starts no release run: the branch has the
+rc version, but no tag and no GitHub release. The condition on the first
+job (head `release/*`, the bot author, the marker) decides which PRs
+release.
 
 If the release binary cannot be downloaded, the action builds verwalter
 from its own checkout instead. The build needs `cargo`, which GitHub-hosted
