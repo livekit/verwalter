@@ -21,7 +21,13 @@ Start a discussion about your proposed change in one of the following channels:
 > [!IMPORTANT]
 > Unsolicited PRs will not be accepted.
 
-### 2.2. Changeset
+### 2.2. Scope
+
+- PRs must be focused and limited to a single concern
+- For larger changes (diffs >= 500 lines), leverage [PR stacks](https://docs.github.com/en/pull-requests/how-tos/stacked-pull-requests)
+- Keep refactors and unrelated cleanup in separate PRs
+
+### 2.3. Changeset
 
 All code changes must have a chageset in order to get released. This project uses [_verwalter_](https://github.com/livekit/verwalter) for release management. Commit a changeset to your branch with required bump level and a brief summary of what changed:
 
@@ -33,7 +39,7 @@ verwalter changeset \
 
 Summary should be suitable for a changelog entry, extended description belongs in the PR description.
 
-### 2.3. Required Checks
+### 2.4. Required Checks
 
 Please make sure your change passes all of the following:
 
@@ -43,7 +49,7 @@ cargo clippy --all-targets -- -D warnings   # lints
 cargo test                                  # tests
 ```
 
-### 2.4. PR Description
+### 2.5. PR Description
 
 - Link discussion: an issue (e.g. `Closes #123`) or a LiveKit Developer Community thread
 - Describe *what* the change does and *why*
