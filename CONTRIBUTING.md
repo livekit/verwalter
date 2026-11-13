@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for your interest in contributing!
+Thanks for your interest in contributing! Please adhere to the following requirements to effectively contribute to this repository.
 
 ## 1. Reporting Bugs
 
