@@ -13,7 +13,8 @@
 | `verwalter publish [--releases <json>] [--jobs <n>]` | Run each package's publish command for the packages in `--releases` (the `releases` output of `release`), or every tagged package without it or with an empty list, dependencies first, up to `n` at once. A failure blocks dependents. A version on the registry is skipped. |
 | `verwalter pre-release [--target <branch>]` | Open an rc PR for every package with a pending changeset and the fixed groups they are in, from `target`. Changesets stay pending. |
 
-All commands take `--config <file>` and an optional checkout path. `pr`,
+All commands take `--config <file>` and an optional checkout path
+(default: the current git repository's root). `pr`,
 `release`, `pre-release`, `publish` and `check` take `--dry-run`. Every push, tag and
 GitHub write is then printed instead of done. Local release branches are
 still regenerated.
