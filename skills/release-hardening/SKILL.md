@@ -32,6 +32,16 @@ The reference is the verwalter documentation:
    instruction that takes part in a release. Include the repositories
    that consume its artifacts. Draw the chain: what starts each step,
    what each step reads, what it writes, and who waits for it.
+   - To find the consumers:
+     `gh search code --owner <org> "<repo>/releases/download"`.
+     For each one, write down what it reads to learn the version, and
+     when that becomes visible.
+   - To audit a pull request, read each workflow file whole at the
+     head of the PR, not only the diff:
+     `gh api "repos/<repo>/contents/<path>?ref=refs/pull/<n>/head" --jq .content | base64 -d`.
+   - In a migration, also list what the old tooling started: workflows
+     on its tags or releases, open drafts, the old release PR, and
+     trusted publisher entries that name a workflow file.
 2. **Check every rule** of
    [docs/release-workflows.md](https://github.com/livekit/verwalter/blob/main/docs/release-workflows.md)
    against the chain. For each broken rule, write down the file and
@@ -40,20 +50,29 @@ The reference is the verwalter documentation:
    tells you what a release looks like when the weakness fires.
 4. **Ask "what if" at each link of the chain.** What if this step
    runs twice? What if it runs before the step it depends on? What if
-   it is skipped? What if it is cancelled halfway? An answer of
-   "green run, incomplete release" is a finding.
+   it is skipped? What if it is cancelled halfway? What if someone
+   runs it by hand later, from another commit? What if the next
+   release starts while this one is incomplete? An answer of "green
+   run, incomplete release" is a finding. So is "red, but in a run
+   that nobody watches".
 5. **Read the history.** List the release runs of the last months and
-   read the result per job, not per run. A skipped job counts as a
-   success:
+   read the result per job, not per run. Filter the list with
+   `--workflow <file>` and `--branch <release branch>`: a workflow on
+   `pull_request: closed` has a skipped run for every other PR. A
+   release often spans several workflows. Match their runs by commit
+   or by time. A skipped job counts as a success:
    `gh run view <id> --json jobs --jq '.jobs[] | "\(.name) \(.conclusion)"'`.
    A skipped upload or publish job in a green run is a finding that
    already fired.
 6. **Rank and report.** Order the findings by what they cost: a
    release that is public and incomplete comes first, then a release
-   that is stuck, then one that needs manual work. For each finding,
-   give the file and line, how it fails, and two fixes: the smallest
-   one in the current tooling, and the one with verwalter. Give a
-   reason for each. The user decides.
+   that is stuck, then one that needs manual work. Within a class, a
+   finding that already fired in the history comes first. For each
+   finding, give the file and line, how it fails, and two fixes: the
+   smallest one in the current tooling, and the one with verwalter.
+   Give a reason for each. If verwalter has no fix, write "none" and
+   report it as a gap, as the `verwalter` skill says. The user
+   decides.
 7. **Prove each fix.** Recreate the failure and show that the new
    workflow handles it. Use `--dry-run`, a fork, or a test package. If
    you did not prove a fix, say so in the report.
@@ -70,7 +89,7 @@ The reference is the verwalter documentation:
 | Trusted publishing cannot create a package. | The first release of a new package fails | The release PR names a first release, and the command sees `VERWALTER_FIRST_RELEASE=true`. The first upload is by hand. |
 | A package is not in the release configuration, or a changeset file does not parse. | A package is missing from the release | `check` fails on both, on the pull request. |
 | A version can be edited by hand. | Tag and version file disagree | The tag comes from the files. A hand edit with no changeset is left alone with a warning. |
-| Shallow checkout: the tags are not there. | An rc number is used twice | `fetch-depth: 0` in every workflow. |
+| Shallow checkout: the tags are not there. | An rc number is used twice | `fetch-depth: 0` in the release, release PR and pre-release workflows. |
 | A step after the publish, such as a deploy or a notification, can fail the run. | The run is red after the registry has the version | Put such steps in their own job, after `publish`, with `continue-on-error`. |
 | The workflow trusts the branch name `release/*`. | A release ran that nobody approved | The example runs only for a merged PR from the bot with the verwalter marker in its body. |
 
