@@ -68,10 +68,10 @@ The reference is the verwalter documentation:
 | No dependency order, or one matrix leg failed. | A publish stopped halfway. Dependents on the registry point at versions that do not exist. | `publish` goes in dependency order and blocks only the transitive dependents. Re-run the job. |
 | The publish command is not safe to run twice. | A re-run fails with "version already exists" | `publish` asks the registry first and skips the versions it has. |
 | Trusted publishing cannot create a package. | The first release of a new package fails | The release PR names a first release, and the command sees `VERWALTER_FIRST_RELEASE=true`. The first upload is by hand. |
-| It is not in the release configuration, or a changeset file did not parse. | A package is missing from the release | `check` fails on both, on the pull request. |
-| A version was edited by hand. | Tag and version file disagree | The tag comes from the files. A hand edit with no changeset is left alone with a warning. |
+| A package is not in the release configuration, or a changeset file does not parse. | A package is missing from the release | `check` fails on both, on the pull request. |
+| A version can be edited by hand. | Tag and version file disagree | The tag comes from the files. A hand edit with no changeset is left alone with a warning. |
 | Shallow checkout: the tags are not there. | An rc number is used twice | `fetch-depth: 0` in every workflow. |
-| A step after the publish failed, such as a deploy or a notification. | The run is red after the registry has the version | Put such steps in their own job, after `publish`, with `continue-on-error`. |
+| A step after the publish, such as a deploy or a notification, can fail the run. | The run is red after the registry has the version | Put such steps in their own job, after `publish`, with `continue-on-error`. |
 | The workflow trusts the branch name `release/*`. | A release ran that nobody approved | The example runs only for a merged PR from the bot with the verwalter marker in its body. |
 
 If a weakness is not in the table, read
