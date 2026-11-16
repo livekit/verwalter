@@ -58,16 +58,25 @@ and finishes what is missing. Start with `verwalter status`. Add
 
 | What failed | What to do |
 |---|---|
-| Build or test job before the tag | Fix, merge, re-run the workflow (`workflow_dispatch`). Nothing was written. |
+| Build or test job before the tag | Fix, merge, run the workflow by hand (`workflow_dispatch`) from the branch head. Nothing was written, so the fix is part of the release. |
 | Tag push | `verwalter release --package <name>` tags and pushes. |
 | GitHub release creation | `verwalter release --package <name> [--asset <file>...]` creates it from the existing tag. |
 | Asset upload | `verwalter release --package <name> --asset <file\|dir>... [--publish]` uploads with `--clobber`. A directory stands for every file directly in it. |
 | Draft never published | `verwalter release --package <name> --publish`. |
-| Registry publish | Re-run the publish job. The tag and release stay. The tool does not touch registries. The publish runs in dependency order and stops at the first failure, so dependents were not published. The re-run picks them up. Or dispatch the workflow with `package=<dependent>` once the dependency is on the registry. |
+| Registry publish | Re-run the publish job with "Re-run failed jobs" on the same run. The tag and release stay. The tool does not touch registries. The publish runs in dependency order and stops at the first failure, so dependents were not published. The re-run picks them up. Or dispatch the workflow with `package=<dependent>` and `ref=<tag>` once the dependency is on the registry. |
 | The commit itself is broken | `verwalter release --abandon <tag>` removes the release and the tag. Add a changeset and release the next version. |
 | Release PR missing or stale | `verwalter pr`. The branch is regenerated, the PR updated in place. |
 | Push rejected with "directory file conflict" | A branch named like the prefix (`release`) exists. Rename it or set `[release].branch_prefix`. |
 | rc PR missing or stale | `verwalter pre-release --target <branch>`. |
+
+Once a tag exists, a recovery run must build and publish the tagged
+commit, not the branch head. "Re-run failed jobs" does that by itself:
+it keeps the merge commit. A run by hand (`workflow_dispatch`) takes the
+workflow file from the branch, so use it when the workflow file needed
+a fix, and set its `ref` input to the release tag. Without `ref`, the
+run checks out the branch head. The tool then tags that commit if the
+tag is missing, and the publish command uploads its source under the
+released version.
 
 Running locally needs push rights and `gh auth login`. Fetch first so tags
 and `origin/<base>` are current.

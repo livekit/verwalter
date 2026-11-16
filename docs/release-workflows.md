@@ -3,8 +3,8 @@
 These rules keep a release with several jobs, workflows or repositories
 from ending incomplete. They hold for any release tooling.
 [examples/workflows/release.yml](../examples/workflows/release.yml)
-follows them, with one exception that "Pin the commit" names. The
-failures behind them are in [release-pitfalls.md](release-pitfalls.md).
+follows them. The failures behind them are in
+[release-pitfalls.md](release-pitfalls.md).
 
 Read the verwalter documents at the version that the repository pins.
 The behavior of a command can differ between versions.
@@ -62,9 +62,8 @@ The behavior of a command can differ between versions.
   on the first run keeps the event and the commit. A new
   `workflow_dispatch` run checks out the branch head, and a publish
   from there uploads newer source under the released version. Give a
-  dispatch a `ref` input or check out the tag. The example workflow
-  does not do this yet: dispatch it only while the branch head is the
-  released commit.
+  dispatch a `ref` input and set it to the release tag, as the example
+  workflow does.
 - **A consumer checks before it builds.** A repository that downloads
   a release asset of another repository fails early, with the tag and
   the asset name in the message. The producer notifies consumers only
