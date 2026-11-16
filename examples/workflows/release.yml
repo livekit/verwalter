@@ -5,9 +5,11 @@
 name: Release
 
 on:
+  # No `branches` filter: an rc PR from pre-release.yml targets the branch
+  # the workflow was run on, and a maintenance branch has its own release
+  # PR. The condition on the first job decides which PRs release.
   pull_request:
     types: [closed]
-    branches: [main]
   # Re-run by hand after a fix: `verwalter release` resumes from the
   # current state (tags, releases, assets) and skips what is done. With
   # `package`, that package is reported again even when complete, so the
@@ -33,7 +35,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: main
+          # The merge commit, not main: an rc PR can target another branch.
+          ref: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
       # Build whatever the release needs: wheels, binaries, packages.
       # A matrix build gives each job its own artifact name, such as
       # `dist-${{ matrix.target }}`, and the release job downloads them
