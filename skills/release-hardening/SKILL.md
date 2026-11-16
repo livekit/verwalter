@@ -34,11 +34,21 @@ The reference is the verwalter documentation:
    what each step reads, what it writes, and who waits for it.
    - To find the consumers:
      `gh search code --owner <org> "<repo>/releases/download"`.
-     For each one, write down what it reads to learn the version, and
-     when that becomes visible.
-   - To audit a pull request, read each workflow file whole at the
-     head of the PR, not only the diff:
-     `gh api "repos/<repo>/contents/<path>?ref=refs/pull/<n>/head" --jq .content | base64 -d`.
+     Search also for the prefix of each asset name and for the name
+     of each download script. A consumer can use a script of the
+     producer through a submodule. For each consumer, write down what
+     it reads to learn the version, and when that becomes visible. A
+     consumer can learn the version from a registry and then download
+     an asset.
+   - To audit a pull request, read each workflow file whole, not only
+     the diff. Get the head commit once, because the head can move
+     during the audit: `gh pr view <n> --json headRefOid`. List the
+     files:
+     `gh api "repos/<repo>/contents/.github/workflows?ref=<sha>" --jq '.[].name'`.
+     Read one:
+     `gh api "repos/<repo>/contents/<path>?ref=<sha>" --jq .content | base64 -d`.
+     Read the PR body too. If it accepts a weakness on purpose, check
+     the stated reason against the code.
    - In a migration, also list what the old tooling started: workflows
      on its tags or releases, open drafts, the old release PR, and
      trusted publisher entries that name a workflow file.
@@ -63,13 +73,20 @@ The reference is the verwalter documentation:
    or by time. A skipped job counts as a success:
    `gh run view <id> --json jobs --jq '.jobs[] | "\(.name) \(.conclusion)"'`.
    A skipped upload or publish job in a green run is a finding that
-   already fired.
+   already fired. Then replay each bad state from the history through
+   the new procedure, for example "public without assets" or "assets
+   complete, one registry failed". Start the recovery run in your
+   head and follow it job by job. Does it repair the state, or does
+   it end green with nothing done?
 6. **Rank and report.** Order the findings by what they cost: a
-   release that is public and incomplete comes first, then a release
-   that is stuck, then one that needs manual work. Within a class, a
+   release that is public and incomplete, or public with content from
+   another commit, comes first. Then a release that is stuck, then
+   one that needs manual work. Within a class, a
    finding that already fired in the history comes first. For each
    finding, give the file and line, how it fails, and two fixes: the
    smallest one in the current tooling, and the one with verwalter.
+   In a pull request that migrates to verwalter, the current tooling
+   is the workflows of that PR.
    Give a reason for each. If verwalter has no fix, write "none" and
    report it as a gap, as the `verwalter` skill says. Before you
    propose a fix, run it through every trigger of the workflow and
@@ -95,7 +112,8 @@ The reference is the verwalter documentation:
 | A version can be edited by hand. | Tag and version file disagree | The tag comes from the files. A hand edit with no changeset is left alone with a warning. |
 | Shallow checkout: the tags are not there. | An rc number is used twice | `fetch-depth: 0` in the release, release PR and pre-release workflows. |
 | A step after the publish, such as a deploy or a notification, can fail the run. | The run is red after the registry has the version | Put such steps in their own job, after `publish`, with `continue-on-error`. |
-| The workflow trusts the branch name `release/*`. | A release ran that nobody approved | The example runs only for a merged PR from the bot with the verwalter marker in its body. |
+| The workflow trusts the branch name `release/*`. | A release ran that nobody approved | The example runs only for a merged PR from the bot with the verwalter marker in its body. A `workflow_dispatch` trigger is a second door: anyone with write access can run it from any branch. Name who may do that. |
+| One version goes to several registries and to release assets. | One registry fails after the release is public. A repair run ends green with nothing done, or fails on the registries that have the version. | `publish.registry` is one per package, and it decides when the draft becomes public. Each further registry is a job of the workflow that asks the registry for the version first. |
 
 If a weakness is not in the table, read
 [docs/release-pitfalls.md](https://github.com/livekit/verwalter/blob/main/docs/release-pitfalls.md).
