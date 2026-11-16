@@ -54,8 +54,10 @@ The reference is the verwalter documentation:
      trusted publisher entries that name a workflow file.
 2. **Check every rule** of
    [docs/release-workflows.md](https://github.com/livekit/verwalter/blob/main/docs/release-workflows.md)
-   against the chain. For each broken rule, write down the file and
-   the line.
+   against the chain. Each rule has a "Check" line: apply it. For
+   each broken rule, write down the file and the line. Read the
+   verwalter documents at the version that the repository pins,
+   because the behavior of a command can differ between versions.
 3. **Check every weakness** in the table below. The second column
    tells you what a release looks like when the weakness fires.
 4. **Ask "what if" at each link of the chain.** What if this step
@@ -111,7 +113,7 @@ The reference is the verwalter documentation:
 | A package is not in the release configuration, or a changeset file does not parse. | A package is missing from the release | `check` fails on both, on the pull request. |
 | A version can be edited by hand. | Tag and version file disagree | The tag comes from the files. A hand edit with no changeset is left alone with a warning. |
 | Shallow checkout: the tags are not there. | An rc number is used twice | `fetch-depth: 0` in the release, release PR and pre-release workflows. |
-| A step after the publish, such as a deploy or a notification, can fail the run. | The run is red after the registry has the version | Put such steps in their own job, after `publish`, with `continue-on-error`. |
+| A step after the publish, such as a deploy or a notification, can fail the run. | The run is red after the registry has the version | Put such steps in their own job, after `publish`. Its failure is red, and the release jobs stay green. |
 | The workflow trusts the branch name `release/*`. | A release ran that nobody approved | The example runs only for a merged PR from the bot with the verwalter marker in its body. A `workflow_dispatch` trigger is a second door: anyone with write access can run it from any branch. Name who may do that. |
 | One version goes to several registries and to release assets. | One registry fails after the release is public. A repair run ends green with nothing done, or fails on the registries that have the version. | `publish.registry` is one per package, and it decides when the draft becomes public. Each further registry is a job of the workflow that asks the registry for the version first. |
 
