@@ -71,8 +71,12 @@ The reference is the verwalter documentation:
    finding, give the file and line, how it fails, and two fixes: the
    smallest one in the current tooling, and the one with verwalter.
    Give a reason for each. If verwalter has no fix, write "none" and
-   report it as a gap, as the `verwalter` skill says. The user
-   decides.
+   report it as a gap, as the `verwalter` skill says. Before you
+   propose a fix, run it through every trigger of the workflow and
+   through the repair path. A fix for the release run must not break
+   the build on a push or the upload to a broken release. The user
+   decides. If the user accepts a finding without a fix, keep it in
+   the report with the reason.
 7. **Prove each fix.** Recreate the failure and show that the new
    workflow handles it. Use `--dry-run`, a fork, or a test package. If
    you did not prove a fix, say so in the report.

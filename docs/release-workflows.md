@@ -48,14 +48,23 @@ The behavior of a command can differ between versions.
   before the assets exist.
 - **Each job is safe to run again.** Upload with `--clobber`, skip a
   version the registry has, and keep a `workflow_dispatch` trigger
-  with a `package` input for recovery.
+  with a `package` input for recovery. Skip a step only when its
+  result is complete, never on a flag that stands for it. A release
+  that is public but has no assets still needs its upload.
 - **Never cancel a publish.** A concurrency group on the release
   workflow sets `cancel-in-progress: false`. A cancelled publish is a
-  half publish. No group at all also passes.
+  half publish. No group at all also passes. A group holds one
+  running and one waiting run. A third run cancels the waiting one,
+  also with `cancel-in-progress: false`. So a group for release runs
+  has the tag or the PR number in its name.
 - **One writer per release.** Each workflow that writes to a release
   has a concurrency group with the tag in its name. Two runs for one
   tag then go one after the other. Without the group, the second run
-  replaces assets on a release that is already public.
+  replaces assets on a release that is already public. If the workflow
+  also runs without a tag, for example as a build on each push, those
+  runs get a group of their own: `inputs.tag_name || github.run_id`.
+  With `github.ref` as the fallback, all pushes to one branch share a
+  group.
 - **Pin the commit.** Every job checks out the merge commit of the
   release PR, not the branch head. A push after the merge must not
   move the tag. Recovery follows the same rule. "Re-run failed jobs"
