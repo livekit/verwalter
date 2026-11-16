@@ -92,3 +92,31 @@ The behavior of a command can differ between versions.
   and notifications run in a later job with `continue-on-error`. A
   publish to a second registry is not such a step. It is part of the
   release, and its failure must be red.
+
+## Recovery
+
+A recovery run may change how the release is done, never what is
+released. The content of a version comes from the commit of its tag.
+First find the cause of the failure. It decides the path.
+
+| Cause | Path |
+|---|---|
+| Transient: a runner, the network, a registry that was down | Re-run the failed jobs of the same run: `gh run rerun <run-id> --failed`. The run keeps its event, its inputs and its commit. Only the failed jobs and the jobs after them run again. GitHub permits this for 30 days. |
+| The workflow file was wrong: a missing secret, a wrong setup step | A re-run uses the old workflow file. Merge the fix, then start a new run by hand with the tag: `gh workflow run <file> -f ref=<tag>`. The workflow file comes from the branch, and the source comes from the tag. |
+| The released commit is wrong: the source does not build or the package is broken | Do not publish a fixed copy of that version. If no registry has the version, remove the release and the tag (`verwalter release --abandon <tag>`). Then merge the fix with a changeset and release the next version. |
+
+A workflow supports these paths when it follows three rules above.
+"Each job is safe to run again" makes a second run harmless. "Pin the
+commit" makes a run by hand build the tag. "One writer per release"
+makes a second run for the same tag wait.
+
+Two limits:
+
+- A run by hand with the tag reads the release configuration from the
+  tag too. A fix to a publish command in `verwalter.toml` does not
+  reach that run.
+- A run by hand builds every job again. A re-run builds only what
+  failed.
+
+What to run for each failed step of a verwalter release is in
+[features.md](features.md#when-a-step-fails).
