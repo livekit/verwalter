@@ -24,7 +24,7 @@
 | Output (`release` only) | Meaning |
 |---|---|
 | `released` | `true` if at least one release was tagged, drafted or published. |
-| `releases` | JSON list of `{package, previous_version, version, tag, prerelease, first_release, status}`, dependencies first. |
+| `releases` | JSON list of `{package, previous_version, version, tag, prerelease, first_release, status}`, dependencies first. `status` is `tagged`, `drafted` or `published`. |
 
 | Output (`publish` only) | Meaning |
 |---|---|

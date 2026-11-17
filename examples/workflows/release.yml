@@ -10,12 +10,18 @@ on:
   # PR. The condition on the first job decides which PRs release.
   pull_request:
     types: [closed]
-  # Re-run by hand after a fix: `verwalter release` resumes from the
-  # current state (tags, releases, assets) and skips what is done. With
-  # `package`, that package is reported again even when complete, so the
-  # publish job runs for it.
+  # A failed job is re-run with "Re-run failed jobs" on the run itself:
+  # that keeps the merge commit. This trigger is for a run that needs a
+  # fixed workflow file from the branch. `verwalter release` resumes from
+  # the current state (tags, releases, assets) and skips what is done.
+  # With `package`, that package is reported again even when complete, so
+  # the publish job runs for it.
   workflow_dispatch:
     inputs:
+      ref:
+        description: Commit or tag to build and publish. Set it to the release tag when the tag exists. Empty is the branch head.
+        required: false
+        default: ""
       package:
         description: Only this package; always reported to the publish job.
         required: false
@@ -36,7 +42,9 @@ jobs:
       - uses: actions/checkout@v7
         with:
           # The merge commit, not main: an rc PR can target another branch.
-          ref: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
+          # On a run by hand, `ref` is the released tag: the branch head
+          # can hold newer source than the version that is published.
+          ref: ${{ github.event.pull_request.merge_commit_sha || inputs.ref || github.sha }}
       # Build whatever the release needs: wheels, binaries, packages.
       # A matrix build gives each job its own artifact name, such as
       # `dist-${{ matrix.target }}`, and the release job downloads them
@@ -58,7 +66,7 @@ jobs:
         with:
           # The merge commit itself: a push to main right after the merge
           # must not move the tags.
-          ref: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
+          ref: ${{ github.event.pull_request.merge_commit_sha || inputs.ref || github.sha }}
           fetch-depth: 0
       - uses: actions/download-artifact@v8
         with:
@@ -92,7 +100,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
+          ref: ${{ github.event.pull_request.merge_commit_sha || inputs.ref || github.sha }}
           fetch-depth: 0  # tags decide what is published
       - uses: actions/download-artifact@v8
         with:

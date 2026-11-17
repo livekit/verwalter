@@ -28,6 +28,12 @@ a checkout of the repository, fetch the raw file from GitHub.
   step by step. It holds the procedure, the mapping per tooling, the
   rules for a minimal `verwalter.toml`, and the handoff list. A
   repository that releases nothing yet takes the README quick start.
+  The last step of every adoption, before you report: use the
+  `release-hardening` skill to audit the workflows you wrote. Fix what
+  it finds in the migration PR, or list the finding in the handoff. If
+  the skill is not installed, check the workflows against
+  [docs/release-workflows.md](https://github.com/livekit/verwalter/blob/main/docs/release-workflows.md)
+  yourself.
 
 ## Report every gap
 

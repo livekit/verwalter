@@ -142,6 +142,7 @@ missing.
 | [docs/api-check.md](docs/api-check.md) | Verifying the changeset level with cargo-semver-checks, griffe or break-check. |
 | [docs/commands.md](docs/commands.md) | Every command and flag. |
 | [examples/publish/README.md](examples/publish/README.md) | Publish commands per registry. |
+| [docs/release-workflows.md](docs/release-workflows.md) | Rules for a release with several jobs, workflows or repositories, each with a reason and a check: job order, workflow calls, drafts, re-runs, recovery. |
 | [docs/release-pitfalls.md](docs/release-pitfalls.md) | The release history of the LiveKit SDKs and how each pitfall maps to the tool. |
 
 ## Agent skill
