@@ -72,11 +72,10 @@ pub fn evaluate(
     changed: &[String],
     changesets: &[Changeset],
 ) -> Check {
-    let affected: BTreeSet<String> = config
-        .packages
+    let affected: BTreeSet<String> = changed
         .iter()
-        .filter(|(_, p)| changed.iter().any(|f| in_package(f, &p.path)))
-        .map(|(name, _)| name.clone())
+        .flat_map(|f| owners(config, f))
+        .cloned()
         .collect();
     let covered: BTreeSet<String> = changesets
         .iter()
@@ -264,6 +263,30 @@ fn in_package(file: &str, package_path: &str) -> bool {
     }
     let path = package_path.trim_end_matches('/');
     path == "." || path.is_empty() || file == path || file.starts_with(&format!("{path}/"))
+}
+
+/// The packages a file belongs to: of the packages whose path holds the
+/// file, those with the longest path. A file in a nested package, such as
+/// `webrtc-sys/build` in `webrtc-sys`, is not a change of the package
+/// around it. Two packages at one path both own the file.
+fn owners<'a>(config: &'a Config, file: &str) -> Vec<&'a String> {
+    fn depth(path: &str) -> usize {
+        match path.trim_end_matches('/') {
+            "." => 0,
+            path => path.len(),
+        }
+    }
+    let holding: Vec<_> = config
+        .packages
+        .iter()
+        .filter(|(_, p)| in_package(file, &p.path))
+        .collect();
+    let longest = holding.iter().map(|(_, p)| depth(&p.path)).max();
+    holding
+        .into_iter()
+        .filter(|(_, p)| Some(depth(&p.path)) == longest)
+        .map(|(name, _)| name)
+        .collect()
 }
 
 pub const MARKER: &str = "<!-- verwalter changeset-check -->";
@@ -592,6 +615,46 @@ versioning.changelog = "CHANGELOG.md"
 
     fn s(v: &[&str]) -> Vec<String> {
         v.iter().map(|x| x.to_string()).collect()
+    }
+
+    // A file in a nested package is a change of that package only. The
+    // package around it gets its bump as a dependent, without a changeset.
+    #[test]
+    fn nested_package_owns_its_files() {
+        let config = Config::parse(
+            r#"
+[packages.webrtc-sys]
+path = "webrtc-sys"
+versioning.files = ["Cargo.toml"]
+
+[packages.webrtc-sys-build]
+path = "webrtc-sys/build"
+versioning.files = ["Cargo.toml"]
+
+[packages.root]
+path = "."
+versioning.files = ["Cargo.toml"]
+"#,
+        )
+        .unwrap();
+        let affected = |files: &[&str]| {
+            evaluate(&config, "feat", &[], &s(files), &[])
+                .affected
+                .into_iter()
+                .collect::<Vec<_>>()
+        };
+
+        assert_eq!(
+            affected(&["webrtc-sys/build/src/lib.rs"]),
+            ["webrtc-sys-build"]
+        );
+        assert_eq!(affected(&["webrtc-sys/src/lib.rs"]), ["webrtc-sys"]);
+        assert_eq!(affected(&["webrtc-sys/builder.rs"]), ["webrtc-sys"]);
+        assert_eq!(affected(&["src/main.rs"]), ["root"]);
+        assert_eq!(
+            affected(&["webrtc-sys/build/build.rs", "webrtc-sys/Cargo.toml"]),
+            ["webrtc-sys", "webrtc-sys-build"]
+        );
     }
 
     // obligations: rule-success/failure ChangesetCheckOnContributorPullRequest

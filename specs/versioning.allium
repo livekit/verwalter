@@ -437,6 +437,8 @@ rule WorkspaceConsistencyCheck {
 -- branch changes against the base, minus those a pending changeset
 -- covers, get one file with the given level and the last commit subject.
 -- Named packages replace the detection.
+-- A changed file belongs to the package with the longest path that holds
+-- it: a file in a nested package does not affect the package around it.
 -- A changeset in the PR that the tool cannot read, or that names a
 -- package not in the config, is the check's own finding: the comment
 -- carries the error, and the check fails.
