@@ -269,7 +269,7 @@ fn in_package(file: &str, package_path: &str) -> bool {
 /// file, those with the longest path. A file in a nested package, such as
 /// `webrtc-sys/build` in `webrtc-sys`, is not a change of the package
 /// around it. Two packages at one path both own the file.
-fn owners<'a>(config: &'a Config, file: &str) -> Vec<&'a String> {
+pub(crate) fn owners<'a>(config: &'a Config, file: &str) -> Vec<&'a String> {
     fn depth(path: &str) -> usize {
         match path.trim_end_matches('/') {
             "." => 0,

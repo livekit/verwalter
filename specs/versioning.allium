@@ -875,8 +875,15 @@ surface PreReleaseRequest {
 -- empty list counts as absent: it reaches publish only from a re-run
 -- by hand after a run that released nothing, and the re-run is for the
 -- versions a registry lacks.
+-- PublishBuildsTheTaggedSource: changed_since_tag(p) is true when HEAD
+-- changed a file of p since its tag, files of a package nested in p
+-- excluded. A run by hand from a later commit would otherwise publish
+-- newer source under the tagged version. The registry check comes
+-- first: a version it has runs no command. A goproxy package is not
+-- compared, because the proxy serves the tag. allow_changed_source,
+-- from `publish --allow-changed-source`, turns the check off.
 rule WorkflowPublishesInDependencyOrder {
-    when: WorkflowRunsPublish(workflow, repository, releases?)
+    when: WorkflowRunsPublish(workflow, repository, releases?, allow_changed_source)
     let candidates = filter(Packages, p => p.repository = repository and p.release_mode != none and GitTags.any(t => t.package = p and t.version = p.version) and (releases = none or p in releases))
     requires: candidates.all(p => p.publish_command != null or p.in_workspace_publish)
     ensures:
@@ -887,6 +894,10 @@ rule WorkflowPublishesInDependencyOrder {
             -- packages run at the same time, up to the job limit.
             if p.on_registry(p.version) = true:
                 PublishOutcome.created(package: p, status: `exists`)
+            else if not allow_changed_source and changed_since_tag(p):
+                -- PublishBuildsTheTaggedSource. The command builds HEAD,
+                -- so HEAD must hold the tagged source of the package.
+                PublishOutcome.created(package: p, status: failed)
             else if p.dependencies.any(d => d in candidates and PublishOutcomes.any(o => o.package = d and o.status in {failed, blocked})):
                 PublishOutcome.created(package: p, status: blocked)
             else if publish_command_succeeded(p):
@@ -906,7 +917,7 @@ entity PublishOutcome {
 -- outcome: the job fails, and a re-run finds the version on the registry
 -- and tries the flip again.
 rule PublishFlipsDrafts {
-    when: WorkflowRunsPublish(workflow, repository, releases?)
+    when: WorkflowRunsPublish(workflow, repository, releases?, allow_changed_source)
     for o in PublishOutcomes where o.status in {published, `exists`}:
         for release in Releases where release.package = o.package and release.status = drafted:
             ensures:
@@ -936,7 +947,7 @@ surface ToolRun {
 
     provides:
         ToolRunStarted(repository, named, publish_drafts)
-        WorkflowRunsPublish(workflow, repository, releases)
+        WorkflowRunsPublish(workflow, repository, releases, allow_changed_source)
 }
 
 -- Every release the run tagged, created, published or attached assets
