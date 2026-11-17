@@ -29,6 +29,48 @@ a checkout of the repository, fetch the raw file from GitHub.
   rules for a minimal `verwalter.toml`, and the handoff list. A
   repository that releases nothing yet takes the README quick start.
 
+## Report every gap
+
+A gap is anything that made you leave the documented path:
+
+- the old flow did something that verwalter cannot do
+- a document was wrong, unclear, or silent on your case
+- a command failed, or its output did not match the documents
+- you wrote a workaround, such as a wrapper script or an extra
+  workflow step
+
+A workaround that stays in one repository fixes one repository. The
+next repository meets the same gap, and the maintainers never learn
+about it. A reported gap is fixed for all of them.
+
+Never post without the consent of the user. An issue, a comment and a
+pull request are public and go out under the user's account. Your part
+is to find each gap, draft the report and ask. The user decides. While
+a gap you met is missing from your report to the user, the job is not
+finished.
+
+1. When you meet a gap, write it down. Do not wait for the end.
+2. Search before you file:
+   `gh issue list --repo livekit/verwalter --state all --search "<words>"`.
+   If an issue exists, draft a comment with your case for it.
+3. Draft one issue per gap for the "Bug Report" template. A missing
+   feature is a gap and takes the same template. Give the
+   verwalter version, what you tried, what you expected, what
+   happened, and the workaround you used. Reduce the case to a minimal
+   `verwalter.toml` and command. Leave out names and contents of a
+   private repository.
+4. Show the drafts to the user and ask which ones to post. Post only
+   those. If the user says no, do not ask again.
+5. If the fix is small and you know it, offer a pull request that
+   closes the issue. A wrong sentence in a document is one example.
+   Follow
+   [CONTRIBUTING.md](https://github.com/livekit/verwalter/blob/main/CONTRIBUTING.md).
+6. List each gap in your report with its issue link, or with the
+   words "not filed" if the user said no. Put the issue link in a comment next to
+   the workaround, so that someone removes the workaround later.
+
+If you met no gap, say so in the report in one sentence.
+
 ## Rules for operating
 
 - **Read before you write.** `verwalter status` and `verwalter plan`

@@ -218,6 +218,10 @@ maintainer:
   [Per tooling](#per-tooling): what contributors do differently, and
   what the old flow had that the new one has not, such as snapshot
   releases.
+- Every gap you met: what verwalter or these documents did not cover,
+  the workaround you used, and the link to the issue on
+  [livekit/verwalter](https://github.com/livekit/verwalter/issues). If
+  you met none, say so.
 
 End your report with the output of `verwalter plan`. That is the
 first release PR the maintainer will see.
