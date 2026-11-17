@@ -140,6 +140,14 @@ SHA=$(gh api "repos/livekit/verwalter/commits/$TAG" -q .sha)
 perl -pi -e "s|livekit/verwalter\@v[0-9.]+|livekit/verwalter\@$SHA # $TAG|" .github/workflows/*.yml
 ```
 
+The examples use tags for the other actions, such as
+`actions/checkout@v7`. If the repository pins every action by commit,
+for example with a pinact check, pin these the same way. Take the
+commit and the comment from a workflow that the repository already has.
+If the repository runs a REUSE check, look at `REUSE.toml`. If it does
+not cover the new files, give each of them the license header of the
+other files.
+
 Then:
 
 - In `release.yml`, replace the placeholder build job with the real one
@@ -159,15 +167,26 @@ Then:
 - In `changeset-check.yml`, drop the `taiki-e/install-action` step and
   `fetch-depth: 0` unless `[check].api` is set.
 - Keep what ran after the old publish (docs upload, downstream
-  dispatch) as steps at the end of the publish job, with
-  `continue-on-error: true`, because the installed workspace is there.
-  Move the secrets or the OIDC role those steps used to that job.
+  dispatch) as steps at the end of the publish job. The installed
+  workspace is there. Move the secrets or the OIDC role those
+  steps used to that job. Leave out `continue-on-error`: a failure then
+  fails the job, and a re-run is safe because `publish` skips what the
+  registry has. A step that deploys to one shared place, such as a docs
+  site, also runs for an rc. Run it only for a final version, for
+  example with no `-` in the version in the manifest. Else an rc
+  replaces the docs of the last final release.
 - Delete the old tooling: the old workflows, the config file of the old
   tool, bump scripts, release-note scripts, and the `devDependency` or
-  install step of the old tool. A removed `devDependency` changes the
+  install step of the old tool. Search every manifest in the workspace,
+  not only the root one: a member can also list the old tool and have
+  scripts that call it. A removed `devDependency` changes the
   lock file: run the install once and commit it, or
   `--frozen-lockfile` fails in CI. Keep the `.changeset/*.md` files:
   the format is the same and pending ones carry over.
+- The old release can be a job in a shared workflow such as `ci.yml`.
+  Then remove the permissions that only that job needed.
+  These are often `contents: write`, `id-token: write` and
+  `pull-requests: write`.
 - If another workflow triggers on the tag or on `release: published`,
   it will not fire from `github.token`. Give the action a GitHub App
   ([action.md](action.md#a-github-app-token)), or move that job into
@@ -184,7 +203,9 @@ maintainer:
 - Create the `internal` label.
 - Trusted publishing on npm, PyPI or crates.io for the workflow, if the
   old flow used a token secret. Keep the secret until the first release
-  went through.
+  went through. If the old flow already used trusted publishing, the
+  trusted publisher names the old workflow file, such as `ci.yml`.
+  Change it to `release.yml`, or the first publish fails.
 - A package the registry has never seen is a first release. Trusted
   publishing cannot create it: the first upload is by hand, and the PR
   body and `VERWALTER_FIRST_RELEASE` say when.
@@ -261,7 +282,8 @@ which owns the order and the skipping). Write the answer.
 **Delete.** `.changeset/config.json`, the `changesets/action` step and
 the snapshot job, `@changesets/cli` and the changelog plugin from
 `devDependencies`, the `changeset`, `ci:version` and `ci:publish`
-scripts. A `ci:publish` that builds and then runs `changeset publish`
+scripts. Do this in the root `package.json` and in every member's
+`package.json`. A `ci:publish` that builds and then runs `changeset publish`
 splits: the build goes into the publish job, the publish is the
 built-in command. Run `pnpm install` once after the removal and commit
 `pnpm-lock.yaml`. Keep `.changeset/*.md` and `.changeset/README.md`:
@@ -282,6 +304,9 @@ pending changesets carry over as they are. Keep every `CHANGELOG.md`.
 - A job that verified every package exists on npm before the publish
   is covered: `status` shows `registry:no`, and `VERWALTER_FIRST_RELEASE`
   is set for the command.
+- If the changeset-bot GitHub App is installed, it keeps posting "No
+  Changeset found" on each PR. `changeset-check.yml` does that job now.
+  List the removal of the App in the handoff.
 
 ### knope
 
