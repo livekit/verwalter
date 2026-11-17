@@ -6,7 +6,7 @@ use std::{
 use anyhow::{Context, Result, anyhow, bail, ensure};
 use clap::Parser;
 use verwalter::{
-    branches, check, github, plan::plan, prerelease, release, repo::Repo, status,
+    branches, check, git, github, plan::plan, prerelease, release, repo::Repo, status,
     version::BumpLevel, workspace,
 };
 
@@ -14,9 +14,9 @@ use verwalter::{
 #[derive(Parser)]
 #[command(version)]
 struct Cli {
-    /// The repository checkout
-    #[arg(global = true, default_value = ".", value_parser = checkout)]
-    checkout: PathBuf,
+    /// The repository checkout [default: the root of the git repository containing the current directory]
+    #[arg(global = true, value_parser = checkout)]
+    checkout: Option<PathBuf>,
     /// Config file [default: <checkout>/verwalter.toml]
     #[arg(long, global = true)]
     config: Option<PathBuf>,
@@ -155,6 +155,10 @@ fn run(cli: Cli) -> Result<()> {
         remote,
         dry_run,
     } = cli;
+    let root = match root {
+        Some(root) => root,
+        None => git::run(Path::new("."), &["rev-parse", "--show-toplevel"])?.into(),
+    };
     // Commands run in package paths see VERWALTER_ROOT: it must be
     // absolute, or `$VERWALTER_ROOT/dist` resolves inside the package.
     let root = root

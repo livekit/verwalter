@@ -2228,3 +2228,18 @@ fn publish_flips_the_draft_release_once_the_registry_has_it() {
     let repo = Repo::load(root).unwrap();
     assert!(!repo.config.draft("livekit-protocol"));
 }
+
+#[test]
+fn runs_from_a_subdirectory() {
+    let r = fixture("subdirectory");
+    let out = Command::new(env!("CARGO_BIN_EXE_verwalter"))
+        .current_dir(r.0.join("livekit-api"))
+        .arg("plan")
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
