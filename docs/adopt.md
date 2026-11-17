@@ -191,6 +191,13 @@ Then:
   it will not fire from `github.token`. Give the action a GitHub App
   ([action.md](action.md#a-github-app-token)), or move that job into
   `release.yml`.
+- Write `RELEASING.md` at the repository root from
+  [examples/RELEASING.md](../examples/RELEASING.md). It names the
+  workflows, the packages, the repair commands and the consumers of
+  this repository, and it replaces the old release instructions. Fill
+  in every placeholder from what you found in step 1 and wrote in
+  this step. Do not copy the generic commands: the file links to
+  [cheat-sheet.md](cheat-sheet.md).
 
 ### Step 5. Settings and the handoff
 
