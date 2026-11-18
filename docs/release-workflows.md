@@ -258,6 +258,8 @@ jobs:
 verify:
   needs: publish
   runs-on: ubuntu-latest
+  permissions:
+    contents: write # a draft release is visible only with write access
   steps:
     - uses: actions/checkout@v7
       with:

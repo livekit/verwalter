@@ -133,7 +133,7 @@ jobs:
     needs: publish
     runs-on: ubuntu-latest
     permissions:
-      contents: read    # reads only
+      contents: write   # reads only. A draft release is visible only with write access
     steps:
       - uses: actions/checkout@v7
         with:
