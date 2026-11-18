@@ -26,6 +26,7 @@ What the tool does, what it catches, and what to do when a step fails.
 | Abandon | Removes a GitHub release and its tag, local and remote. The registry is not touched. | `release --abandon <tag>` |
 | Dry run | Every push, tag and GitHub write is printed instead of done. | `--dry-run`, action `dry-run` |
 | Status | Per package: version, tag, release, pending changesets, open PRs, next step. | `status` |
+| End-state check | The last job of a release run asserts the result. The tag must be on the remote. The GitHub release must be public and have its required assets. The registry must have the version. Each failure names what is missing and the command that finishes it. A package with `release.mode = "none"` is not checked. A version edited by hand is not checked. | `status --check`, `release.required_assets` |
 
 ## Failure paths
 
@@ -46,6 +47,7 @@ What the tool does, what it catches, and what to do when a step fails.
 | An rc is requested twice, or by another member of the group | One branch per package or group, updated in place. The number continues. |
 | A GitHub release is deleted but the tag remains | The next release run recreates it from the changelog. |
 | Two release runs race on the same tag | The run that loses the create sees the existing release and reports it. |
+| A draft release lacks a file that consumers download | The package lists the file in `release.required_assets`. `release --publish` and `publish` then fail for the package and list the missing names. The release stays a draft. |
 | A publish fails for one package | Its transitive dependents are blocked and reported with the cause. Every other package publishes. The run exits non-zero. |
 | A publish is re-run | Versions the registry has are skipped before the command runs. The rest publish. |
 | A run by hand publishes from a commit after the release | A package whose files changed since its tag fails before its command runs. The reason names `ref=<tag>`. Its dependents are blocked. `publish --allow-changed-source` publishes the newer source anyway. |

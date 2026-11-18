@@ -932,76 +932,105 @@ fn release_finishes_a_partial_release_for_one_package() {
     );
 }
 
-// Spec: AssetsComeFromTheTaggedSource. A recovery run from a commit after
-// the release must not attach binaries of newer source to the tagged
-// version. A release without assets is still created from any commit.
+// Spec: RequiredAssetsBeforePublic. A draft is not published while a
+// name in `release.required_assets` is missing on it.
 #[test]
-fn release_refuses_assets_when_the_source_changed_since_the_tag() {
-    let r = fixture("assets-changed");
+fn release_publishes_a_draft_only_with_its_required_assets() {
+    let r = fixture("required-assets");
     let root = &r.0;
-    let _remote = remote(root, "assets-changed");
+    let _remote = remote(root, "required-assets");
     git(root, &["tag", "livekit-v0.7.0"]);
-    git(root, &["tag", "livekit-api-v0.4.3"]);
-    git(root, &["tag", "livekit-protocol-v0.3.1"]);
     git(root, &["push", "-q", "origin", "--tags"]);
-    // After the release: livekit changes.
-    write(root, "livekit/src/lib.rs", "pub fn newer() {}\n");
-    git(root, &["add", "-A"]);
-    git(root, &["commit", "-q", "-m", "after the release"]);
-
+    // The last table of the fixture config is livekit.
+    let base = fs::read_to_string(root.join("verwalter.toml")).unwrap();
+    write(
+        root,
+        "verwalter.toml",
+        &format!("{base}release.required_assets = [\"notes.txt\", \"ffi-{{version}}.zip\"]\n"),
+    );
     let repo = Repo::load(root).unwrap();
-    // The fake GitHub has a published release for the tag, or none.
-    let has_release = std::cell::Cell::new(false);
+
+    // The draft has notes.txt only.
     let calls = std::cell::RefCell::new(Vec::<String>::new());
     let gh = MockClient(|args: &[&str]| -> Result<String> {
         calls.borrow_mut().push(args.join(" "));
         match args {
-            ["api", "graphql", ..] if has_release.get() => {
-                Ok(r#"{"isDraft":false,"asset_count":0}"#.into())
+            ["api", "graphql", ..] => {
+                Ok(r#"{"isDraft":true,"asset_count":1,"assets":["notes.txt"]}"#.into())
             }
             _ => Ok(String::new()),
         }
     });
-    let wrote = |what: &str| calls.borrow().iter().any(|c| c.starts_with(what));
     let mut options = verwalter::release::Options {
-        assets: vec!["dist/a.tar.gz".into()],
         package: Some("livekit".into()),
+        publish: true,
         ..Default::default()
     };
-
-    // No GitHub release yet: it is not created with the assets.
     let err = verwalter::release::run(&repo, "origin", &options, &gh)
         .unwrap_err()
         .to_string();
-    assert!(err.contains("ref=livekit-v0.7.0"), "{err}");
-    assert!(err.contains("resume with: verwalter release"), "{err}");
-    assert!(!wrote("release create"), "{calls:?}");
-
-    // The release exists: the assets are not uploaded to it.
-    has_release.set(true);
-    let err = verwalter::release::run(&repo, "origin", &options, &gh)
-        .unwrap_err()
-        .to_string();
-    assert!(err.contains("ref=livekit-v0.7.0"), "{err}");
-    assert!(!wrote("release upload"), "{calls:?}");
-
-    // The flag turns the check off.
-    options.allow_changed_source = true;
-    verwalter::release::run(&repo, "origin", &options, &gh).unwrap();
-    assert!(wrote("release upload livekit-v0.7.0"), "{calls:?}");
-
-    // Without assets, the release is created for the old tag.
-    has_release.set(false);
-    let options = verwalter::release::Options {
-        package: Some("livekit".into()),
-        ..Default::default()
-    };
-    let released = verwalter::release::run(&repo, "origin", &options, &gh).unwrap();
-    assert_eq!(
-        (released[0].package.as_str(), released[0].status),
-        ("livekit", "published")
+    assert!(
+        err.contains("lacks required assets: ffi-0.7.0.zip. It stays a draft"),
+        "{err}"
     );
-    assert!(wrote("release create livekit-v0.7.0"), "{calls:?}");
+    assert!(
+        err.contains("resume with: verwalter release --package livekit --publish"),
+        "{err}"
+    );
+    assert!(!calls.borrow().iter().any(|c| c.starts_with("release edit")));
+
+    // The same run with the missing file uploads it and publishes.
+    options.assets = vec!["dist/ffi-0.7.0.zip".into()];
+    let released = verwalter::release::run(&repo, "origin", &options, &gh).unwrap();
+    assert_eq!(released[0].status, "published");
+    assert!(
+        calls
+            .borrow()
+            .contains(&"release edit livekit-v0.7.0 --draft=false".to_string())
+    );
+}
+
+// Spec: RequiredAssetsBeforePublic. A release that is created public has
+// only the assets of the run that creates it.
+#[test]
+fn release_is_not_created_public_without_its_required_assets() {
+    let r = fixture("required-assets-create");
+    let root = &r.0;
+    let _remote = remote(root, "required-assets-create");
+    let base = fs::read_to_string(root.join("verwalter.toml")).unwrap();
+    write(
+        root,
+        "verwalter.toml",
+        &format!("{base}release.required_assets = [\"ffi.zip\"]\n"),
+    );
+    let repo = Repo::load(root).unwrap();
+    let calls = std::cell::RefCell::new(Vec::<String>::new());
+    // No tag has a release yet.
+    let gh = MockClient(|args: &[&str]| -> Result<String> {
+        calls.borrow_mut().push(args.join(" "));
+        Ok(String::new())
+    });
+    let mut options = verwalter::release::Options {
+        package: Some("livekit".into()),
+        ..Default::default()
+    };
+    let err = verwalter::release::run(&repo, "origin", &options, &gh)
+        .unwrap_err()
+        .to_string();
+    assert!(
+        err.contains("required assets are not among the --asset files: ffi.zip"),
+        "{err}"
+    );
+    assert!(
+        !calls
+            .borrow()
+            .iter()
+            .any(|c| c.starts_with("release create"))
+    );
+
+    options.assets = vec!["dist/ffi.zip".into()];
+    let released = verwalter::release::run(&repo, "origin", &options, &gh).unwrap();
+    assert_eq!(released[0].status, "published");
 }
 
 #[test]
@@ -1090,6 +1119,77 @@ fn status_reports_state_and_next_step() {
         "untagged version comes first: {}",
         lk.next_step
     );
+}
+
+// Spec: Release.is_complete. `status --check` fails for a row with
+// `incomplete` set.
+#[test]
+fn status_check_finds_the_incomplete_releases() {
+    let r = fixture("status-check");
+    let root = &r.0;
+    let _remote = remote(root, "status-check");
+    git(root, &["tag", "livekit-protocol-v0.3.1"]);
+    git(root, &["tag", "livekit-api-v0.4.3"]);
+    git(root, &["tag", "livekit-v0.7.0"]);
+    git(root, &["push", "-q", "origin", "--tags"]);
+    // The last table of the fixture config is livekit.
+    let base = fs::read_to_string(root.join("verwalter.toml")).unwrap();
+    write(
+        root,
+        "verwalter.toml",
+        &format!("{base}release.required_assets = [\"a.zip\", \"b.zip\"]\n"),
+    );
+
+    // protocol: public. api: a draft. livekit: public, without b.zip.
+    let gh = MockClient(|args: &[&str]| -> Result<String> {
+        match args {
+            ["pr", "list", ..] => Ok("[]".into()),
+            ["api", "graphql", "-f", "tag=livekit-api-v0.4.3", ..] => {
+                Ok(r#"{"isDraft":true,"asset_count":0,"assets":[]}"#.into())
+            }
+            ["api", "graphql", "-f", "tag=livekit-v0.7.0", ..] => {
+                Ok(r#"{"isDraft":false,"asset_count":1,"assets":["a.zip"]}"#.into())
+            }
+            ["api", "graphql", ..] => Ok(r#"{"isDraft":false,"asset_count":0,"assets":[]}"#.into()),
+            _ => Err(anyhow!("not found")),
+        }
+    });
+    let repo = Repo::load(root).unwrap();
+    let rows = verwalter::status::status(&repo, "origin", &gh).unwrap();
+    let by = |n: &str| rows.iter().find(|r| r.package == n).unwrap();
+
+    assert_eq!(by("livekit-protocol").incomplete, None);
+    assert_eq!(
+        by("livekit-api").incomplete.as_deref(),
+        Some(
+            format!(
+                "the GitHub release is a draft -> {}",
+                by("livekit-api").next_step
+            )
+            .as_str()
+        )
+    );
+    let livekit = by("livekit").incomplete.clone().unwrap();
+    assert!(
+        livekit.starts_with("required assets are missing: b.zip -> "),
+        "{livekit}"
+    );
+
+    // A version bumped by hand has no tag and no changelog entry: it is
+    // no release, so nothing is missing.
+    write(
+        root,
+        "livekit-protocol/Cargo.toml",
+        "[package]\nname = \"livekit-protocol\"\nversion = \"0.3.2\"\n",
+    );
+    let repo = Repo::load(root).unwrap();
+    let rows = verwalter::status::status(&repo, "origin", &gh).unwrap();
+    let protocol = rows
+        .iter()
+        .find(|r| r.package == "livekit-protocol")
+        .unwrap();
+    assert_eq!(protocol.tag_state, "missing");
+    assert_eq!(protocol.incomplete, None);
 }
 
 #[test]
@@ -2394,6 +2494,68 @@ fn publish_flips_the_draft_release_once_the_registry_has_it() {
     assert!(!repo.config.draft("livekit-protocol"));
 }
 
+// Spec: RequiredAssetsBeforePublic. `publish` leaves a draft without a
+// required asset as it is and fails for that package. A package without
+// the key is flipped as before.
+#[test]
+fn publish_leaves_a_draft_without_a_required_asset() {
+    let r = fixture("publish-required-assets");
+    let root = &r.0;
+    git(root, &["tag", "livekit-protocol-v0.3.1"]);
+    git(root, &["tag", "livekit-api-v0.4.3"]);
+    git(root, &["tag", "livekit-v0.7.0"]);
+    // The last table of the fixture config is livekit.
+    let base = fs::read_to_string(root.join("verwalter.toml")).unwrap();
+    write(
+        root,
+        "verwalter.toml",
+        &format!(
+            "{base}release.required_assets = [\"sdk-{{tag}}.zip\"]\n\n[publish]\ncommand = 'true'\n"
+        ),
+    );
+    let repo = Repo::load(root).unwrap();
+    let no_registry = |_: &str| -> Result<u16> { Err(anyhow!("no registry configured")) };
+    let opts = verwalter::publish::Options {
+        jobs: Some(1),
+        dry_run: false,
+        only: None,
+    };
+
+    // Every release is a draft without assets.
+    let calls = std::cell::RefCell::new(Vec::<String>::new());
+    let gh = MockClient(|args: &[&str]| -> Result<String> {
+        calls.borrow_mut().push(args.join(" "));
+        match args {
+            ["api", "graphql", ..] => Ok(r#"{"isDraft":true,"asset_count":0,"assets":[]}"#.into()),
+            _ => Ok(String::new()),
+        }
+    });
+    let outcomes = verwalter::publish::run(&repo, &opts, &no_registry, &gh).unwrap();
+    let by = |n: &str| outcomes.iter().find(|o| o.package == n).unwrap();
+
+    assert_eq!(by("livekit").status, "failed");
+    assert!(
+        by("livekit")
+            .reason
+            .contains("lacks required assets: sdk-livekit-v0.7.0.zip"),
+        "{}",
+        by("livekit").reason
+    );
+    assert!(verwalter::publish::failed(&outcomes));
+    assert!(
+        !calls
+            .borrow()
+            .contains(&"release edit livekit-v0.7.0 --draft=false".to_string())
+    );
+
+    assert_eq!(by("livekit-protocol").status, "published");
+    assert!(
+        calls
+            .borrow()
+            .contains(&"release edit livekit-protocol-v0.3.1 --draft=false".to_string())
+    );
+}
+
 #[test]
 fn runs_from_a_subdirectory() {
     let r = fixture("subdirectory");
@@ -2407,4 +2569,76 @@ fn runs_from_a_subdirectory() {
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
+}
+
+// Spec: AssetsComeFromTheTaggedSource. A recovery run from a commit after
+// the release must not attach binaries of newer source to the tagged
+// version. A release without assets is still created from any commit.
+#[test]
+fn release_refuses_assets_when_the_source_changed_since_the_tag() {
+    let r = fixture("assets-changed");
+    let root = &r.0;
+    let _remote = remote(root, "assets-changed");
+    git(root, &["tag", "livekit-v0.7.0"]);
+    git(root, &["tag", "livekit-api-v0.4.3"]);
+    git(root, &["tag", "livekit-protocol-v0.3.1"]);
+    git(root, &["push", "-q", "origin", "--tags"]);
+    // After the release: livekit changes.
+    write(root, "livekit/src/lib.rs", "pub fn newer() {}\n");
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-q", "-m", "after the release"]);
+
+    let repo = Repo::load(root).unwrap();
+    // The fake GitHub has a published release for the tag, or none.
+    let has_release = std::cell::Cell::new(false);
+    let calls = std::cell::RefCell::new(Vec::<String>::new());
+    let gh = MockClient(|args: &[&str]| -> Result<String> {
+        calls.borrow_mut().push(args.join(" "));
+        match args {
+            ["api", "graphql", ..] if has_release.get() => {
+                Ok(r#"{"isDraft":false,"asset_count":0}"#.into())
+            }
+            _ => Ok(String::new()),
+        }
+    });
+    let wrote = |what: &str| calls.borrow().iter().any(|c| c.starts_with(what));
+    let mut options = verwalter::release::Options {
+        assets: vec!["dist/a.tar.gz".into()],
+        package: Some("livekit".into()),
+        ..Default::default()
+    };
+
+    // No GitHub release yet: it is not created with the assets.
+    let err = verwalter::release::run(&repo, "origin", &options, &gh)
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("ref=livekit-v0.7.0"), "{err}");
+    assert!(err.contains("resume with: verwalter release"), "{err}");
+    assert!(!wrote("release create"), "{calls:?}");
+
+    // The release exists: the assets are not uploaded to it.
+    has_release.set(true);
+    let err = verwalter::release::run(&repo, "origin", &options, &gh)
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("ref=livekit-v0.7.0"), "{err}");
+    assert!(!wrote("release upload"), "{calls:?}");
+
+    // The flag turns the check off.
+    options.allow_changed_source = true;
+    verwalter::release::run(&repo, "origin", &options, &gh).unwrap();
+    assert!(wrote("release upload livekit-v0.7.0"), "{calls:?}");
+
+    // Without assets, the release is created for the old tag.
+    has_release.set(false);
+    let options = verwalter::release::Options {
+        package: Some("livekit".into()),
+        ..Default::default()
+    };
+    let released = verwalter::release::run(&repo, "origin", &options, &gh).unwrap();
+    assert_eq!(
+        (released[0].package.as_str(), released[0].status),
+        ("livekit", "published")
+    );
+    assert!(wrote("release create livekit-v0.7.0"), "{calls:?}");
 }

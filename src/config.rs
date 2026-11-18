@@ -118,6 +118,10 @@ pub struct PackageRelease {
     /// publishes the package (`Config::draft`), else published on
     /// creation.
     pub draft: Option<bool>,
+    /// Asset names the GitHub release must have before it becomes public,
+    /// with `{version}` and `{tag}`. Exact names, no globs. A draft that
+    /// lacks one stays a draft.
+    pub required_assets: Vec<String>,
 }
 
 /// The package keys of `[publish]`. Unlike the other tables, these hold
@@ -579,6 +583,11 @@ impl Config {
             }
         }
         for (name, p) in &config.packages {
+            ensure!(
+                p.release.required_assets.is_empty()
+                    || p.release.mode == ReleaseMode::TagAndRelease,
+                "{name}: release.required_assets needs release.mode = \"tag_and_release\": no other mode creates a GitHub release"
+            );
             for dep in &p.dependencies {
                 ensure!(dep != name, "{name}: depends on itself");
                 ensure!(
@@ -637,6 +646,27 @@ impl Config {
             .release
             .draft
             .unwrap_or_else(|| self.published_by_tool(package))
+    }
+
+    /// Spec: Package.required_assets. The names of `release.required_assets`
+    /// that are not in `present`, with `{version}` and `{tag}` replaced.
+    /// ponytail: `present` holds the first 100 assets of a release
+    /// (`ReleaseView`), so a name after those reads as missing. Page the
+    /// query when a release has more.
+    pub fn missing_assets(
+        &self,
+        package: &str,
+        version: &str,
+        tag: &str,
+        present: &[String],
+    ) -> Vec<String> {
+        self.packages[package]
+            .release
+            .required_assets
+            .iter()
+            .map(|a| a.replace("{version}", version).replace("{tag}", tag))
+            .filter(|a| !present.contains(a))
+            .collect()
     }
 
     /// Whether `publish` runs for the package: it has a publish command,
@@ -878,6 +908,21 @@ release.mode = "tag"
         assert!(c.draft("a"), "the proxy fetch is the publish");
         let c = with("[publish]\nregistry = \"npm\"\nworkspace = \"pnpm -r publish\"\n");
         assert!(c.draft("a"), "covered by the workspace command");
+    }
+
+    // Spec: Package.required_assets. Placeholders are replaced, and the
+    // key is refused where no GitHub release is created.
+    #[test]
+    fn required_assets_need_a_github_release() {
+        let package = "[packages.a]\npath = \"a\"\nversioning.files = [\"Cargo.toml\"]\nrelease.required_assets = [\"a-{version}.zip\", \"{tag}.txt\"]\n";
+        let c = Config::parse(package).unwrap();
+        let present = ["a-1.0.0.zip".to_string()];
+        assert_eq!(
+            c.missing_assets("a", "1.0.0", "v1.0.0", &present),
+            ["v1.0.0.txt"]
+        );
+        let err = Config::parse(&format!("{package}release.mode = \"tag\"\n")).unwrap_err();
+        assert!(err.to_string().contains("release.required_assets"), "{err}");
     }
 
     // Spec: config.versioning and config.release hold defaults for every
