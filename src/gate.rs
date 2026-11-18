@@ -91,9 +91,11 @@ mod tests {
     fn release_runs() {
         let custom = "[release]\nbranch_prefix = \"rel-\"\nauthor = \"github-actions[bot]\"\n";
         let actions = "github-actions[bot]";
+        // On a maintenance branch, verwalter.toml names that branch.
+        let v1 = "[git]\nbase_branch = \"v1\"\n";
         #[rustfmt::skip]
         let cases = [
-            // (event name, event, [release] config, release run?)
+            // (event name, event, extra config, release run?)
             ("workflow_dispatch", json!({}), "", true),
             ("pull_request", pr(true, "release/main", "main", BOT, BODY), "", true),
             ("pull_request_target", pr(true, "release/main", "main", BOT, BODY), "", true),
@@ -106,6 +108,11 @@ mod tests {
             ("pull_request", pr(true, "release/main", "main", BOT, "no marker"), "", false),
             ("pull_request", json!({ "pull_request": { "merged": true, "body": null } }), "", false),
             ("push", json!({}), "", false),
+            // A maintenance branch releases from its own release branch only.
+            ("pull_request", pr(true, "release/v1", "v1", BOT, BODY), v1, true),
+            ("pull_request", pr(true, "release/v1-rc", "v1", BOT, BODY), v1, true),
+            ("pull_request", pr(true, "release/main", "v1", BOT, BODY), v1, false),
+            ("pull_request", pr(true, "release/v1", "main", BOT, BODY), "", false),
             ("pull_request", pr(true, "rel-main", "main", actions, BODY), custom, true),
             ("pull_request", pr(true, "rel-main-rc", "main", actions, BODY), custom, true),
             ("pull_request", pr(true, "release/main", "main", BOT, BODY), custom, false),
