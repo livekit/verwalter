@@ -258,7 +258,7 @@ fn finish(repo: &Repo, gh: &dyn github::Client, o: &mut Outcome) {
         Err(e) => {
             o.status = "failed";
             o.reason = format!(
-                "on the registry, but the release {} could not be read: {e}",
+                "published, but the release {} could not be read: {e}",
                 o.tag
             );
             return;
@@ -274,7 +274,7 @@ fn finish(repo: &Repo, gh: &dyn github::Client, o: &mut Outcome) {
     if !missing.is_empty() {
         o.status = "failed";
         o.reason = format!(
-            "on the registry, but the draft release {} lacks required assets: {}. It stays a draft",
+            "published, but the draft release {} lacks required assets: {}. It stays a draft",
             o.tag,
             missing.join(", ")
         );
@@ -285,7 +285,7 @@ fn finish(repo: &Repo, gh: &dyn github::Client, o: &mut Outcome) {
         Err(e) => {
             o.status = "failed";
             o.reason = format!(
-                "on the registry, but the draft release {} could not be published: {e}",
+                "published, but the draft release {} could not be published: {e}",
                 o.tag
             );
         }
