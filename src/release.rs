@@ -123,6 +123,13 @@ pub fn expand_assets(root: &Path, assets: &[String]) -> Result<Vec<String>> {
     Ok(out)
 }
 
+/// The name an asset has on the release: the file name, without the
+/// `#label` that gh accepts after it.
+fn asset_name(asset: &str) -> String {
+    let file = asset.split('#').next().unwrap_or(asset);
+    file.rsplit('/').next().unwrap_or(file).to_string()
+}
+
 fn resume_hint(e: anyhow::Error, package: &str, options: &Options) -> anyhow::Error {
     let assets: String = options
         .assets
@@ -217,6 +224,19 @@ fn release_one(
                     fresh = true;
                 }
                 if draft && options.publish {
+                    // Spec: RequiredAssetsBeforePublic. The upload above
+                    // succeeded, so its files count as on the release.
+                    let mut present = existing.assets;
+                    present.extend(options.assets.iter().map(|a| asset_name(a)));
+                    let missing =
+                        repo.config
+                            .missing_assets(name, &version.to_string(), &tag, &present);
+                    if !missing.is_empty() {
+                        bail!(
+                            "the release {tag} lacks required assets: {}. It stays a draft",
+                            missing.join(", ")
+                        );
+                    }
                     github::ReleaseEdit {
                         tag: &tag,
                         draft: false,
@@ -231,6 +251,21 @@ fn release_one(
                 let notes = changelog_section(&changelog, &version.to_string());
                 let title = format!("{name} {version}");
                 let draft = repo.config.draft(name) && !options.publish;
+                // Spec: RequiredAssetsBeforePublic. A release created
+                // public has only the assets of this run.
+                if !draft {
+                    let present: Vec<String> =
+                        options.assets.iter().map(|a| asset_name(a)).collect();
+                    let missing =
+                        repo.config
+                            .missing_assets(name, &version.to_string(), &tag, &present);
+                    if !missing.is_empty() {
+                        bail!(
+                            "required assets are not among the --asset files: {}. The release {tag} was not created",
+                            missing.join(", ")
+                        );
+                    }
+                }
                 let prerelease = version.is_prerelease();
                 // A maintenance release must not take "Latest" from a newer line.
                 let latest = (!prerelease

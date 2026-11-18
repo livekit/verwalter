@@ -158,6 +158,10 @@ entity Package {
     -- registry = goproxy), else false: a package with nothing to publish
     -- has nothing to wait for.
     release_as_draft: Boolean
+    -- The asset names the GitHub release must have before it is public,
+    -- with {version} and {tag} replaced. Exact names, no patterns. A
+    -- config error unless release_mode is tag_and_release.
+    required_assets: Set<String>
     -- Where the package is published: crates | npm | pypi | pubdev |
     -- goproxy | custom (an exists_url with {name} and {version}) | none. Defaults
     -- to config.publish.registry. The tool only asks whether a version is
@@ -318,6 +322,12 @@ entity Release {
     -- The release PR always writes one. A version with none was edited
     -- by hand, not released by a release PR.
     has_changelog_entry: changelog_has_entry(package.changelog_file, version)
+    -- RequiredAssetsBeforePublic: every name in package.required_assets
+    -- is on the GitHub release, or among the assets of the run that
+    -- creates it. The tool makes no release public without them: the run
+    -- fails for that package and names the missing ones, and a draft
+    -- stays a draft. A release that stays a draft is never refused.
+    has_required_assets: required_assets_present(package.required_assets, version)
 
     transitions status {
         committed -> tagged
@@ -660,6 +670,7 @@ rule ResumeTaggedReleasesWithoutGitHubRelease {
     for release in Releases where package.repository = repository and status = tagged:
         requires: named = null or release.package = named
         requires: release.package.release_mode = tag_and_release
+        requires: (release.package.release_as_draft and not publish_drafts) or release.has_required_assets
         ensures:
             if release.package.release_as_draft and not publish_drafts:
                 release.status = drafted
@@ -671,11 +682,13 @@ rule ResumeTaggedReleasesWithoutGitHubRelease {
 
 -- A run asked to publish flips every draft it handles once the assets
 -- are there: the WorkflowPublishesRelease step, from the command line.
+-- The assets this run uploads count (RequiredAssetsBeforePublic).
 rule PublishDraftsOnToolRun {
     when: ToolRunStarted(repository, named?, publish_drafts)
     for release in Releases where package.repository = repository and status = drafted:
         requires: publish_drafts
         requires: named = null or release.package = named
+        requires: release.has_required_assets
         ensures: release.status = published
 }
 
@@ -684,6 +697,7 @@ rule CreateGitHubRelease {
     when: release: Release.status transitions_to tagged
     requires: release.status = tagged
     requires: release.package.release_mode = tag_and_release
+    requires: release.package.release_as_draft or release.has_required_assets
     ensures:
         if release.package.release_as_draft:
             release.status = drafted
@@ -721,6 +735,7 @@ rule WorkflowAttachesAssets {
 rule WorkflowPublishesDraftRelease {
     when: WorkflowPublishesRelease(workflow, release)
     requires: release.status = drafted
+    requires: release.has_required_assets
     ensures: release.status = published
 }
 
@@ -904,13 +919,14 @@ entity PublishOutcome {
 -- is public. After the commands, every outcome of published or `exists`
 -- whose release is a draft flips it. A flip that fails is a failed
 -- outcome: the job fails, and a re-run finds the version on the registry
--- and tries the flip again.
+-- and tries the flip again. A draft without a required asset is not
+-- flipped and is a failed outcome too (RequiredAssetsBeforePublic).
 rule PublishFlipsDrafts {
     when: WorkflowRunsPublish(workflow, repository, releases?)
     for o in PublishOutcomes where o.status in {published, `exists`}:
         for release in Releases where release.package = o.package and release.status = drafted:
             ensures:
-                if github_release_published(release.github_release):
+                if release.has_required_assets and github_release_published(release.github_release):
                     release.status = published
                 else:
                     o.status = failed

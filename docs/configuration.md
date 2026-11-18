@@ -64,6 +64,7 @@ exists_url = "https://r/{name}/{version}"  # for custom: 200 when the version ex
 
 [packages.livekit-protocol]
 path = "livekit-protocol"        # the only required key, unless `members` finds the package
+release.required_assets = ["protocol-{version}.zip"]   # the GitHub release is not made public without them
 
 [packages.livekit-ffi]
 path = "livekit-ffi"
@@ -99,6 +100,17 @@ table (`release = { draft = true }`) or a `[packages.livekit-ffi.release]`
 header.
 
 The API check is described in [api-check.md](api-check.md).
+
+`release.required_assets` lists the asset names that the GitHub release
+of a package must have before it is public. The names are exact, with
+no patterns. `{version}` and `{tag}` are replaced. `release --publish`
+and `publish` do not make a draft public while a name is missing: they
+fail for that package and list the missing names, and the release stays
+a draft. A release that is created public needs every name among the
+`--asset` files of that run. A release that stays a draft is never an
+error. The key is a package key only, and it needs
+`release.mode = "tag_and_release"`. verwalter reads the first 100 assets
+of a release.
 
 The publish command for a package is its own `publish.command`, else
 `[publish].command` when the package is on the default registry, else the

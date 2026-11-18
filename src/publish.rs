@@ -244,16 +244,17 @@ fn run_command(repo: &Repo, name: &str, c: &Candidate, first: bool) -> (bool, St
 
 /// Spec: PublishFlipsDrafts. A package is finished when the registry has
 /// it and its GitHub release, if it is a draft, is published. A flip that
-/// fails turns the outcome into a failure, so a re-run comes back: the
-/// registry then says `exists`, and the flip is tried again.
+/// fails, or a draft without a required asset, turns the outcome into a
+/// failure, so a re-run comes back: the registry then says `exists`, and
+/// the flip is tried again.
 fn finish(repo: &Repo, gh: &dyn github::Client, o: &mut Outcome) {
     if !matches!(o.status, "published" | "exists")
         || repo.config.packages[&o.package].release.mode != ReleaseMode::TagAndRelease
     {
         return;
     }
-    let draft = match (github::ReleaseView { tag: &o.tag }).execute(gh) {
-        Ok(state) => state.is_some_and(|s| s.draft),
+    let release = match (github::ReleaseView { tag: &o.tag }).execute(gh) {
+        Ok(state) => state.filter(|s| s.draft),
         Err(e) => {
             o.status = "failed";
             o.reason = format!(
@@ -263,7 +264,20 @@ fn finish(repo: &Repo, gh: &dyn github::Client, o: &mut Outcome) {
             return;
         }
     };
-    if !draft {
+    let Some(release) = release else {
+        return;
+    };
+    // Spec: RequiredAssetsBeforePublic.
+    let missing = repo
+        .config
+        .missing_assets(&o.package, &o.version, &o.tag, &release.assets);
+    if !missing.is_empty() {
+        o.status = "failed";
+        o.reason = format!(
+            "on the registry, but the draft release {} lacks required assets: {}. It stays a draft",
+            o.tag,
+            missing.join(", ")
+        );
         return;
     }
     match gh.execute(&["release", "edit", &o.tag, "--draft=false"]) {
