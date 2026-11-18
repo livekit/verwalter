@@ -38,6 +38,9 @@ enum Command {
         /// Exit non-zero when the current version of a package is not completely released
         #[arg(long)]
         check: bool,
+        /// Print one JSON list in place of the table
+        #[arg(long)]
+        json: bool,
         /// Only this package
         #[arg(long, value_name = "NAME")]
         package: Option<String>,
@@ -289,14 +292,21 @@ fn run(cli: Cli) -> Result<()> {
             }
             Ok(())
         }
-        Command::Status { check, package } => {
+        Command::Status {
+            check,
+            json,
+            package,
+        } => {
             let mut rows = status::status(&repo, &remote, gh)?;
             if let Some(only) = &package {
                 rows.retain(|r| &r.package == only);
                 ensure!(!rows.is_empty(), "{only}: no such package");
             }
+            if json {
+                println!("{}", serde_json::to_string(&rows)?);
+            }
             let w = rows.iter().map(|r| r.package.len()).max().unwrap_or(0);
-            for r in &rows {
+            for r in rows.iter().filter(|_| !json) {
                 let pending = if r.pending_changesets.is_empty() {
                     String::new()
                 } else {

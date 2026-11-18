@@ -1174,6 +1174,19 @@ fn status_check_finds_the_incomplete_releases() {
         livekit.starts_with("required assets are missing: b.zip -> "),
         "{livekit}"
     );
+    // `status --json` prints these rows.
+    let json = serde_json::to_value(&rows).unwrap();
+    let row = json
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["package"] == "livekit")
+        .unwrap();
+    assert_eq!(row["version"], "0.7.0");
+    assert_eq!(row["tag_state"], "both");
+    assert_eq!(row["release"], "published");
+    assert_eq!(row["missing_assets"], serde_json::json!(["b.zip"]));
+    assert_eq!(row["incomplete"], livekit.as_str());
 
     // A version bumped by hand has no tag and no changelog entry: it is
     // no release, so nothing is missing.

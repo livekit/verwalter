@@ -16,7 +16,8 @@ use crate::{
     repo::Repo,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// The field names are the keys of `status --json`.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct PackageStatus {
     pub package: String,
     pub version: String,
