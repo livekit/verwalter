@@ -2519,6 +2519,7 @@ fn publish_leaves_a_draft_without_a_required_asset() {
         jobs: Some(1),
         dry_run: false,
         only: None,
+        allow_changed_source: false,
     };
 
     // Every release is a draft without assets.
