@@ -149,9 +149,10 @@ Three terms:
     as the example workflow does, and set it to the merge commit or to
     any tag of that release.
   - `verwalter publish` fails a package whose files changed since its
-    tag, and the reason names `ref=<tag>`. It does not compare files
-    outside the package path, such as a root lock file, so pin the
-    commit anyway.
+    tag, and the reason names `ref=<tag>`. `verwalter release --asset`
+    does the same before it uploads to a tag from an earlier run.
+    Neither compares files outside the package path, such as a root
+    lock file, so pin the commit anyway.
   - A later release run can finish an older release: verwalter reports
     a draft on every run until it is public. A job that finishes such
     a draft checks out the tag of that release, not the commit of the
@@ -284,7 +285,7 @@ First find the cause of the failure. It decides the path.
 |---|---|
 | Transient: a runner, the network, a registry that was down | Re-run the failed jobs of the same run: `gh run rerun <run-id> --failed`. The run keeps its event, its inputs and its commit. Only the failed jobs and the jobs after them run again. GitHub permits this for 30 days after the first run. The build artifacts of the first run must still exist. |
 | The workflow file was wrong: a missing secret, a wrong setup step | A re-run uses the old workflow file. Merge the fix, then start a new run by hand with the tag: `gh workflow run <file> -f ref=<tag>`. The workflow file comes from the branch, and the source comes from the tag. Every job builds again. |
-| The release configuration was wrong: a publish command in `verwalter.toml` | A run with `ref=<tag>` reads the old configuration from the tag. Merge the fix. If `git diff <tag> HEAD -- <package path>` is empty, start a run by hand from the branch head. If it is not empty, release the next version. |
+| The release configuration was wrong: a publish command in `verwalter.toml` | A run with `ref=<tag>` reads the old configuration from the tag. Merge the fix, then start a run by hand from the branch head. verwalter compares the package's files with the tag. If they changed, `publish` and `release --asset` fail and name the tag. Then release the next version. |
 | The released commit is wrong: the source does not build or the package is broken | Do not publish a fixed copy of that version. If no registry has the version, remove the release and the tag (`verwalter release --abandon <tag>`). Then merge the fix with a changeset and release the next version. |
 
 A workflow supports these paths when it follows three rules above.

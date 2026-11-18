@@ -712,9 +712,18 @@ rule MaintainerAbandonsRelease {
 -- release has no GitHub release to attach to. An asset given as a
 -- directory stands for every file directly in it, so a matrix build
 -- names its download directory once.
+-- AssetsComeFromTheTaggedSource: the workflow built the assets from
+-- HEAD. When the tag existed before the run, changed_since_tag (see
+-- PublishBuildsTheTaggedSource) must be false for the package, or the
+-- run fails and uploads nothing. This also holds when the run creates
+-- the GitHub release for such a tag with assets. A tag made in the run
+-- points at HEAD and is not compared. A GitHub release without assets
+-- is created for an existing tag from any commit. allow_changed_source,
+-- from `release --allow-changed-source`, turns the check off.
 rule WorkflowAttachesAssets {
-    when: WorkflowAttachesAssets(workflow, release, assets, package_named)
+    when: WorkflowAttachesAssets(workflow, release, assets, package_named, allow_changed_source)
     requires: release.status = drafted or (release.status = published and package_named)
+    requires: allow_changed_source or not changed_since_tag(release.package)
     ensures: ReleaseAssetsAttached(release: release, assets: assets)
 }
 
@@ -969,7 +978,7 @@ surface WorkflowReleaseHandoff {
 
     provides:
         WorkflowPublishesRelease(workflow, release) when release.status = drafted
-        WorkflowAttachesAssets(workflow, release, assets, package_named) when release.status = drafted | published
+        WorkflowAttachesAssets(workflow, release, assets, package_named, allow_changed_source) when release.status = drafted | published
 
     @guidance
         -- Recommended order in the workflow: build, then tag and create
