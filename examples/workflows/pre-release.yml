@@ -8,20 +8,12 @@ name: Pre-release PR
 on:
   workflow_dispatch:
 
-permissions:
-  contents: write
-  pull-requests: write
-
 jobs:
   pr:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0 # the tags number the rc
-      - uses: livekit/verwalter@v0.22.0
-        with:
-          command: pre-release
-          args: --target ${{ github.ref_name }}
-          app-client-id: ${{ secrets.VERWALTER_RELEASE_CLIENT_ID }}
-          app-private-key: ${{ secrets.VERWALTER_RELEASE_APP_KEY }}
+    permissions:
+      contents: write
+      pull-requests: write
+    uses: livekit/verwalter/.github/workflows/call-pre-release.yml@v0.22.0
+    secrets:
+      VERWALTER_RELEASE_CLIENT_ID: ${{ secrets.VERWALTER_RELEASE_CLIENT_ID }}
+      VERWALTER_RELEASE_APP_KEY: ${{ secrets.VERWALTER_RELEASE_APP_KEY }}

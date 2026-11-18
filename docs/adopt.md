@@ -164,8 +164,9 @@ Then:
   back to it fails with 404. The command publishes
   what is on disk, so the job installs and builds first, or downloads
   the build job's artifact.
-- In `changeset-check.yml`, drop the `taiki-e/install-action` step and
-  `fetch-depth: 0` unless `[check].api` is set.
+- If `[check].api` is set, replace the call in `changeset-check.yml`
+  with steps of your own that install the tool first. See
+  [api-check.md](api-check.md).
 - Keep what ran after the old publish (docs upload, downstream
   dispatch) as steps at the end of the publish job. The installed
   workspace is there. Move the secrets or the OIDC role those

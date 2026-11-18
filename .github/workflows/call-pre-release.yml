@@ -1,0 +1,33 @@
+# Reusable: opens an rc PR from the branch that the caller runs on. The
+# calling job needs `contents: write` and `pull-requests: write`.
+name: Pre-release PR (reusable)
+
+on:
+  workflow_call:
+    secrets:
+      VERWALTER_RELEASE_CLIENT_ID:
+        required: false
+      VERWALTER_RELEASE_APP_KEY:
+        required: false
+
+jobs:
+  pr:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      # The action at the commit of this workflow file, so one pin in the
+      # caller sets the version of both.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .verwalter-action
+      - run: echo .verwalter-action >> .git/info/exclude
+      - uses: ./.verwalter-action
+        with:
+          command: pre-release
+          args: --target ${{ github.ref_name }}
+          app-client-id: ${{ secrets.VERWALTER_RELEASE_CLIENT_ID }}
+          app-private-key: ${{ secrets.VERWALTER_RELEASE_APP_KEY }}

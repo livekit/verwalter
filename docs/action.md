@@ -44,6 +44,13 @@ per registry for `verwalter.toml`:
 | `release.yml` | `pull_request` closed on any base branch, merged, head `release/*`, author `verwalter-release[bot]`, body with the verwalter marker | `release`, then `publish` |
 | `pre-release.yml` | `workflow_dispatch` | `pre-release --target ${{ github.ref_name }}`, with `fetch-depth: 0` because the tags number the rc. The pending changesets decide what is in it and how far it moves. |
 
+`changeset-check.yml`, `release-pr.yml` and `pre-release.yml` call a
+reusable workflow of this repository (`call-check.yml`, `call-pr.yml`,
+`call-pre-release.yml`). The one pin on the `uses` line sets the version
+of the workflow and of the action. The caller keeps the trigger, the
+permissions and the two App secrets. `release.yml` is not shared: the
+build and the publish steps differ per repository.
+
 To ship releases from a maintenance branch such as `v1` next to `main`:
 
 1. On `v1`, set `[git] base_branch = "v1"` in `verwalter.toml`.

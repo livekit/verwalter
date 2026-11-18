@@ -1,10 +1,8 @@
 # Fails a contributor PR that changes a versioned package without a
 # changeset, with a comment that links to a prefilled changeset file.
 # The `internal` label (config: [check] exempt_label) skips the check.
-# With `[check].api` in verwalter.toml, the same run checks the public
-# API of each covered package against its changeset level. The tool it
-# names must be installed first, and the baseline tag must be in the
-# checkout.
+# With `[check].api` in verwalter.toml, use steps of your own instead of
+# the shared workflow: docs/api-check.md shows them.
 name: Changeset check
 
 on:
@@ -12,20 +10,9 @@ on:
     types: [opened, synchronize, reopened, labeled, unlabeled]
     branches: [main]
 
-permissions:
-  contents: read
-  pull-requests: write
-
 jobs:
   check:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0                       # the API check needs the baseline tag
-      - uses: taiki-e/install-action@v2   # only with [check].api
-        with:
-          tool: cargo-semver-checks
-      - uses: livekit/verwalter@v0.22.0
-        with:
-          command: check
+    permissions:
+      contents: read
+      pull-requests: write
+    uses: livekit/verwalter/.github/workflows/call-check.yml@v0.22.0
