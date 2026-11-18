@@ -26,6 +26,7 @@ What the tool does, what it catches, and what to do when a step fails.
 | Abandon | Removes a GitHub release and its tag, local and remote. The registry is not touched. | `release --abandon <tag>` |
 | Dry run | Every push, tag and GitHub write is printed instead of done. | `--dry-run`, action `dry-run` |
 | Status | Per package: version, tag, release, pending changesets, open PRs, next step. | `status` |
+| End-state check | The last job of a release run asserts the result. The tag must be on the remote. The GitHub release must be public and have its required assets. The registry must have the version. Each failure names what is missing and the command that finishes it. A package with `release.mode = "none"` is not checked. A version edited by hand is not checked. | `status --check`, `release.required_assets` |
 
 ## Failure paths
 
