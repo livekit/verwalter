@@ -112,12 +112,14 @@ pub fn status(repo: &Repo, remote: &str, gh: &dyn github::Client) -> Result<Vec<
             .map(|r| r.to.to_string());
         let release_pr = open
             .iter()
-            .find(|pr| pr.head == crate::branches::branch_name(repo))
+            .find(|pr| pr.head == crate::branches::branch_name(&repo.config))
             .filter(|_| next_version.is_some())
             .map(|pr| pr.number);
         let rc_pr = open
             .iter()
-            .find(|pr| pr.head == prerelease::branch_name(repo, &repo.config.git.base_branch))
+            .find(|pr| {
+                pr.head == prerelease::branch_name(&repo.config, &repo.config.git.base_branch)
+            })
             .map(|pr| pr.number);
 
         let next_step = if package.release.mode == ReleaseMode::None {

@@ -3,7 +3,7 @@ description: Changeset-based versioning for single packages and monorepos. Runs 
 
 inputs:
   command:
-    description: "One of: check, changeset, plan, pr, release, publish, pre-release, status."
+    description: "One of: check, changeset, plan, pr, gate, release, publish, pre-release, status."
     required: true
   pr:
     description: Pull request number for `check`. Defaults to the event's pull request.
@@ -31,6 +31,9 @@ inputs:
     default: ""
 
 outputs:
+  release:
+    description: "`gate` only: true when this workflow run is a release run, else false."
+    value: ${{ steps.run.outputs.release }}
   released:
     description: "`release` only: true when at least one release was tagged, drafted or published."
     value: ${{ steps.run.outputs.released }}

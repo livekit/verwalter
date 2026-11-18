@@ -10,7 +10,9 @@
 use anyhow::{Result, bail, ensure};
 
 use crate::{
-    Version, apply, branches, git,
+    Version, apply, branches,
+    config::Config,
+    git,
     github::{self, MARKER, PullRequest, open_pr, section, upsert_pr},
     plan::PlannedRelease,
     repo::Repo,
@@ -18,8 +20,8 @@ use crate::{
 };
 
 /// The rc branch, named after the target like the release PR: `release/main-rc`.
-pub fn branch_name(repo: &Repo, target: &str) -> String {
-    format!("{}{target}-rc", repo.config.release.branch_prefix)
+pub fn branch_name(config: &Config, target: &str) -> String {
+    format!("{}{target}-rc", config.release.branch_prefix)
 }
 
 /// Versions of `package` that have a release tag.
@@ -125,7 +127,7 @@ pub fn open(
     gh: &dyn github::Client,
 ) -> Result<(Vec<PlannedRelease>, PullRequest)> {
     let releases = plan(repo)?;
-    let branch = branch_name(repo, target);
+    let branch = branch_name(&repo.config, target);
     let start = format!("{remote}/{target}");
     ensure!(
         git::ref_exists(&repo.root, &start),
