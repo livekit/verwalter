@@ -1121,6 +1121,77 @@ fn status_reports_state_and_next_step() {
     );
 }
 
+// Spec: Release.is_complete. `status --check` fails for a row with
+// `incomplete` set.
+#[test]
+fn status_check_finds_the_incomplete_releases() {
+    let r = fixture("status-check");
+    let root = &r.0;
+    let _remote = remote(root, "status-check");
+    git(root, &["tag", "livekit-protocol-v0.3.1"]);
+    git(root, &["tag", "livekit-api-v0.4.3"]);
+    git(root, &["tag", "livekit-v0.7.0"]);
+    git(root, &["push", "-q", "origin", "--tags"]);
+    // The last table of the fixture config is livekit.
+    let base = fs::read_to_string(root.join("verwalter.toml")).unwrap();
+    write(
+        root,
+        "verwalter.toml",
+        &format!("{base}release.required_assets = [\"a.zip\", \"b.zip\"]\n"),
+    );
+
+    // protocol: public. api: a draft. livekit: public, without b.zip.
+    let gh = MockClient(|args: &[&str]| -> Result<String> {
+        match args {
+            ["pr", "list", ..] => Ok("[]".into()),
+            ["api", "graphql", "-f", "tag=livekit-api-v0.4.3", ..] => {
+                Ok(r#"{"isDraft":true,"asset_count":0,"assets":[]}"#.into())
+            }
+            ["api", "graphql", "-f", "tag=livekit-v0.7.0", ..] => {
+                Ok(r#"{"isDraft":false,"asset_count":1,"assets":["a.zip"]}"#.into())
+            }
+            ["api", "graphql", ..] => Ok(r#"{"isDraft":false,"asset_count":0,"assets":[]}"#.into()),
+            _ => Err(anyhow!("not found")),
+        }
+    });
+    let repo = Repo::load(root).unwrap();
+    let rows = verwalter::status::status(&repo, "origin", &gh).unwrap();
+    let by = |n: &str| rows.iter().find(|r| r.package == n).unwrap();
+
+    assert_eq!(by("livekit-protocol").incomplete, None);
+    assert_eq!(
+        by("livekit-api").incomplete.as_deref(),
+        Some(
+            format!(
+                "the GitHub release is a draft -> {}",
+                by("livekit-api").next_step
+            )
+            .as_str()
+        )
+    );
+    let livekit = by("livekit").incomplete.clone().unwrap();
+    assert!(
+        livekit.starts_with("required assets are missing: b.zip -> "),
+        "{livekit}"
+    );
+
+    // A version bumped by hand has no tag and no changelog entry: it is
+    // no release, so nothing is missing.
+    write(
+        root,
+        "livekit-protocol/Cargo.toml",
+        "[package]\nname = \"livekit-protocol\"\nversion = \"0.3.2\"\n",
+    );
+    let repo = Repo::load(root).unwrap();
+    let rows = verwalter::status::status(&repo, "origin", &gh).unwrap();
+    let protocol = rows
+        .iter()
+        .find(|r| r.package == "livekit-protocol")
+        .unwrap();
+    assert_eq!(protocol.tag_state, "missing");
+    assert_eq!(protocol.incomplete, None);
+}
+
 #[test]
 fn release_runs_in_dependency_order_and_stops_at_the_first_failure() {
     let r = fixture("order");

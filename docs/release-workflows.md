@@ -6,8 +6,7 @@ has a reason and a check. The failures behind them are in
 [release-pitfalls.md](release-pitfalls.md).
 
 [examples/workflows/release.yml](../examples/workflows/release.yml) is
-the starting point. It has no job that checks the end state, because
-the required assets and registries differ per repository.
+the starting point.
 
 Three terms:
 
@@ -92,9 +91,11 @@ Three terms:
   the tag exists, the release is public, each required asset is there,
   and each registry has the version.
   - Why: this job fails on every silent skip, whatever caused it.
-  - With verwalter, `publish` already fails the job when a registry
-    lacks the version or the draft cannot become public. The assets
-    and the registries that verwalter does not handle need the job.
+  - With verwalter, the last job is one step: `verwalter status --check`.
+    The tag must be on the remote. The release must be public and
+    have each name in `release.required_assets`. The registry must
+    have the version. A registry that verwalter does not handle needs
+    a step of its own.
     See [Check the end state](#check-the-end-state).
   - Check: delete one upload step in your head. Does the run go red?
 
@@ -255,28 +256,24 @@ jobs:
 
 ```yaml
 verify:
-  needs: [release, publish]
-  if: needs.release.outputs.released == 'true'
+  needs: publish
   runs-on: ubuntu-latest
-  env:
-    GH_TOKEN: ${{ github.token }}
-    GH_REPO: ${{ github.repository }}
-    TAG: ${{ needs.release.outputs.tag }}
-    REQUIRED: "app-linux.zip app-macos.zip app-windows.zip"
   steps:
-    - run: |
-        set -euo pipefail
-        if [ "$(gh release view "$TAG" --json isDraft --jq .isDraft)" != "false" ]; then
-          echo "::error::release $TAG is not public"
-          exit 1
-        fi
-        gh release view "$TAG" --json assets --jq '.assets[].name' > on-release.txt
-        for asset in $REQUIRED; do
-          grep -qxF "$asset" on-release.txt || { echo "::error::$asset is missing on $TAG"; exit 1; }
-        done
-        # One request per registry that verwalter does not handle.
-        npm view "my-package@${TAG#v}" version
+    - uses: actions/checkout@v7
+      with:
+        ref: ${{ github.event.pull_request.merge_commit_sha || inputs.ref || github.sha }}
+        fetch-depth: 0
+    - uses: livekit/verwalter@v0.22.0
+      with:
+        command: status
+        args: --check
+    # A registry that verwalter does not handle gets one request of its
+    # own here, such as: npm view "my-package@<version>" version
 ```
+
+The required assets are the names in `release.required_assets` of each
+package. The step prints the status of every package, then one line
+for each package that is not completely released.
 
 ## Recovery
 

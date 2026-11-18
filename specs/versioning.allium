@@ -328,6 +328,15 @@ entity Release {
     -- fails for that package and names the missing ones, and a draft
     -- stays a draft. A release that stays a draft is never refused.
     has_required_assets: required_assets_present(package.required_assets, version)
+    -- The end state of a release: the tag is on the remote, the GitHub
+    -- release, when one is wanted, is public with its required assets,
+    -- and the registry, when one is configured, has the version. An
+    -- answer the tool cannot get, from GitHub or from the registry,
+    -- counts as not complete.
+    is_complete:
+        tag_on_remote(package, version)
+        and (package.release_mode = tag or (status = published and has_required_assets))
+        and package.on_registry(version) != false
 
     transitions status {
         committed -> tagged
@@ -999,7 +1008,15 @@ surface WorkflowReleaseHandoff {
 }
 
 -- Where every package stands and what finishes its release, so a
--- maintainer can take over from a failed workflow run.
+-- maintainer can take over from a failed workflow run. With `--check`
+-- the same read is the last job of a release run: it fails when the
+-- Release of a package's current version is not complete
+-- (Release.is_complete), and names what is missing and the command that
+-- finishes it. `--package` keeps the output and the check to one package.
+-- Not checked: a package with release_mode none, and a version that is
+-- no release (ReleaseNeedsChangelogEntry: no tag and no changelog entry).
+-- Pending changesets and an open release PR are later releases and never
+-- fail the check.
 surface ReleaseStatus {
     facing maintainer: Maintainer
     context package: Package
@@ -1009,6 +1026,7 @@ surface ReleaseStatus {
         package.pending_changesets
         package.open_release_pull_request
         package.release_pull_requests
+        package.required_assets
 
     @guidance
         -- The implementation derives the Release state from tags and the
