@@ -75,6 +75,9 @@ enum Command {
         /// Publish the draft release
         #[arg(long)]
         publish: bool,
+        /// Upload assets even when HEAD changed a package's files since its tag. Without it, the release fails: build the assets from the tag instead
+        #[arg(long)]
+        allow_changed_source: bool,
         /// Delete this tag's GitHub release and the tag
         #[arg(long, value_name = "TAG", conflicts_with_all = ["assets", "package", "publish"])]
         abandon: Option<String>,
@@ -357,6 +360,7 @@ fn run(cli: Cli) -> Result<()> {
             assets,
             package,
             publish,
+            allow_changed_source,
             abandon,
         } => {
             if let Some(tag) = abandon {
@@ -369,6 +373,7 @@ fn run(cli: Cli) -> Result<()> {
                 assets,
                 package,
                 publish,
+                allow_changed_source,
                 dry_run,
             };
             let released = release::run(&repo, &remote, &options, gh)?;

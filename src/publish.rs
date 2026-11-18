@@ -167,7 +167,7 @@ fn candidates(repo: &Repo, only: Option<&BTreeSet<String>>) -> Result<BTreeMap<S
 
 /// Spec: PublishBuildsTheTaggedSource. True when HEAD changed a file of
 /// `name` since `tag`. A file of a package nested in it is not its file.
-fn changed_since_tag(repo: &Repo, name: &str, tag: &str) -> Result<bool> {
+pub(crate) fn changed_since_tag(repo: &Repo, name: &str, tag: &str) -> Result<bool> {
     let path = &repo.config.packages[name].path;
     let files = git::run(
         &repo.root,
