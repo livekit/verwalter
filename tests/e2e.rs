@@ -2855,10 +2855,10 @@ publish.command = 'echo {tag} >> "$VERWALTER_ROOT/published.log"'
         ]
     );
 
-    // `publish` runs the command, then leaves the draft as it is and
-    // fails the package: extra.txt is missing.
+    // `publish` fails the package before its command runs: extra.txt is
+    // missing, and the command cannot be undone. The draft stays.
     let outcomes = verwalter::publish::run(&repo, &publish_options, &no_registry, &gh).unwrap();
-    assert_eq!(published_log(), "v0.7.0\n");
+    assert_eq!(published_log(), "");
     assert_eq!(outcomes[0].status, "failed");
     assert!(
         outcomes[0]
@@ -2917,15 +2917,15 @@ publish.command = 'echo {tag} >> "$VERWALTER_ROOT/published.log"'
         (TAG, "drafted")
     );
 
-    // `publish` fails the package before its command runs: the log still
-    // has only the line of step A.
+    // `publish` fails the package before its command runs: the log is
+    // still empty.
     let outcomes = verwalter::publish::run(&repo, &publish_options, &no_registry, &gh).unwrap();
     assert_eq!(outcomes[0].status, "failed");
     assert_eq!(
         outcomes[0].reason,
         "HEAD changed the source since v0.7.0: publish from ref=v0.7.0"
     );
-    assert_eq!(published_log(), "v0.7.0\n");
+    assert_eq!(published_log(), "");
     assert!(gh.take_writes().is_empty());
     assert_eq!(gh.is_draft(TAG), Some(true));
 
@@ -2943,13 +2943,14 @@ publish.command = 'echo {tag} >> "$VERWALTER_ROOT/published.log"'
         ["release upload v0.7.0 --clobber dist/artifact.txt dist/extra.txt"]
     );
 
-    // `publish` runs the command again and makes the release public.
+    // `publish` runs the command, for the first time, and makes the
+    // release public.
     let outcomes = verwalter::publish::run(&repo, &publish_options, &no_registry, &gh).unwrap();
     assert_eq!(
         (outcomes[0].status, outcomes[0].reason.as_str()),
         ("published", "")
     );
-    assert_eq!(published_log(), "v0.7.0\nv0.7.0\n");
+    assert_eq!(published_log(), "v0.7.0\n");
     assert_eq!(gh.is_draft(TAG), Some(false));
     assert_eq!(gh.take_writes(), ["release edit v0.7.0 --draft=false"]);
 
