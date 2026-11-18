@@ -46,7 +46,7 @@ What the tool does, what it catches, and what to do when a step fails.
 | An rc is requested twice, or by another member of the group | One branch per package or group, updated in place. The number continues. |
 | A GitHub release is deleted but the tag remains | The next release run recreates it from the changelog. |
 | Two release runs race on the same tag | The run that loses the create sees the existing release and reports it. |
-| A draft release lacks a file that consumers download | The package lists the file in `release.required_assets`. `release --publish` and `publish` then fail for the package and list the missing names. The release stays a draft. |
+| A draft release lacks a file that consumers download | The package lists the file in `release.required_assets`. `release --publish` and `publish` then fail for the package and list the missing names. The release stays a draft. `publish` checks this before the publish command, so the command does not run for such a package. |
 | A publish fails for one package | Its transitive dependents are blocked and reported with the cause. Every other package publishes. The run exits non-zero. |
 | A publish is re-run | Versions the registry has are skipped before the command runs. The rest publish. |
 | The registry is down during a publish | A 503 is an error, not "not there yet". The package fails, its dependents are blocked. |

@@ -897,6 +897,8 @@ rule WorkflowPublishesInDependencyOrder {
     ensures:
         for p in candidates:
             -- A version the registry has is skipped before the command runs.
+            -- A draft that lacks a required asset fails before the command
+            -- runs too (RequiredAssetsBeforePublic).
             -- Otherwise started only after every in-repo dependency among
             -- the candidates ended as published or exists. Independent
             -- packages run at the same time, up to the job limit.
@@ -920,7 +922,9 @@ entity PublishOutcome {
 -- whose release is a draft flips it. A flip that fails is a failed
 -- outcome: the job fails, and a re-run finds the version on the registry
 -- and tries the flip again. A draft without a required asset is not
--- flipped and is a failed outcome too (RequiredAssetsBeforePublic).
+-- flipped and is a failed outcome too (RequiredAssetsBeforePublic). For
+-- a version the registry does not have yet, that check comes before the
+-- publish command: the command does not run for such a draft.
 rule PublishFlipsDrafts {
     when: WorkflowRunsPublish(workflow, repository, releases?)
     for o in PublishOutcomes where o.status in {published, `exists`}:

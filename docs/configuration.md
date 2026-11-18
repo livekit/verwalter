@@ -106,7 +106,9 @@ of a package must have before it is public. The names are exact, with
 no patterns. `{version}` and `{tag}` are replaced. `release --publish`
 and `publish` do not make a draft public while a name is missing: they
 fail for that package and list the missing names, and the release stays
-a draft. A release that is created public needs every name among the
+a draft. `publish` checks the draft before it runs the publish command.
+The command cannot be undone, so it does not run for a release that
+would stay a draft. A release that is created public needs every name among the
 `--asset` files of that run. A release that stays a draft is never an
 error. The key is a package key only, and it needs
 `release.mode = "tag_and_release"`. verwalter reads the first 100 assets

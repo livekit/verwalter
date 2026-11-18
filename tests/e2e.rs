@@ -2330,8 +2330,9 @@ fn publish_flips_the_draft_release_once_the_registry_has_it() {
 }
 
 // Spec: RequiredAssetsBeforePublic. `publish` leaves a draft without a
-// required asset as it is and fails for that package. A package without
-// the key is flipped as before.
+// required asset as it is and fails for that package. Its publish command
+// does not run: the command cannot be undone, and the release would stay
+// a draft. A package without the key is published and flipped as before.
 #[test]
 fn publish_leaves_a_draft_without_a_required_asset() {
     let r = fixture("publish-required-assets");
@@ -2345,7 +2346,7 @@ fn publish_leaves_a_draft_without_a_required_asset() {
         root,
         "verwalter.toml",
         &format!(
-            "{base}release.required_assets = [\"sdk-{{tag}}.zip\"]\n\n[publish]\ncommand = 'true'\n"
+            "{base}release.required_assets = [\"sdk-{{tag}}.zip\"]\n\n[publish]\ncommand = 'echo \"$VERWALTER_PACKAGE\" >> \"$VERWALTER_ROOT/published.log\"'\n"
         ),
     );
     let repo = Repo::load(root).unwrap();
@@ -2382,6 +2383,9 @@ fn publish_leaves_a_draft_without_a_required_asset() {
             .borrow()
             .contains(&"release edit livekit-v0.7.0 --draft=false".to_string())
     );
+    let ran = fs::read_to_string(root.join("published.log")).unwrap();
+    assert!(!ran.lines().any(|l| l == "livekit"), "{ran}");
+    assert!(ran.lines().any(|l| l == "livekit-protocol"), "{ran}");
 
     assert_eq!(by("livekit-protocol").status, "published");
     assert!(
