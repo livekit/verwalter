@@ -372,6 +372,14 @@
             "null"
           ],
           "default": null
+        },
+        "required_assets": {
+          "description": "Asset names the GitHub release must have before it becomes public,\nwith `{version}` and `{tag}`. Exact names, no globs. A draft that\nlacks one stays a draft.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
         }
       },
       "additionalProperties": false
