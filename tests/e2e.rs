@@ -20,6 +20,149 @@ impl<F: Fn(&[&str]) -> Result<String>> Client for MockClient<F> {
     }
 }
 
+/// A release as [`FakeGitHub`] keeps it.
+struct FakeRelease {
+    draft: bool,
+    /// Asset names, in upload order.
+    assets: Vec<String>,
+}
+
+/// Stateful fake GitHub, for a scenario that spans several runs of the
+/// tool. It keeps one release per tag and answers the gh calls `release`,
+/// `publish` and `status` send. A call it has no answer for is an error,
+/// and fails the test when the fake drops: the tool goes on after some
+/// failed gh calls, so the error alone could pass unseen.
+#[derive(Default)]
+struct FakeGitHub {
+    releases: std::cell::RefCell<std::collections::BTreeMap<String, FakeRelease>>,
+    /// Every `gh release ...` call since the last `take_writes`.
+    writes: std::cell::RefCell<Vec<String>>,
+    unanswered: std::cell::RefCell<Vec<String>>,
+}
+
+impl FakeGitHub {
+    /// None when the tag has no release.
+    fn is_draft(&self, tag: &str) -> Option<bool> {
+        self.releases.borrow().get(tag).map(|r| r.draft)
+    }
+
+    fn assets(&self, tag: &str) -> Vec<String> {
+        self.releases
+            .borrow()
+            .get(tag)
+            .map(|r| r.assets.clone())
+            .unwrap_or_default()
+    }
+
+    /// The write calls since the last call of this, as gh arguments. The
+    /// release notes are shown as `<notes>`.
+    fn take_writes(&self) -> Vec<String> {
+        self.writes.take()
+    }
+}
+
+impl Client for FakeGitHub {
+    fn execute(&self, args: &[&str]) -> Result<String> {
+        let mut releases = self.releases.borrow_mut();
+        if args.first() == Some(&"release") {
+            let shown: Vec<&str> = args
+                .iter()
+                .map(|a| if a.contains('\n') { "<notes>" } else { *a })
+                .collect();
+            self.writes.borrow_mut().push(shown.join(" "));
+        }
+        // The name of an asset is the file name of its path.
+        let name = |path: &str| path.rsplit('/').next().unwrap().to_string();
+        match args {
+            ["pr", "list", ..] => Ok("[]".into()),
+            // ReleaseView: the output of its --jq, or nothing.
+            ["api", "graphql", "-f", tag, ..] if tag.starts_with("tag=") => {
+                Ok(match releases.get(&tag["tag=".len()..]) {
+                    Some(r) => serde_json::json!({
+                        "isDraft": r.draft,
+                        "asset_count": r.assets.len(),
+                        "assets": r.assets,
+                    })
+                    .to_string(),
+                    None => String::new(),
+                })
+            }
+            [
+                "release",
+                "create",
+                tag,
+                "--title",
+                _,
+                "--notes",
+                _,
+                rest @ ..,
+            ] => {
+                if releases.contains_key(*tag) {
+                    anyhow::bail!("a release for {tag} exists already");
+                }
+                let mut release = FakeRelease {
+                    draft: false,
+                    assets: Vec::new(),
+                };
+                for arg in rest {
+                    match *arg {
+                        "--draft" => release.draft = true,
+                        "--verify-tag" | "--prerelease" | "--latest=false" => {}
+                        flag if flag.starts_with("--") => {
+                            anyhow::bail!("FakeGitHub does not know the flag {flag}")
+                        }
+                        file => release.assets.push(name(file)),
+                    }
+                }
+                releases.insert(tag.to_string(), release);
+                Ok(String::new())
+            }
+            ["release", "upload", tag, files @ ..] => {
+                let release = releases
+                    .get_mut(*tag)
+                    .ok_or_else(|| anyhow!("release not found: {tag}"))?;
+                let clobber = files.contains(&"--clobber");
+                for file in files.iter().filter(|f| **f != "--clobber") {
+                    let name = name(file);
+                    if !release.assets.contains(&name) {
+                        release.assets.push(name);
+                    } else if !clobber {
+                        anyhow::bail!("asset {name} exists already on {tag}");
+                    }
+                }
+                Ok(String::new())
+            }
+            ["release", "edit", tag, "--draft=false"] => {
+                let release = releases
+                    .get_mut(*tag)
+                    .ok_or_else(|| anyhow!("release not found: {tag}"))?;
+                release.draft = false;
+                Ok(String::new())
+            }
+            ["release", "delete", tag, "--yes"] => {
+                releases
+                    .remove(*tag)
+                    .ok_or_else(|| anyhow!("release not found: {tag}"))?;
+                Ok(String::new())
+            }
+            _ => {
+                let call = format!("gh {}", args.join(" "));
+                self.unanswered.borrow_mut().push(call.clone());
+                Err(anyhow!("FakeGitHub has no answer for: {call}"))
+            }
+        }
+    }
+}
+
+impl Drop for FakeGitHub {
+    fn drop(&mut self) {
+        let unanswered = self.unanswered.borrow();
+        if !unanswered.is_empty() && !std::thread::panicking() {
+            panic!("FakeGitHub had no answer for: {unanswered:#?}");
+        }
+    }
+}
+
 struct Repo_(PathBuf);
 
 fn git(root: &Path, args: &[&str]) -> String {
@@ -2646,4 +2789,225 @@ fn release_refuses_assets_when_the_source_changed_since_the_tag() {
         ("livekit", "published")
     );
     assert!(wrote("release create livekit-v0.7.0"), "{calls:?}");
+}
+
+// Scenario: a release with required assets that takes four runs to finish.
+// Spec: RequiredAssetsBeforePublic, AssetsComeFromTheTaggedSource,
+// PublishBuildsTheTaggedSource, Release.is_complete. One fake GitHub lives
+// through all runs; every step loads the repository again, as a run of
+// the tool does.
+#[test]
+fn scenario_a_release_that_lacks_an_asset_is_repaired_from_its_tag() {
+    const TAG: &str = "v0.7.0";
+    let r = fixture("scenario-assets");
+    let root = &r.0;
+    let _remote = remote(root, "scenario-assets");
+    // One package, so its tags are `v<version>`. Its release needs two
+    // assets. Its publish command only writes the tag to a log, so the
+    // test can see each time it ran.
+    write(
+        root,
+        "verwalter.toml",
+        r#"
+[packages.livekit]
+path = "livekit"
+versioning.files = ["Cargo.toml"]
+versioning.changelog = "CHANGELOG.md"
+release.required_assets = ["artifact.txt", "extra.txt"]
+publish.command = 'echo {tag} >> "$VERWALTER_ROOT/published.log"'
+"#,
+    );
+    git(root, &["commit", "-q", "-am", "one package"]);
+    let published_log = || fs::read_to_string(root.join("published.log")).unwrap_or_default();
+
+    let gh = FakeGitHub::default();
+    // The package has no registry, so nothing may ask one.
+    let no_registry = |_: &str| -> Result<u16> { Err(anyhow!("no registry configured")) };
+    let publish_options = verwalter::publish::Options::default();
+    let status_of_livekit = || {
+        let repo = Repo::load(root).unwrap();
+        let rows = verwalter::status::status(&repo, "origin", &gh).unwrap();
+        rows.into_iter().find(|r| r.package == "livekit").unwrap()
+    };
+
+    // Step A. The release workflow runs after the release PR merged. Its
+    // build made only one of the two files.
+    write(root, "dist/artifact.txt", "built\n");
+    let repo = Repo::load(root).unwrap();
+
+    // `release --asset dist` creates the tag and a draft with that file.
+    let options = verwalter::release::Options {
+        assets: vec!["dist".into()],
+        ..Default::default()
+    };
+    let released = verwalter::release::run(&repo, "origin", &options, &gh).unwrap();
+    assert_eq!(
+        (released[0].tag.as_str(), released[0].status),
+        (TAG, "drafted")
+    );
+    assert!(!git(root, &["ls-remote", "--tags", "origin", TAG]).is_empty());
+    assert_eq!(gh.is_draft(TAG), Some(true));
+    assert_eq!(gh.assets(TAG), ["artifact.txt"]);
+    assert_eq!(
+        gh.take_writes(),
+        [
+            "release create v0.7.0 --title livekit 0.7.0 --notes <notes> --verify-tag dist/artifact.txt --draft"
+        ]
+    );
+
+    // `publish` runs the command, then leaves the draft as it is and
+    // fails the package: extra.txt is missing.
+    let outcomes = verwalter::publish::run(&repo, &publish_options, &no_registry, &gh).unwrap();
+    assert_eq!(published_log(), "v0.7.0\n");
+    assert_eq!(outcomes[0].status, "failed");
+    assert!(
+        outcomes[0]
+            .reason
+            .contains("draft release v0.7.0 lacks required assets: extra.txt"),
+        "{}",
+        outcomes[0].reason
+    );
+    assert_eq!(gh.is_draft(TAG), Some(true));
+    assert!(gh.take_writes().is_empty());
+
+    // `status` says the release is incomplete: a draft, without extra.txt.
+    let status = status_of_livekit();
+    assert_eq!(status.release, "draft");
+    assert_eq!(status.missing_assets, ["extra.txt"]);
+    let incomplete = status.incomplete.unwrap();
+    assert!(
+        incomplete.starts_with(
+            "the GitHub release is a draft, required assets are missing: extra.txt -> "
+        ),
+        "{incomplete}"
+    );
+
+    // Step B1. The branch moves: a commit changes a file of the package,
+    // the version stays. A maintainer builds both files from that commit
+    // and runs `release --package livekit --asset dist` by hand.
+    write(root, "livekit/src/lib.rs", "pub fn newer() {}\n");
+    git(root, &["add", "livekit/src/lib.rs"]);
+    git(root, &["commit", "-q", "-m", "after the release"]);
+    write(root, "dist/extra.txt", "built\n");
+    let repo = Repo::load(root).unwrap();
+
+    // The files are not built from the tag: `release` refuses, names the
+    // ref to build from, and uploads nothing.
+    let with_both_files = verwalter::release::Options {
+        assets: vec!["dist".into()],
+        package: Some("livekit".into()),
+        ..Default::default()
+    };
+    let err = verwalter::release::run(&repo, "origin", &with_both_files, &gh)
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("ref=v0.7.0"), "{err}");
+    assert!(gh.take_writes().is_empty());
+    assert_eq!(gh.assets(TAG), ["artifact.txt"]);
+
+    // Step B2. The same commit, a run by hand without assets.
+    // `release --package livekit` reports the draft and writes nothing.
+    let without_assets = verwalter::release::Options {
+        package: Some("livekit".into()),
+        ..Default::default()
+    };
+    let released = verwalter::release::run(&repo, "origin", &without_assets, &gh).unwrap();
+    assert_eq!(
+        (released[0].tag.as_str(), released[0].status),
+        (TAG, "drafted")
+    );
+
+    // `publish` fails the package before its command runs: the log still
+    // has only the line of step A.
+    let outcomes = verwalter::publish::run(&repo, &publish_options, &no_registry, &gh).unwrap();
+    assert_eq!(outcomes[0].status, "failed");
+    assert_eq!(
+        outcomes[0].reason,
+        "HEAD changed the source since v0.7.0: publish from ref=v0.7.0"
+    );
+    assert_eq!(published_log(), "v0.7.0\n");
+    assert!(gh.take_writes().is_empty());
+    assert_eq!(gh.is_draft(TAG), Some(true));
+
+    // Step C. The repair: the maintainer checks out the tag, builds both
+    // files there, and runs `release --package livekit --asset dist`.
+    git(root, &["checkout", "-q", TAG]);
+    let repo = Repo::load(root).unwrap();
+
+    // Both files go to the draft.
+    let released = verwalter::release::run(&repo, "origin", &with_both_files, &gh).unwrap();
+    assert_eq!(released[0].status, "drafted");
+    assert_eq!(gh.assets(TAG), ["artifact.txt", "extra.txt"]);
+    assert_eq!(
+        gh.take_writes(),
+        ["release upload v0.7.0 --clobber dist/artifact.txt dist/extra.txt"]
+    );
+
+    // `publish` runs the command again and makes the release public.
+    let outcomes = verwalter::publish::run(&repo, &publish_options, &no_registry, &gh).unwrap();
+    assert_eq!(
+        (outcomes[0].status, outcomes[0].reason.as_str()),
+        ("published", "")
+    );
+    assert_eq!(published_log(), "v0.7.0\nv0.7.0\n");
+    assert_eq!(gh.is_draft(TAG), Some(false));
+    assert_eq!(gh.take_writes(), ["release edit v0.7.0 --draft=false"]);
+
+    // `status` says the release is complete.
+    let status = status_of_livekit();
+    assert_eq!(status.release, "published");
+    assert_eq!(status.incomplete, None);
+}
+
+// Scenario: a version edited by hand is no release.
+// Spec: ReleaseNeedsChangelogEntry, Release.is_complete.
+#[test]
+fn scenario_a_version_edited_by_hand_is_not_an_incomplete_release() {
+    let r = fixture("scenario-hand-edit");
+    let root = &r.0;
+    let _remote = remote(root, "scenario-hand-edit");
+    let gh = FakeGitHub::default();
+    let incomplete = || {
+        let repo = Repo::load(root).unwrap();
+        let rows = verwalter::status::status(&repo, "origin", &gh).unwrap();
+        rows.into_iter()
+            .map(|r| (r.package, r.incomplete))
+            .collect::<std::collections::BTreeMap<_, _>>()
+    };
+
+    // The release run releases the three packages: `status` has nothing
+    // incomplete.
+    let repo = Repo::load(root).unwrap();
+    let released = verwalter::release::run(&repo, "origin", &Default::default(), &gh).unwrap();
+    assert_eq!(released.len(), 3);
+    assert_eq!(gh.is_draft("livekit-v0.7.0"), Some(false));
+    assert!(incomplete().values().all(Option::is_none));
+    gh.take_writes();
+
+    // A maintainer edits the version of livekit by hand and commits it.
+    // No changelog entry, no tag.
+    write(
+        root,
+        "livekit/Cargo.toml",
+        "[package]\nname = \"livekit\"\nversion = \"0.7.1\"\n\n[dependencies]\nlivekit-protocol = { workspace = true }\n",
+    );
+    git(root, &["commit", "-q", "-am", "bump by hand"]);
+
+    // `status` shows the missing tag, but 0.7.1 is not an incomplete
+    // release. The other packages stay complete.
+    let repo = Repo::load(root).unwrap();
+    let rows = verwalter::status::status(&repo, "origin", &gh).unwrap();
+    let livekit = rows.iter().find(|r| r.package == "livekit").unwrap();
+    assert_eq!(
+        (livekit.version.as_str(), livekit.tag_state),
+        ("0.7.1", "missing")
+    );
+    assert_eq!(livekit.incomplete, None);
+    assert!(incomplete().values().all(Option::is_none));
+
+    // The next release run leaves it alone.
+    let released = verwalter::release::run(&repo, "origin", &Default::default(), &gh).unwrap();
+    assert!(released.is_empty(), "{released:?}");
+    assert_eq!(gh.is_draft("livekit-v0.7.1"), None);
+    assert!(gh.take_writes().is_empty());
 }
