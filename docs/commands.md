@@ -2,7 +2,7 @@
 
 | Command | What it does |
 |---|---|
-| `verwalter status` | Per package: version, tag, GitHub release, pending changesets, open PRs, next step. |
+| `verwalter status [--check] [--package <name>]` | Per package: version, tag, GitHub release, pending changesets, open PRs, next step. `--check` prints the same, then exits non-zero for a package whose current version is not completely released. The tag must be on the remote. The GitHub release must be public and have its required assets. The registry must have the version. Pending changesets and an open release PR do not fail it. `--package` limits the output and the check to one package. |
 | `verwalter plan` | Print the release plan: next versions, dependencies first. |
 | `verwalter changeset [--level <l>] [--package <name>]... [--summary <text>]` | Write a changeset for the packages the branch changes and no pending changeset covers. With `--package`, exactly the named packages. The summary defaults to the last commit subject. |
 | `verwalter check --pr <n>` | Changeset and API check for a contributor PR, with comment. |
