@@ -285,7 +285,7 @@ fn finish(repo: &Repo, gh: &dyn github::Client, o: &mut Outcome) {
         Err(e) => {
             o.status = "failed";
             o.reason = format!(
-                "published, but the draft release {} could not be published: {e}",
+                "published, but the draft release {} could not be made public: {e}",
                 o.tag
             );
         }
