@@ -199,7 +199,10 @@ maintainer:
 
 - Settings, Actions, General: allow GitHub Actions to create and approve
   pull requests. Or set up a GitHub App
-  ([action.md](action.md#a-github-app-token)).
+  ([action.md](action.md#a-github-app-token)). Without an App named
+  `verwalter-release`, set `[release].author` to the login that opens
+  the release PR, such as `github-actions[bot]`. If it is wrong, `gate`
+  answers no and the merge releases nothing.
 - Create the `internal` label.
 - Trusted publishing on npm, PyPI or crates.io for the workflow, if the
   old flow used a token secret. Keep the secret until the first release
@@ -421,7 +424,7 @@ script or an LLM. Plugins that pin a floor on the core package.
 | Plugins with a floor on the core | Nothing. The floor in `pyproject.toml` moves on each release of the core. |
 | `uv.lock` | Updated by the tool. |
 | Release notes script | Dropped. The GitHub release body is the changelog entry. |
-| `release-gate.yml` (bot author plus approvals) | The example `release.yml` checks the bot author and the body marker. Keep a branch protection rule for the reviews. |
+| `release-gate.yml` (bot author plus approvals) | The `gate` job of the example `release.yml` checks the bot author and the body marker. Keep a branch protection rule for the reviews. |
 
 ```toml
 [workspace]
@@ -553,9 +556,9 @@ and the PR body names it.
   The tool converts. A `uv.lock` is updated too.
 - **Shallow checkouts.** rc numbering and changelog attribution read the
   tags and the history. Every workflow checks out with `fetch-depth: 0`.
-- **Hand merges of `release/*`.** The example `release.yml` runs only for
-  a PR the bot authored with the verwalter marker in its body. Keep that
-  condition.
+- **Hand merges of `release/*`.** The `gate` job of the example
+  `release.yml` lets a run release only for a PR the bot authored with
+  the verwalter marker in its body. Keep that job.
 - **Hotfix from a release branch.** `pr --base <branch>` works. The
   changelog entry is not carried back to `main`. Backport it by hand.
 - **Snapshot releases from any commit** have no equivalent. Offer an rc

@@ -22,6 +22,7 @@ pub mod workspace;
 // Commands, one per subcommand of the binary.
 pub mod branches;
 pub mod check;
+pub mod gate;
 pub mod prerelease;
 pub mod publish;
 pub mod registry;

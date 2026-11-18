@@ -8,6 +8,7 @@
 | `verwalter check --pr <n>` | Changeset and API check for a contributor PR, with comment. |
 | `verwalter branches [--base <ref>]` | Create the release branch locally. |
 | `verwalter pr [--remote origin]` | Push the branch and open or update the PR. |
+| `verwalter gate` | In a GitHub Actions workflow: say whether the run is a release run. It reads the event from `GITHUB_EVENT_NAME` and `GITHUB_EVENT_PATH`. Yes for a run by hand, and for a merged PR with the verwalter marker in its body, from the release branch or the rc branch, opened by `[release].author`. Prints the answer with the reason and exits 0 for yes and for no. The action gives the answer as the `release` output. |
 | `verwalter release [--asset <file\|dir>]... [--package <name>] [--publish]` | Tag and create GitHub releases for every untagged version that has a changelog entry. Uploads assets to drafts or a named package. A directory stands for every file directly in it. `--publish` flips a draft. |
 | `verwalter release --abandon <tag>` | Delete a GitHub release and its tag. |
 | `verwalter publish [--releases <json>] [--jobs <n>]` | Run each package's publish command for the packages in `--releases` (the `releases` output of `release`), or every tagged package without it or with an empty list, dependencies first, up to `n` at once. A failure blocks dependents. A version on the registry is skipped. |

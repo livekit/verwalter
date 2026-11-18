@@ -158,7 +158,8 @@ Three terms:
 - **Guard the run by hand.** A `workflow_dispatch` trigger on a
   release workflow lets anyone with write access publish from any
   branch.
-  - Why: the guard on the release PR does not apply to this trigger.
+  - Why: `verwalter gate` checks a merged PR. It answers yes for
+    every run by hand.
   - Name who can do it. An environment with required reviewers on the
     publish job is one guard. It then asks for approval on every
     release.
