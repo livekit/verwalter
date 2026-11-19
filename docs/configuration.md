@@ -51,6 +51,7 @@ prerelease_label = "rc"          # 1.6.0-rc.1, written as 1.6.0rc1 in pyproject.
 [release]                        # the release PR, the tag and the GitHub release
 branch_prefix = "release/"       # default
 label = "release"                # default
+author = "verwalter-release[bot]" # default: the login that opens the release PR. `gate` accepts no other. Without a GitHub App: "github-actions[bot]"
 tag = "{package}/v{version}"     # default: v{version} with one package, {package}-v{version} otherwise, <path>/v{version} for a go.mod
 mode = "tag_and_release"         # default. none | tag | tag_and_release
 draft = true                     # default: a package `publish` handles is a draft until the registry has it; a package with nothing to publish is released on creation

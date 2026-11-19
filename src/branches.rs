@@ -6,15 +6,12 @@ use std::{fs, path::Path};
 
 use anyhow::{Context, Result, ensure};
 
-use crate::{apply, git, plan::PlannedRelease, repo::Repo};
+use crate::{apply, config::Config, git, plan::PlannedRelease, repo::Repo};
 
 /// `release/main`: the prefix plus the base branch, so it never collides
 /// with the rc branches (`release/<package>-rc`) under the same prefix.
-pub fn branch_name(repo: &Repo) -> String {
-    format!(
-        "{}{}",
-        repo.config.release.branch_prefix, repo.config.git.base_branch
-    )
+pub fn branch_name(config: &Config) -> String {
+    format!("{}{}", config.release.branch_prefix, config.git.base_branch)
 }
 
 /// Longest title, prefix included, before the package list is cut short.
@@ -69,7 +66,7 @@ pub fn create(repo: &Repo, plan: &[PlannedRelease], base: &str) -> Result<Option
     if plan.is_empty() {
         return Ok(None);
     }
-    let name = branch_name(repo);
+    let name = branch_name(&repo.config);
 
     commit_branch(root, base, &name, &title(plan), |worktree| {
         for release in plan {
