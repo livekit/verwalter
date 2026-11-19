@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.32.0
+
+### Minor Changes
+
+- `publish` waits until the registry shows a version after its command passed, five minutes by default (`--wait`), because npm scans a new version before it shows it. `status --check --wait <time>` asks again until every package is complete - [#124](https://github.com/livekit/verwalter/pull/124) ([@lukasIO](https://github.com/lukasIO))
+
 ## 0.31.0
 
 ### Minor Changes
