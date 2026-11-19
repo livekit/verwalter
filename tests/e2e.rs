@@ -932,6 +932,78 @@ fn release_finishes_a_partial_release_for_one_package() {
     );
 }
 
+// Spec: AssetsComeFromTheTaggedSource. A recovery run from a commit after
+// the release must not attach binaries of newer source to the tagged
+// version. A release without assets is still created from any commit.
+#[test]
+fn release_refuses_assets_when_the_source_changed_since_the_tag() {
+    let r = fixture("assets-changed");
+    let root = &r.0;
+    let _remote = remote(root, "assets-changed");
+    git(root, &["tag", "livekit-v0.7.0"]);
+    git(root, &["tag", "livekit-api-v0.4.3"]);
+    git(root, &["tag", "livekit-protocol-v0.3.1"]);
+    git(root, &["push", "-q", "origin", "--tags"]);
+    // After the release: livekit changes.
+    write(root, "livekit/src/lib.rs", "pub fn newer() {}\n");
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-q", "-m", "after the release"]);
+
+    let repo = Repo::load(root).unwrap();
+    // The fake GitHub has a published release for the tag, or none.
+    let has_release = std::cell::Cell::new(false);
+    let calls = std::cell::RefCell::new(Vec::<String>::new());
+    let gh = MockClient(|args: &[&str]| -> Result<String> {
+        calls.borrow_mut().push(args.join(" "));
+        match args {
+            ["api", "graphql", ..] if has_release.get() => {
+                Ok(r#"{"isDraft":false,"asset_count":0}"#.into())
+            }
+            _ => Ok(String::new()),
+        }
+    });
+    let wrote = |what: &str| calls.borrow().iter().any(|c| c.starts_with(what));
+    let mut options = verwalter::release::Options {
+        assets: vec!["dist/a.tar.gz".into()],
+        package: Some("livekit".into()),
+        ..Default::default()
+    };
+
+    // No GitHub release yet: it is not created with the assets.
+    let err = verwalter::release::run(&repo, "origin", &options, &gh)
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("ref=livekit-v0.7.0"), "{err}");
+    assert!(err.contains("resume with: verwalter release"), "{err}");
+    assert!(!wrote("release create"), "{calls:?}");
+
+    // The release exists: the assets are not uploaded to it.
+    has_release.set(true);
+    let err = verwalter::release::run(&repo, "origin", &options, &gh)
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("ref=livekit-v0.7.0"), "{err}");
+    assert!(!wrote("release upload"), "{calls:?}");
+
+    // The flag turns the check off.
+    options.allow_changed_source = true;
+    verwalter::release::run(&repo, "origin", &options, &gh).unwrap();
+    assert!(wrote("release upload livekit-v0.7.0"), "{calls:?}");
+
+    // Without assets, the release is created for the old tag.
+    has_release.set(false);
+    let options = verwalter::release::Options {
+        package: Some("livekit".into()),
+        ..Default::default()
+    };
+    let released = verwalter::release::run(&repo, "origin", &options, &gh).unwrap();
+    assert_eq!(
+        (released[0].package.as_str(), released[0].status),
+        ("livekit", "published")
+    );
+    assert!(wrote("release create livekit-v0.7.0"), "{calls:?}");
+}
+
 // Spec: RequiredAssetsBeforePublic. A draft is not published while a
 // name in `release.required_assets` is missing on it.
 #[test]
@@ -2533,6 +2605,7 @@ fn publish_leaves_a_draft_without_a_required_asset() {
         jobs: Some(1),
         dry_run: false,
         only: None,
+        allow_changed_source: false,
     };
 
     // Every release is a draft without assets.

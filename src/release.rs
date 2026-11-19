@@ -43,6 +43,9 @@ pub struct Options {
     /// Spec: WorkflowPublishesRelease. Flip a draft to published once its
     /// assets are there.
     pub publish: bool,
+    /// Spec: AssetsComeFromTheTaggedSource. Upload assets even when HEAD
+    /// changed the package's files since its tag.
+    pub allow_changed_source: bool,
     pub dry_run: bool,
 }
 
@@ -137,8 +140,13 @@ fn resume_hint(e: anyhow::Error, package: &str, options: &Options) -> anyhow::Er
         .map(|a| format!(" --asset {a}"))
         .collect();
     let publish = if options.publish { " --publish" } else { "" };
+    let allow = if options.allow_changed_source {
+        " --allow-changed-source"
+    } else {
+        ""
+    };
     anyhow!(
-        "{package}: {e:#}\nresume with: verwalter release --package {package}{assets}{publish}  (add --dry-run to see the steps first)"
+        "{package}: {e:#}\nresume with: verwalter release --package {package}{assets}{publish}{allow}  (add --dry-run to see the steps first)"
     )
 }
 
@@ -178,6 +186,7 @@ fn release_one(
     // Spec: TagRelease / ResumeUntaggedReleases. An existing tag, local
     // or on the remote, counts as done wherever it points.
     let mut fresh = false;
+    let mut tagged_here = false;
     let changelog = package
         .versioning
         .changelog
@@ -210,8 +219,24 @@ fn release_one(
                 &["push", "--quiet", remote, &format!("refs/tags/{tag}")],
             )?;
             fresh = true;
+            tagged_here = true;
         }
     }
+    // Spec: AssetsComeFromTheTaggedSource. The assets were built from
+    // HEAD. A tag made in this run points at HEAD. An older tag must
+    // hold the same files of the package, or the release would carry
+    // binaries of newer source.
+    let assets_fit_the_tag = || -> Result<()> {
+        if !tagged_here
+            && !options.allow_changed_source
+            && crate::publish::changed_since_tag(repo, name, &tag)?
+        {
+            bail!(
+                "HEAD changed the source since {tag}, so the assets are not built from the tag: build them from ref={tag}, or release the next version"
+            );
+        }
+        Ok(())
+    };
     let mut status = "tagged";
 
     // Spec: CreateGitHubRelease / ResumeTaggedReleasesWithoutGitHubRelease,
@@ -225,6 +250,7 @@ fn release_one(
                 // draft or the package was named: in a monorepo, `--asset`
                 // must not land on every complete release.
                 if !options.assets.is_empty() && (draft || options.package.is_some()) {
+                    assets_fit_the_tag()?;
                     github::ReleaseUpload {
                         tag: &tag,
                         assets: &options.assets,
@@ -258,6 +284,11 @@ fn release_one(
                 status = if draft { "drafted" } else { "published" };
             }
             None => {
+                // Without assets, a release for an existing tag is created
+                // from any commit: that is the resume path.
+                if !options.assets.is_empty() {
+                    assets_fit_the_tag()?;
+                }
                 let notes = changelog_section(&changelog, &version.to_string());
                 let title = format!("{name} {version}");
                 let draft = repo.config.draft(name) && !options.publish;

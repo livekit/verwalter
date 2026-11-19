@@ -8,7 +8,7 @@
 | `verwalter check --pr <n>` | Changeset and API check for a contributor PR, with comment. |
 | `verwalter branches [--base <ref>]` | Create the release branch locally. |
 | `verwalter pr [--remote origin]` | Push the branch and open or update the PR. |
-| `verwalter release [--asset <file\|dir>]... [--package <name>] [--publish]` | Tag and create GitHub releases for every untagged version that has a changelog entry. Uploads assets to drafts or a named package. A directory stands for every file directly in it. `--publish` flips a draft. |
+| `verwalter release [--asset <file\|dir>]... [--package <name>] [--publish] [--allow-changed-source]` | Tag and create GitHub releases for every untagged version that has a changelog entry. Uploads assets to drafts or a named package. A directory stands for every file directly in it. `--publish` flips a draft. Assets for a tag from an earlier run are refused when the package's files changed since the tag, unless `--allow-changed-source` is set. |
 | `verwalter release --abandon <tag>` | Delete a GitHub release and its tag. |
 | `verwalter publish [--releases <json>] [--jobs <n>] [--allow-changed-source]` | Run each package's publish command for the packages in `--releases` (the `releases` output of `release`), or every tagged package without it or with an empty list, dependencies first, up to `n` at once. A failure blocks dependents. A version on the registry is skipped. A package whose files changed since its tag fails, unless `--allow-changed-source` is set. |
 | `verwalter pre-release [--target <branch>]` | Open an rc PR for every package with a pending changeset and the fixed groups they are in, from `target`. Changesets stay pending. |

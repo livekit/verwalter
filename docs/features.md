@@ -51,6 +51,7 @@ What the tool does, what it catches, and what to do when a step fails.
 | A publish fails for one package | Its transitive dependents are blocked and reported with the cause. Every other package publishes. The run exits non-zero. |
 | A publish is re-run | Versions the registry has are skipped before the command runs. The rest publish. |
 | A run by hand publishes from a commit after the release | A package whose files changed since its tag fails before its command runs. The reason names `ref=<tag>`. Its dependents are blocked. `publish --allow-changed-source` publishes the newer source anyway. |
+| A recovery run attaches assets from a commit after the release | `release` fails for a package whose files changed since its tag, when the tag is from an earlier run. Nothing is uploaded. The error names `ref=<tag>`. A release without assets is still created. `release --allow-changed-source` uploads the assets anyway. |
 | The registry is down during a publish | A 503 is an error, not "not there yet". The package fails, its dependents are blocked. |
 
 ### When a step fails
@@ -63,8 +64,8 @@ and finishes what is missing. Start with `verwalter status`. Add
 |---|---|
 | Build or test job before the tag | Fix, merge, run the workflow by hand (`workflow_dispatch`) from the branch head. Nothing was written, so the fix is part of the release. |
 | Tag push | `verwalter release --package <name>` tags and pushes. |
-| GitHub release creation | `verwalter release --package <name> [--asset <file>...]` creates it from the existing tag. |
-| Asset upload | `verwalter release --package <name> --asset <file\|dir>... [--publish]` uploads with `--clobber`. A directory stands for every file directly in it. |
+| GitHub release creation | `verwalter release --package <name> [--asset <file>...]` creates it from the existing tag. With `--asset`, the checkout must hold the package as tagged. |
+| Asset upload | `verwalter release --package <name> --asset <file\|dir>... [--publish]` uploads with `--clobber`. A directory stands for every file directly in it. The checkout must hold the package as tagged. |
 | Draft never published | `verwalter release --package <name> --publish`. |
 | Registry publish | Re-run the publish job with "Re-run failed jobs" on the same run. The tag and release stay. The tool does not touch registries. The publish runs in dependency order and stops at the first failure, so dependents were not published. The re-run picks them up. Or dispatch the workflow with `package=<dependent>` and `ref=<tag>` once the dependency is on the registry. |
 | The commit itself is broken | `verwalter release --abandon <tag>` removes the release and the tag. Add a changeset and release the next version. |
@@ -79,7 +80,8 @@ workflow file from the branch, so use it when the workflow file needed
 a fix, and set its `ref` input to the release tag. Without `ref`, the
 run checks out the branch head. The tool then tags that commit if the
 tag is missing. If the tag exists and the branch head changed a package
-since the tag, `publish` fails that package and names the tag.
+since the tag, `publish` fails that package and names the tag, and
+`release --asset` fails the same way before it uploads.
 
 Running locally needs push rights and `gh auth login`. Fetch first so tags
 and `origin/<base>` are current.
