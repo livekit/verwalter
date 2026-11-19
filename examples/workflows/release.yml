@@ -123,3 +123,23 @@ jobs:
         with:
           command: publish
           releases: ${{ needs.release.outputs.releases }}
+
+  # The end state, asserted: `status --check` fails when a tag is not on
+  # the remote, a GitHub release is missing or still a draft, a name in
+  # `release.required_assets` is missing on it, or a registry does not
+  # have the version. A step that was skipped without an error ends here.
+  # A registry the tool does not handle needs a step of its own.
+  verify:
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # reads only. A draft release is visible only with write access
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha || inputs.ref || github.sha }}
+          fetch-depth: 0
+      - uses: livekit/verwalter@v0.22.0
+        with:
+          command: status
+          args: --check

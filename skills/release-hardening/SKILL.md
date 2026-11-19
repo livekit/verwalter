@@ -58,16 +58,21 @@ The reference is the verwalter documentation:
    each broken rule, write down the file and the line. Read the
    verwalter documents at the version that the repository pins,
    because the behavior of a command can differ between versions.
-3. **Check every weakness** in the table below. The second column
+3. **Check `RELEASING.md`** at the repository root against the chain.
+   Each workflow file, input and command that it names must exist.
+   Each package, registry and consumer of step 1 must be in it. A
+   difference is a finding. If the file is missing, propose it from
+   [examples/RELEASING.md](https://github.com/livekit/verwalter/blob/main/examples/RELEASING.md).
+4. **Check every weakness** in the table below. The second column
    tells you what a release looks like when the weakness fires.
-4. **Ask "what if" at each link of the chain.** What if this step
+5. **Ask "what if" at each link of the chain.** What if this step
    runs twice? What if it runs before the step it depends on? What if
    it is skipped? What if it is cancelled halfway? What if someone
    runs it by hand later, from another commit? What if the next
    release starts while this one is incomplete? An answer of "green
    run, incomplete release" is a finding. So is "red, but in a run
    that nobody watches".
-5. **Read the history.** List the release runs of the last months and
+6. **Read the history.** List the release runs of the last months and
    read the result per job, not per run. Filter the list with
    `--workflow <file>` and `--branch <release branch>`: a workflow on
    `pull_request: closed` has a skipped run for every other PR. A
@@ -80,7 +85,7 @@ The reference is the verwalter documentation:
    complete, one registry failed". Start the recovery run in your
    head and follow it job by job. Does it repair the state, or does
    it end green with nothing done?
-6. **Rank and report.** Order the findings by what they cost: a
+7. **Rank and report.** Order the findings by what they cost: a
    release that is public and incomplete, or public with content from
    another commit, comes first. Then a release that is stuck, then
    one that needs manual work. Within a class, a
@@ -96,7 +101,7 @@ The reference is the verwalter documentation:
    the build on a push or the upload to a broken release. The user
    decides. If the user accepts a finding without a fix, keep it in
    the report with the reason.
-7. **Prove each fix.** Recreate the failure and show that the new
+8. **Prove each fix.** Recreate the failure and show that the new
    workflow handles it. Use `--dry-run`, a fork, or a test package. If
    you did not prove a fix, say so in the report.
 
@@ -116,6 +121,9 @@ The reference is the verwalter documentation:
 | A step after the publish, such as a deploy or a notification, can fail the run. | The run is red after the registry has the version | Put such steps in their own job, after `publish`. Its failure is red, and the release jobs stay green. |
 | The workflow trusts the branch name `release/*`. | A release ran that nobody approved | The example runs only for a merged PR from the bot with the verwalter marker in its body. A `workflow_dispatch` trigger is a second door: anyone with write access can run it from any branch. Name who may do that. |
 | One version goes to several registries and to release assets. | One registry fails after the release is public. A repair run ends green with nothing done, or fails on the registries that have the version. | `publish.registry` is one per package, and it decides when the draft becomes public. Each further registry is a job of the workflow that asks the registry for the version first. |
+| The publish jobs of two versions can run at the same time. | The older version finishes last and takes `latest` on npm. | One concurrency group for the publish job, with `queue: max`. The job checks out after the wait, and verwalter picks the dist-tag from the tags that it sees. |
+| A step after the publish writes to one shared place and does not check what was released. | An rc, a release of another package or a release from a maintenance branch replaces the docs site. | Read `package` and `prerelease` from the `releases` output or from the `outcomes` of `publish`. Do not search the output for `-rc.`. |
+| The release trigger filters by base branch. | An rc PR into another branch merges. The branch has the version, but no tag and no publish. | The example `release.yml` has no `branches` filter. The condition on its first job decides which PRs release. |
 
 If a weakness is not in the table, read
 [docs/release-pitfalls.md](https://github.com/livekit/verwalter/blob/main/docs/release-pitfalls.md).

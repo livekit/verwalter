@@ -264,28 +264,73 @@ fn run_command(repo: &Repo, name: &str, c: &Candidate, first: bool) -> (bool, St
     }
 }
 
+/// Spec: RequiredAssetsBeforePublic. The reason not to run the publish
+/// command: the release of `tag` is a draft that lacks a required asset.
+/// None when the package has no required assets, the release is public or
+/// missing, or it cannot be read: `finish` reports that case.
+fn lacks_required_assets(
+    repo: &Repo,
+    gh: &dyn github::Client,
+    package: &str,
+    version: &str,
+    tag: &str,
+) -> Option<String> {
+    let cfg = &repo.config.packages[package].release;
+    if cfg.required_assets.is_empty() {
+        return None;
+    }
+    let release = (github::ReleaseView { tag })
+        .execute(gh)
+        .ok()
+        .flatten()
+        .filter(|r| r.draft)?;
+    let missing = repo
+        .config
+        .missing_assets(package, version, tag, &release.assets);
+    (!missing.is_empty()).then(|| {
+        format!(
+            "the draft release {tag} lacks required assets: {}. The publish command did not run",
+            missing.join(", ")
+        )
+    })
+}
+
 /// Spec: PublishFlipsDrafts. A package is finished when the registry has
 /// it and its GitHub release, if it is a draft, is published. A flip that
-/// fails turns the outcome into a failure, so a re-run comes back: the
-/// registry then says `exists`, and the flip is tried again.
+/// fails, or a draft without a required asset, turns the outcome into a
+/// failure, so a re-run comes back: the registry then says `exists`, and
+/// the flip is tried again.
 fn finish(repo: &Repo, gh: &dyn github::Client, o: &mut Outcome) {
     if !matches!(o.status, "published" | "exists")
         || repo.config.packages[&o.package].release.mode != ReleaseMode::TagAndRelease
     {
         return;
     }
-    let draft = match (github::ReleaseView { tag: &o.tag }).execute(gh) {
-        Ok(state) => state.is_some_and(|s| s.draft),
+    let release = match (github::ReleaseView { tag: &o.tag }).execute(gh) {
+        Ok(state) => state.filter(|s| s.draft),
         Err(e) => {
             o.status = "failed";
             o.reason = format!(
-                "on the registry, but the release {} could not be read: {e}",
+                "published, but the release {} could not be read: {e}",
                 o.tag
             );
             return;
         }
     };
-    if !draft {
+    let Some(release) = release else {
+        return;
+    };
+    // Spec: RequiredAssetsBeforePublic.
+    let missing = repo
+        .config
+        .missing_assets(&o.package, &o.version, &o.tag, &release.assets);
+    if !missing.is_empty() {
+        o.status = "failed";
+        o.reason = format!(
+            "published, but the draft release {} lacks required assets: {}. It stays a draft",
+            o.tag,
+            missing.join(", ")
+        );
         return;
     }
     match gh.execute(&["release", "edit", &o.tag, "--draft=false"]) {
@@ -293,7 +338,7 @@ fn finish(repo: &Repo, gh: &dyn github::Client, o: &mut Outcome) {
         Err(e) => {
             o.status = "failed";
             o.reason = format!(
-                "on the registry, but the draft release {} could not be published: {e}",
+                "published, but the draft release {} could not be made public: {e}",
                 o.tag
             );
         }
@@ -452,6 +497,27 @@ pub fn run(
                         resolved = true;
                         continue;
                     }
+                }
+                // Spec: RequiredAssetsBeforePublic. The command cannot be
+                // undone, so it does not run for a draft that would stay a
+                // draft. A workspace command runs for all members or none.
+                let own = [(name.clone(), c.version.clone(), c.tag.clone())];
+                let units = if c.members.is_empty() {
+                    &own[..]
+                } else {
+                    &c.members
+                };
+                if let Some(reason) = units
+                    .iter()
+                    .find_map(|(m, v, t)| lacks_required_assets(repo, gh, m, &v.to_string(), t))
+                {
+                    done.insert(name.clone(), "failed");
+                    for (m, v, t) in units {
+                        done.insert(m.clone(), "failed");
+                        outcomes.push(outcome(m, v, t, "failed", &reason));
+                    }
+                    resolved = true;
+                    continue;
                 }
                 let first = name != WORKSPACE
                     && crate::release::first_release(repo, name, &c.version, http)?;

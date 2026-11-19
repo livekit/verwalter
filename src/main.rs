@@ -34,7 +34,17 @@ struct Cli {
 #[derive(clap::Subcommand)]
 enum Command {
     /// Per package: version, tag, GitHub release, pending changesets, open PRs, next step
-    Status,
+    Status {
+        /// Exit non-zero when the current version of a package is not completely released
+        #[arg(long)]
+        check: bool,
+        /// Print one JSON list in place of the table
+        #[arg(long)]
+        json: bool,
+        /// Only this package
+        #[arg(long, value_name = "NAME")]
+        package: Option<String>,
+    },
     /// Print the release plan: next versions, dependencies first
     Plan,
     /// Create the release branch locally
@@ -285,10 +295,21 @@ fn run(cli: Cli) -> Result<()> {
             }
             Ok(())
         }
-        Command::Status => {
-            let rows = status::status(&repo, &remote, gh)?;
+        Command::Status {
+            check,
+            json,
+            package,
+        } => {
+            let mut rows = status::status(&repo, &remote, gh)?;
+            if let Some(only) = &package {
+                rows.retain(|r| &r.package == only);
+                ensure!(!rows.is_empty(), "{only}: no such package");
+            }
+            if json {
+                println!("{}", serde_json::to_string(&rows)?);
+            }
             let w = rows.iter().map(|r| r.package.len()).max().unwrap_or(0);
-            for r in &rows {
+            for r in rows.iter().filter(|_| !json) {
                 let pending = if r.pending_changesets.is_empty() {
                     String::new()
                 } else {
@@ -321,6 +342,21 @@ fn run(cli: Cli) -> Result<()> {
                     prs
                 );
                 println!("{:w$}  -> {}", "", r.next_step);
+            }
+            // Spec: surface ReleaseStatus, the end-state check.
+            if check {
+                for r in &rows {
+                    if let Some(why) = &r.incomplete {
+                        eprintln!(
+                            "{} {} is not completely released: {why}",
+                            r.package, r.version
+                        );
+                    }
+                }
+                ensure!(
+                    rows.iter().all(|r| r.incomplete.is_none()),
+                    "not every package is completely released"
+                );
             }
             Ok(())
         }

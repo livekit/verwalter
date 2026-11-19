@@ -19,7 +19,10 @@ a checkout of the repository, fetch the raw file from GitHub.
 ## Which job
 
 - **Operate**: the repository has `verwalter.toml`. Follow the rules
-  below. Commands and flags are in
+  below. If the repository has `RELEASING.md`, read it first: it names
+  the workflows and the repair commands of this repository. If you
+  change a release workflow, change that file in the same pull
+  request. Commands and flags are in
   [docs/commands.md](https://github.com/livekit/verwalter/blob/main/docs/commands.md),
   what to do when a step fails is in
   [docs/features.md](https://github.com/livekit/verwalter/blob/main/docs/features.md).
@@ -28,6 +31,8 @@ a checkout of the repository, fetch the raw file from GitHub.
   step by step. It holds the procedure, the mapping per tooling, the
   rules for a minimal `verwalter.toml`, and the handoff list. A
   repository that releases nothing yet takes the README quick start.
+  Every adoption writes `RELEASING.md` from
+  [examples/RELEASING.md](https://github.com/livekit/verwalter/blob/main/examples/RELEASING.md).
   The last step of every adoption, before you report: use the
   `release-hardening` skill to audit the workflows you wrote. Fix what
   it finds in the migration PR, or list the finding in the handoff. If

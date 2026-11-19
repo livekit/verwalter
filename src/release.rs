@@ -126,6 +126,13 @@ pub fn expand_assets(root: &Path, assets: &[String]) -> Result<Vec<String>> {
     Ok(out)
 }
 
+/// The name an asset has on the release: the file name, without the
+/// `#label` that gh accepts after it.
+fn asset_name(asset: &str) -> String {
+    let file = asset.split('#').next().unwrap_or(asset);
+    file.rsplit('/').next().unwrap_or(file).to_string()
+}
+
 fn resume_hint(e: anyhow::Error, package: &str, options: &Options) -> anyhow::Error {
     let assets: String = options
         .assets
@@ -141,6 +148,23 @@ fn resume_hint(e: anyhow::Error, package: &str, options: &Options) -> anyhow::Er
     anyhow!(
         "{package}: {e:#}\nresume with: verwalter release --package {package}{assets}{publish}{allow}  (add --dry-run to see the steps first)"
     )
+}
+
+/// Spec: ReleaseNeedsChangelogEntry. The release branch always writes an
+/// entry; a version edited by hand has none and, without a tag, is not a
+/// release. A package without a changelog has nothing to tell them apart.
+pub fn lacks_changelog_entry(
+    root: &Path,
+    package: &crate::config::Package,
+    version: &crate::Version,
+) -> bool {
+    let heading = format!("## {version}");
+    package.versioning.changelog.as_ref().is_some_and(|c| {
+        !fs::read_to_string(root.join(c))
+            .unwrap_or_default()
+            .lines()
+            .any(|l| l.trim() == heading)
+    })
 }
 
 fn release_one(
@@ -170,14 +194,7 @@ fn release_one(
         .map(|c| fs::read_to_string(root.join(c)).unwrap_or_default())
         .unwrap_or_default();
     if !git::ref_exists(root, &tag) {
-        // Spec: ReleaseNeedsChangelogEntry. The release branch always writes
-        // one; a version edited by hand has none and is not a release. A
-        // package without a changelog has nothing to tell them apart.
-        let heading = format!("## {version}");
-        if options.package.is_none()
-            && package.versioning.changelog.is_some()
-            && !changelog.lines().any(|l| l.trim() == heading)
-        {
+        if options.package.is_none() && lacks_changelog_entry(root, package, version) {
             eprintln!(
                 "warning: {name} {version} has no tag and no changelog entry; not released (edited by hand?). `release --package {name}` releases it anyway"
             );
@@ -243,6 +260,19 @@ fn release_one(
                     fresh = true;
                 }
                 if draft && options.publish {
+                    // Spec: RequiredAssetsBeforePublic. The upload above
+                    // succeeded, so its files count as on the release.
+                    let mut present = existing.assets;
+                    present.extend(options.assets.iter().map(|a| asset_name(a)));
+                    let missing =
+                        repo.config
+                            .missing_assets(name, &version.to_string(), &tag, &present);
+                    if !missing.is_empty() {
+                        bail!(
+                            "the release {tag} lacks required assets: {}. It stays a draft",
+                            missing.join(", ")
+                        );
+                    }
                     github::ReleaseEdit {
                         tag: &tag,
                         draft: false,
@@ -262,6 +292,21 @@ fn release_one(
                 let notes = changelog_section(&changelog, &version.to_string());
                 let title = format!("{name} {version}");
                 let draft = repo.config.draft(name) && !options.publish;
+                // Spec: RequiredAssetsBeforePublic. A release created
+                // public has only the assets of this run.
+                if !draft {
+                    let present: Vec<String> =
+                        options.assets.iter().map(|a| asset_name(a)).collect();
+                    let missing =
+                        repo.config
+                            .missing_assets(name, &version.to_string(), &tag, &present);
+                    if !missing.is_empty() {
+                        bail!(
+                            "required assets are not among the --asset files: {}. The release {tag} was not created",
+                            missing.join(", ")
+                        );
+                    }
+                }
                 let prerelease = version.is_prerelease();
                 // A maintenance release must not take "Latest" from a newer line.
                 let latest = (!prerelease
