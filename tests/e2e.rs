@@ -1522,6 +1522,7 @@ fn publish_runs_dependencies_first_and_blocks_dependents_of_a_failure() {
         dry_run: false,
         allow_changed_source: false,
         only: None,
+        wait: std::time::Duration::ZERO,
     };
 
     // A pnpm workspace above the package, not at the root, makes the npm
@@ -1537,6 +1538,7 @@ fn publish_runs_dependencies_first_and_blocks_dependents_of_a_failure() {
         dry_run: true,
         allow_changed_source: false,
         only: Some(["livekit-api".to_string()].into_iter().collect()),
+        wait: std::time::Duration::ZERO,
     };
     let missing = |_: &str| -> Result<u16> { Ok(404) };
     let out = verwalter::publish::run(&Repo::load(root).unwrap(), &dry, &missing, &no_gh).unwrap();
@@ -1565,6 +1567,7 @@ fn publish_runs_dependencies_first_and_blocks_dependents_of_a_failure() {
         dry_run: true,
         allow_changed_source: false,
         only: Some(["livekit".to_string()].into_iter().collect()),
+        wait: std::time::Duration::ZERO,
     };
     assert!(
         verwalter::publish::run(
@@ -1609,6 +1612,7 @@ fn publish_runs_dependencies_first_and_blocks_dependents_of_a_failure() {
         dry_run: false,
         allow_changed_source: false,
         only: Some(["livekit-api".to_string()].into_iter().collect()),
+        wait: std::time::Duration::ZERO,
     };
     let outcomes = verwalter::publish::run(&repo, &only, &no_registry, &no_gh).unwrap();
     assert_eq!(
@@ -1660,6 +1664,7 @@ fn publish_runs_dependencies_first_and_blocks_dependents_of_a_failure() {
             dry_run: false,
             allow_changed_source: false,
             only: None,
+            wait: std::time::Duration::ZERO,
         },
         &no_registry,
         &no_gh,
@@ -1749,6 +1754,7 @@ fn workspace_publish_command_runs_once_and_reports_per_member() {
         dry_run: false,
         allow_changed_source: false,
         only: None,
+        wait: std::time::Duration::ZERO,
     };
     let outcomes = verwalter::publish::run(&repo, &opts, &no_registry, &no_gh).unwrap();
     let by: std::collections::BTreeMap<&str, &str> = outcomes
@@ -1796,6 +1802,87 @@ fn workspace_publish_command_runs_once_and_reports_per_member() {
     assert_eq!(by["livekit"], "blocked", "depends on protocol");
 }
 
+// Spec: PublishWaitsForTheRegistry. npm shows a new version only after
+// its scan. Until then a read answers 404, as for a version that was
+// never published.
+#[test]
+fn publish_waits_for_the_registry_to_show_the_version() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let no_gh = MockClient(|_: &[&str]| -> Result<String> { Ok(String::new()) });
+    let r = fixture("publish-wait");
+    let root = &r.0;
+    git(root, &["tag", "livekit-protocol-v0.3.1"]);
+    let base = fs::read_to_string(root.join("verwalter.toml")).unwrap();
+    write(
+        root,
+        "verwalter.toml",
+        &format!("{base}\n[publish]\nregistry = \"npm\"\ncommand = 'true'\n"),
+    );
+    let repo = Repo::load(root).unwrap();
+    let opts = |wait| verwalter::publish::Options {
+        jobs: Some(1),
+        dry_run: false,
+        allow_changed_source: false,
+        only: Some(["livekit-protocol".to_string()].into_iter().collect()),
+        wait,
+    };
+    // The version URL answers 404 for the first `hidden` questions.
+    let asks = AtomicUsize::new(0);
+    let registry = |hidden: usize| {
+        asks.store(0, Ordering::SeqCst);
+        let asks = &asks;
+        move |url: &str| -> Result<u16> {
+            if !url.ends_with("/0.3.1") {
+                return Ok(200);
+            }
+            Ok(if asks.fetch_add(1, Ordering::SeqCst) < hidden {
+                404
+            } else {
+                200
+            })
+        }
+    };
+
+    // Hidden for the check before the command, shown right after it.
+    let out = verwalter::publish::run(
+        &repo,
+        &opts(std::time::Duration::from_secs(60)),
+        &registry(1),
+        &no_gh,
+    )
+    .unwrap();
+    assert_eq!(out[0].status, "published", "{out:?}");
+    assert_eq!(asks.load(Ordering::SeqCst), 2);
+
+    // Never shown: the package fails, and the reason says that the
+    // command passed.
+    let out = verwalter::publish::run(
+        &repo,
+        &opts(std::time::Duration::from_millis(1)),
+        &registry(usize::MAX),
+        &no_gh,
+    )
+    .unwrap();
+    assert_eq!(out[0].status, "failed", "{out:?}");
+    assert!(
+        out[0].reason.starts_with(
+            "the publish command passed, but the registry does not show livekit-protocol 0.3.1"
+        ),
+        "{out:?}"
+    );
+
+    // No wait: the registry is not asked after the command.
+    let out = verwalter::publish::run(
+        &repo,
+        &opts(std::time::Duration::ZERO),
+        &registry(usize::MAX),
+        &no_gh,
+    )
+    .unwrap();
+    assert_eq!(out[0].status, "published", "{out:?}");
+    assert_eq!(asks.load(Ordering::SeqCst), 1);
+}
+
 // Spec: PublishBuildsTheTaggedSource. A run by hand from a commit after
 // the release must not publish newer source under the tagged version.
 #[test]
@@ -1824,6 +1911,7 @@ fn publish_fails_a_package_whose_source_changed_since_its_tag() {
         dry_run: false,
         only: None,
         allow_changed_source: false,
+        wait: std::time::Duration::ZERO,
     };
     let status = |outcomes: &[verwalter::publish::Outcome]| {
         outcomes
@@ -2215,6 +2303,7 @@ fn go_workspace_modules_release_and_publish_through_the_proxy() {
         dry_run: false,
         allow_changed_source: false,
         only: None,
+        wait: std::time::Duration::ZERO,
     };
     let out = verwalter::publish::run(&repo, &opts, &proxy, &no_gh).unwrap();
     let status: Vec<(&str, &str)> = out.iter().map(|o| (o.package.as_str(), o.status)).collect();
@@ -2527,6 +2616,7 @@ fn publish_flips_the_draft_release_once_the_registry_has_it() {
         dry_run: false,
         allow_changed_source: false,
         only: None,
+        wait: std::time::Duration::ZERO,
     };
 
     // protocol and api are drafts, livekit is published already.
@@ -2606,6 +2696,7 @@ fn publish_leaves_a_draft_without_a_required_asset() {
         dry_run: false,
         only: None,
         allow_changed_source: false,
+        wait: std::time::Duration::ZERO,
     };
 
     // Every release is a draft without assets.

@@ -117,6 +117,29 @@ fn goproxy_module_url(config: &Config, name: &str) -> Option<String> {
     Some(format!("{GOPROXY}/{escaped}"))
 }
 
+/// Spec: PublishWaitsForTheRegistry. Asks until the URL answers 200 or
+/// `wait` is over. npm scans a new version before it shows it, and reads
+/// answer 404 in that time, as for a version that was never published.
+/// Any other answer than 200 counts as "not yet".
+pub fn wait_for(
+    url: &str,
+    http: Http,
+    wait: std::time::Duration,
+    interval: std::time::Duration,
+) -> bool {
+    let deadline = std::time::Instant::now() + wait;
+    loop {
+        if matches!(exists(Some(url.to_string()), http), Ok(Some(true))) {
+            return true;
+        }
+        let left = deadline.saturating_duration_since(std::time::Instant::now());
+        if left.is_zero() {
+            return false;
+        }
+        std::thread::sleep(interval.min(left));
+    }
+}
+
 /// Some(true) on 200, Some(false) on 404, None without a registry, an
 /// error for any other answer: a registry outage must not look like
 /// "not there yet".
@@ -137,6 +160,37 @@ pub fn exists(url: Option<String>, http: Http) -> Result<Option<bool>> {
 mod tests {
     use super::*;
     use crate::config::Config;
+
+    // Spec: PublishWaitsForTheRegistry.
+    #[test]
+    fn wait_for_asks_until_the_version_shows() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::time::Duration;
+        let asks = AtomicUsize::new(0);
+        // 404, then an error, then 200.
+        let http = |_: &str| -> Result<u16> {
+            match asks.fetch_add(1, Ordering::SeqCst) {
+                0 => Ok(404),
+                1 => Ok(503),
+                _ => Ok(200),
+            }
+        };
+        assert!(wait_for(
+            "u",
+            &http,
+            Duration::from_secs(60),
+            Duration::from_millis(1)
+        ));
+        assert_eq!(asks.load(Ordering::SeqCst), 3);
+
+        let never = |_: &str| -> Result<u16> { Ok(404) };
+        assert!(!wait_for(
+            "u",
+            &never,
+            Duration::from_millis(5),
+            Duration::from_millis(1)
+        ));
+    }
 
     fn config(top: &str, extra: &str) -> Config {
         Config::parse(&format!(
