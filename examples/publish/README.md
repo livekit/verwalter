@@ -155,7 +155,9 @@ carries. The `version` in the handoff is the semver spelling. Convert with
 
 ## Maven Central, pub.dev, CocoaPods
 
-Maven Central: `curl -fsS https://repo1.maven.org/maven2/<group path>/<artifact>/$VER/`
-answers 200 for a released version. pub.dev:
+Maven Central: `curl -fsS https://repo1.maven.org/maven2/<group path>/<artifact>/$VER/<artifact>-$VER.pom`
+answers 200 for a released version. Ask for the `.pom` file, not for the
+directory. The directory listing is a page for browsers, and it can
+answer 404 for a version that is there. pub.dev:
 `curl -fsS https://pub.dev/api/packages/$PKG/versions/$VER`. CocoaPods has
 no stable API. `pod trunk info $PKG` lists the versions.
