@@ -35,9 +35,22 @@ pub enum Registry {
 pub type Http<'a> = &'a (dyn Fn(&str) -> Result<u16> + Sync);
 
 /// `curl` on the machine: 200, 404, or an error for anything else.
+/// A 404 is asked a second time. The CDN of a registry sometimes answers
+/// 404 for a version that is there, and a wrong "not there" runs a
+/// publish command for a version that the registry has.
+pub fn curl(url: &str) -> Result<u16> {
+    match curl_once(url)? {
+        404 => {
+            std::thread::sleep(std::time::Duration::from_secs(2));
+            curl_once(url)
+        }
+        code => Ok(code),
+    }
+}
+
 /// crates.io answers 403 to curl's default User-Agent, so the tool
 /// names itself.
-pub fn curl(url: &str) -> Result<u16> {
+fn curl_once(url: &str) -> Result<u16> {
     let agent = format!(
         "verwalter/{} (https://github.com/livekit/verwalter)",
         env!("CARGO_PKG_VERSION")
