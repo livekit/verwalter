@@ -58,16 +58,21 @@ The reference is the verwalter documentation:
    each broken rule, write down the file and the line. Read the
    verwalter documents at the version that the repository pins,
    because the behavior of a command can differ between versions.
-3. **Check every weakness** in the table below. The second column
+3. **Check `RELEASING.md`** at the repository root against the chain.
+   Each workflow file, input and command that it names must exist.
+   Each package, registry and consumer of step 1 must be in it. A
+   difference is a finding. If the file is missing, propose it from
+   [examples/RELEASING.md](https://github.com/livekit/verwalter/blob/main/examples/RELEASING.md).
+4. **Check every weakness** in the table below. The second column
    tells you what a release looks like when the weakness fires.
-4. **Ask "what if" at each link of the chain.** What if this step
+5. **Ask "what if" at each link of the chain.** What if this step
    runs twice? What if it runs before the step it depends on? What if
    it is skipped? What if it is cancelled halfway? What if someone
    runs it by hand later, from another commit? What if the next
    release starts while this one is incomplete? An answer of "green
    run, incomplete release" is a finding. So is "red, but in a run
    that nobody watches".
-5. **Read the history.** List the release runs of the last months and
+6. **Read the history.** List the release runs of the last months and
    read the result per job, not per run. Filter the list with
    `--workflow <file>` and `--branch <release branch>`: a workflow on
    `pull_request: closed` has a skipped run for every other PR. A
@@ -80,7 +85,7 @@ The reference is the verwalter documentation:
    complete, one registry failed". Start the recovery run in your
    head and follow it job by job. Does it repair the state, or does
    it end green with nothing done?
-6. **Rank and report.** Order the findings by what they cost: a
+7. **Rank and report.** Order the findings by what they cost: a
    release that is public and incomplete, or public with content from
    another commit, comes first. Then a release that is stuck, then
    one that needs manual work. Within a class, a
@@ -96,7 +101,7 @@ The reference is the verwalter documentation:
    the build on a push or the upload to a broken release. The user
    decides. If the user accepts a finding without a fix, keep it in
    the report with the reason.
-7. **Prove each fix.** Recreate the failure and show that the new
+8. **Prove each fix.** Recreate the failure and show that the new
    workflow handles it. Use `--dry-run`, a fork, or a test package. If
    you did not prove a fix, say so in the report.
 
