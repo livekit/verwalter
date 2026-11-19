@@ -1277,6 +1277,89 @@ fn status_check_finds_the_incomplete_releases() {
     assert_eq!(protocol.incomplete, None);
 }
 
+// Spec: Package.distributions. A version that a distribution lacks is not
+// completely released. An optional one is shown and does not count.
+#[test]
+fn status_check_asks_the_distributions_of_a_version() {
+    let r = fixture("status-distributions");
+    let root = &r.0;
+    let _remote = remote(root, "status-distributions");
+    git(root, &["tag", "livekit-protocol-v0.3.1"]);
+    git(root, &["tag", "livekit-api-v0.4.3"]);
+    git(root, &["tag", "livekit-v0.7.0"]);
+    git(root, &["push", "-q", "origin", "--tags"]);
+    let base = fs::read_to_string(root.join("verwalter.toml")).unwrap();
+    write(
+        root,
+        "verwalter.toml",
+        &format!(
+            r#"{base}
+[packages.livekit.distributions]
+npm = {{ registry = "npm", name = ["@livekit/a", "@livekit/b"] }}
+maven = {{ exists_url = "https://maven/io/livekit/{{version}}/" }}
+swift = {{ exists_url = "https://swift/tree/{{tag}}", optional = true }}
+"#
+        ),
+    );
+    let gh = MockClient(|args: &[&str]| -> Result<String> {
+        match args {
+            ["pr", "list", ..] => Ok("[]".into()),
+            ["api", "graphql", ..] => Ok(r#"{"isDraft":false,"asset_count":0,"assets":[]}"#.into()),
+            _ => Err(anyhow!("not found")),
+        }
+    });
+    let repo = Repo::load(root).unwrap();
+    let livekit = |http: verwalter::registry::Http| {
+        let rows = verwalter::status::status_with(&repo, "origin", &gh, http).unwrap();
+        let protocol = rows
+            .iter()
+            .find(|r| r.package == "livekit-protocol")
+            .unwrap();
+        assert_eq!(
+            (protocol.distributions.len(), &protocol.incomplete),
+            (0, &None)
+        );
+        rows.into_iter().find(|r| r.package == "livekit").unwrap()
+    };
+
+    // One of the two npm names lacks the version. Maven and Swift lack it.
+    let row = livekit(&|url: &str| -> Result<u16> {
+        Ok(if url == "https://registry.npmjs.org/@livekit/a/0.7.0" {
+            200
+        } else {
+            404
+        })
+    });
+    assert_eq!(
+        row.incomplete.as_deref(),
+        Some(
+            "maven does not have the version, npm does not have the version -> run the workflow job that publishes it"
+        )
+    );
+    // `status --json`: a job reads `.distributions.maven.present`.
+    assert_eq!(
+        serde_json::to_value(&row).unwrap()["distributions"],
+        serde_json::json!({
+            "maven": { "present": false, "optional": false },
+            "npm": { "present": false, "optional": false },
+            "swift": { "present": false, "optional": true },
+        })
+    );
+
+    // npm and Maven have it. Swift is optional: the release is complete.
+    let row =
+        livekit(&|url: &str| -> Result<u16> { Ok(if url.contains("swift") { 404 } else { 200 }) });
+    assert_eq!(row.incomplete, None);
+
+    // A distribution that does not answer is not "there".
+    let row =
+        livekit(&|url: &str| -> Result<u16> { Ok(if url.contains("maven") { 503 } else { 200 }) });
+    assert_eq!(
+        row.incomplete.as_deref(),
+        Some("maven did not answer -> run the workflow job that publishes it")
+    );
+}
+
 #[test]
 fn release_runs_in_dependency_order_and_stops_at_the_first_failure() {
     let r = fixture("order");

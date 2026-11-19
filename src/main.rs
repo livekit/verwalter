@@ -322,8 +322,22 @@ fn run(cli: Cli) -> Result<()> {
                 .into_iter()
                 .flatten()
                 .collect::<String>();
+                // The distributions: `?` when one did not answer or was not
+                // asked.
+                let places: String = r
+                    .distributions
+                    .iter()
+                    .map(|(label, d)| {
+                        let state = match d.present {
+                            Some(true) => "yes",
+                            Some(false) => "no",
+                            None => "?",
+                        };
+                        format!("  {label}:{state}")
+                    })
+                    .collect();
                 println!(
-                    "{:w$}  {}  tag:{}  release:{}{}{}{}{}",
+                    "{:w$}  {}  tag:{}  release:{}{}{}{}{}{}",
                     r.package,
                     r.version,
                     r.tag_state,
@@ -338,6 +352,7 @@ fn run(cli: Cli) -> Result<()> {
                         Some(false) => "  registry:no",
                         None => "",
                     },
+                    places,
                     pending,
                     prs
                 );

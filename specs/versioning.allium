@@ -171,6 +171,12 @@ entity Package {
     exists_url: String? = config.publish.exists_url
     -- null when registry = none.
     on_registry(v): registry_has_version(registry, exists_url, name, v)
+    -- The other forms in which a version is distributed, by name: the
+    -- same version on a second registry, or a binary package elsewhere.
+    -- Each has a registry with one or more names, or an exists_url with
+    -- {name}, {version} and {tag}, and can be optional. The tool only
+    -- asks. A job of the workflow publishes each one.
+    distributions: Map<String, Distribution>
     -- The shell command that publishes this package, run in its path:
     -- the package's own, else config.publish.command when the package is
     -- on the default registry, else the built-in command for its
@@ -337,6 +343,9 @@ entity Release {
         tag_on_remote(package, version)
         and (package.release_mode = tag or (status = published and has_required_assets))
         and package.on_registry(version) != false
+        -- A distribution that lacks the version, or does not answer,
+        -- unless it is optional.
+        and package.distributions.all(d => d.optional or distribution_has_version(d, package, version) = true)
 
     transitions status {
         committed -> tagged

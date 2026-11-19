@@ -114,6 +114,34 @@ error. The key is a package key only, and it needs
 `release.mode = "tag_and_release"`. verwalter reads the first 100 assets
 of a release.
 
+`distributions` on a package lists the other forms in which a version
+of the package is distributed: the same version on a second registry,
+or a binary package in another repository. A job of the workflow
+publishes each one. verwalter only asks whether the version is there.
+
+```toml
+[packages.livekit-ffi.distributions]
+npm   = { registry = "npm", name = ["@livekit/rtc-ffi-bindings", "@livekit/rtc-ffi-bindings-linux-x64-gnu"] }
+dart  = { registry = "pubdev", name = "livekit_ffi" }
+maven = { exists_url = "https://repo1.maven.org/maven2/io/livekit/livekit-ffi-android/{version}/" }
+swift = { exists_url = "https://github.com/livekit/livekit-ffi-xcframework/tree/{version}", optional = true }
+```
+
+The key of an entry is its name in `status`. An entry names a
+`registry` that verwalter knows (`crates`, `npm`, `pypi`, `pubdev`) and
+the `name` of the package there, or it gives an `exists_url` that
+answers 200 when the version is there and 404 when not. `name` can be a
+list: the distribution then has the version when every name has it. In
+an `exists_url`, `{version}` and `{tag}` are replaced, and `{name}` once
+for each name. `status` shows the answer for each entry. `status
+--check` fails while an entry lacks the version or does not answer. With
+`optional = true`, the entry is shown and does not fail the check: use
+it where the version appears later, for example after a person merges a
+pull request. Before a job publishes, it can read the answer and skip a
+version that is there:
+`verwalter status --json --package <name> | jq '.[0].distributions.maven.present'`.
+`publish` does not read the table.
+
 The publish command for a package is its own `publish.command`, else
 `[publish].command` when the package is on the default registry, else the
 built-in command for its registry: `cargo publish`,

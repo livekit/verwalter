@@ -324,6 +324,13 @@
             "type": "string"
           },
           "default": []
+        },
+        "distributions": {
+          "description": "The other forms in which a version of this package is distributed,\nby a job of the workflow and not by the tool: the same version on\na second registry, or a binary package in another repository. The\nkey is the name in `status`. `status` asks each one, and `status\n--check` fails while one that is not optional lacks the version.",
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/Distribution"
+          }
         }
       },
       "additionalProperties": false
@@ -430,6 +437,55 @@
         }
       },
       "additionalProperties": false
+    },
+    "Distribution": {
+      "description": "Spec: Package.distributions. One other form in which a version of the\npackage is distributed.",
+      "type": "object",
+      "properties": {
+        "registry": {
+          "description": "crates | npm | pypi | pubdev: the tool knows the URL, and `name`\nis the package there. Unset or custom: `exists_url` is the URL.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Registry"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "name": {
+          "description": "The name on the registry, or several names that all carry the\nversion, such as the platform packages of an npm package.",
+          "$ref": "#/$defs/Names"
+        },
+        "exists_url": {
+          "description": "A URL that answers 200 when the version is there and 404 when not,\nwith `{version}` and `{tag}`, and `{name}` for each name.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "optional": {
+          "description": "`status` shows the answer, and `status --check` does not fail for\nit. For a place where the version appears later, such as one that\nwaits for a person.",
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "Names": {
+      "description": "One name, or a list of names.",
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      ]
     }
   }
 }
