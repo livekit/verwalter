@@ -1263,6 +1263,7 @@ fn publish_runs_dependencies_first_and_blocks_dependents_of_a_failure() {
     let opts = verwalter::publish::Options {
         jobs: Some(4),
         dry_run: false,
+        allow_changed_source: false,
         only: None,
     };
 
@@ -1277,6 +1278,7 @@ fn publish_runs_dependencies_first_and_blocks_dependents_of_a_failure() {
     let dry = verwalter::publish::Options {
         jobs: Some(1),
         dry_run: true,
+        allow_changed_source: false,
         only: Some(["livekit-api".to_string()].into_iter().collect()),
     };
     let missing = |_: &str| -> Result<u16> { Ok(404) };
@@ -1304,6 +1306,7 @@ fn publish_runs_dependencies_first_and_blocks_dependents_of_a_failure() {
     let github_only = verwalter::publish::Options {
         jobs: Some(1),
         dry_run: true,
+        allow_changed_source: false,
         only: Some(["livekit".to_string()].into_iter().collect()),
     };
     assert!(
@@ -1320,8 +1323,7 @@ fn publish_runs_dependencies_first_and_blocks_dependents_of_a_failure() {
 
     // No command at all: an error before anything runs.
     let err = verwalter::publish::run(&Repo::load(root).unwrap(), &opts, &no_registry, &no_gh)
-        .err()
-        .expect("no command");
+        .expect_err("no command");
     assert!(err.to_string().contains("no publish command"), "{err}");
 
     // Everything succeeds: the order file shows protocol before the others.
@@ -1348,6 +1350,7 @@ fn publish_runs_dependencies_first_and_blocks_dependents_of_a_failure() {
     let only = verwalter::publish::Options {
         jobs: Some(4),
         dry_run: false,
+        allow_changed_source: false,
         only: Some(["livekit-api".to_string()].into_iter().collect()),
     };
     let outcomes = verwalter::publish::run(&repo, &only, &no_registry, &no_gh).unwrap();
@@ -1398,6 +1401,7 @@ fn publish_runs_dependencies_first_and_blocks_dependents_of_a_failure() {
         &verwalter::publish::Options {
             jobs: Some(1),
             dry_run: false,
+            allow_changed_source: false,
             only: None,
         },
         &no_registry,
@@ -1486,6 +1490,7 @@ fn workspace_publish_command_runs_once_and_reports_per_member() {
     let opts = verwalter::publish::Options {
         jobs: Some(4),
         dry_run: false,
+        allow_changed_source: false,
         only: None,
     };
     let outcomes = verwalter::publish::run(&repo, &opts, &no_registry, &no_gh).unwrap();
@@ -1532,6 +1537,92 @@ fn workspace_publish_command_runs_once_and_reports_per_member() {
     assert_eq!(by["livekit-api"], "published");
     assert_eq!(by["livekit-protocol"], "failed");
     assert_eq!(by["livekit"], "blocked", "depends on protocol");
+}
+
+// Spec: PublishBuildsTheTaggedSource. A run by hand from a commit after
+// the release must not publish newer source under the tagged version.
+#[test]
+fn publish_fails_a_package_whose_source_changed_since_its_tag() {
+    let no_gh = MockClient(|_: &[&str]| -> Result<String> { Ok(String::new()) });
+    let r = fixture("publish-changed");
+    let root = &r.0;
+    git(root, &["tag", "livekit-protocol-v0.3.1"]);
+    git(root, &["tag", "livekit-api-v0.4.3"]);
+    git(root, &["tag", "livekit-v0.7.0"]);
+    // After the release: api changes, and a file outside every package.
+    write(root, "livekit-api/src/lib.rs", "pub fn newer() {}\n");
+    write(root, "README.md", "docs\n");
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-q", "-m", "after the release"]);
+    let base = fs::read_to_string(root.join("verwalter.toml")).unwrap();
+    write(
+        root,
+        "verwalter.toml",
+        &format!("{base}\n[publish]\nregistry = \"crates\"\ncommand = 'true'\n"),
+    );
+    let repo = Repo::load(root).unwrap();
+    let missing = |_: &str| -> Result<u16> { Ok(404) };
+    let mut opts = verwalter::publish::Options {
+        jobs: Some(1),
+        dry_run: false,
+        only: None,
+        allow_changed_source: false,
+    };
+    let status = |outcomes: &[verwalter::publish::Outcome]| {
+        outcomes
+            .iter()
+            .map(|o| (o.package.clone(), (o.status, o.reason.clone())))
+            .collect::<std::collections::BTreeMap<_, _>>()
+    };
+
+    // api fails before its command runs, and names the tag to run from.
+    // The other packages publish: the README is no package's file.
+    let by = status(&verwalter::publish::run(&repo, &opts, &missing, &no_gh).unwrap());
+    assert_eq!(by["livekit-api"].0, "failed");
+    assert!(
+        by["livekit-api"].1.contains("ref=livekit-api-v0.4.3"),
+        "{by:?}"
+    );
+    assert_eq!(by["livekit-protocol"].0, "published");
+    assert_eq!(by["livekit"].0, "published");
+
+    // A version the registry has is skipped before the check.
+    let has_api = |url: &str| -> Result<u16> {
+        Ok(if url.contains("livekit-api") {
+            200
+        } else {
+            404
+        })
+    };
+    let by = status(&verwalter::publish::run(&repo, &opts, &has_api, &no_gh).unwrap());
+    assert_eq!(by["livekit-api"].0, "exists");
+
+    // The flag turns the check off.
+    opts.allow_changed_source = true;
+    let by = status(&verwalter::publish::run(&repo, &opts, &missing, &no_gh).unwrap());
+    assert_eq!(by["livekit-api"].0, "published");
+    opts.allow_changed_source = false;
+
+    // A workspace command covers protocol and api: one changed member
+    // stops it for both. livekit depends on protocol and is blocked.
+    write(
+        root,
+        "verwalter.toml",
+        &format!(
+            "{}\n[publish]\nregistry = \"crates\"\nworkspace = 'true'\n",
+            base.replace(
+                "path = \"livekit\"\nversioning.files = [\"Cargo.toml\"]\nversioning.changelog = \"CHANGELOG.md\"",
+                "path = \"livekit\"\nversioning.files = [\"Cargo.toml\"]\nversioning.changelog = \"CHANGELOG.md\"\npublish.command = \"true\""
+            )
+        ),
+    );
+    let repo = Repo::load(root).unwrap();
+    let by = status(&verwalter::publish::run(&repo, &opts, &missing, &no_gh).unwrap());
+    assert_eq!(by["livekit-api"].0, "failed");
+    assert!(by["livekit-api"].1.contains("ref=livekit-api-v0.4.3"));
+    assert_eq!(by["livekit-protocol"].0, "failed");
+    assert!(by["livekit-protocol"].1.contains("livekit-api"), "{by:?}");
+    assert_eq!(by["livekit"].0, "blocked");
 }
 
 #[test]
@@ -1865,6 +1956,7 @@ fn go_workspace_modules_release_and_publish_through_the_proxy() {
     let opts = verwalter::publish::Options {
         jobs: Some(1),
         dry_run: false,
+        allow_changed_source: false,
         only: None,
     };
     let out = verwalter::publish::run(&repo, &opts, &proxy, &no_gh).unwrap();
@@ -2176,6 +2268,7 @@ fn publish_flips_the_draft_release_once_the_registry_has_it() {
     let opts = verwalter::publish::Options {
         jobs: Some(1),
         dry_run: false,
+        allow_changed_source: false,
         only: None,
     };
 

@@ -93,6 +93,9 @@ enum Command {
         /// Packages to publish at once
         #[arg(long, value_name = "N")]
         jobs: Option<usize>,
+        /// Publish even when HEAD changed a package's files since its tag. Without it, such a package fails: check out the tag instead
+        #[arg(long)]
+        allow_changed_source: bool,
     },
     /// Open an rc PR for every package with a pending changeset
     PreRelease {
@@ -331,11 +334,16 @@ fn run(cli: Cli) -> Result<()> {
             }
             Ok(())
         }
-        Command::Publish { releases, jobs } => {
+        Command::Publish {
+            releases,
+            jobs,
+            allow_changed_source,
+        } => {
             let options = verwalter::publish::Options {
                 jobs,
                 dry_run,
                 only: only(releases),
+                allow_changed_source,
             };
             let outcomes =
                 verwalter::publish::run(&repo, &options, &verwalter::registry::curl, gh)?;

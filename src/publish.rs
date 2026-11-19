@@ -31,6 +31,9 @@ pub struct Options {
     /// from the `release` step's output. None publishes every tagged
     /// package, for a re-run by hand; the CLI maps an empty list to None.
     pub only: Option<BTreeSet<String>>,
+    /// Spec: PublishBuildsTheTaggedSource. Run the command even when HEAD
+    /// changed the package's files since its tag.
+    pub allow_changed_source: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -160,6 +163,25 @@ fn candidates(repo: &Repo, only: Option<&BTreeSet<String>>) -> Result<BTreeMap<S
         }
     }
     Ok(out)
+}
+
+/// Spec: PublishBuildsTheTaggedSource. True when HEAD changed a file of
+/// `name` since `tag`. A file of a package nested in it is not its file.
+fn changed_since_tag(repo: &Repo, name: &str, tag: &str) -> Result<bool> {
+    let path = &repo.config.packages[name].path;
+    let files = git::run(
+        &repo.root,
+        &["diff", "--name-only", "--relative", tag, "HEAD", "--", path],
+    )?;
+    Ok(files.lines().any(|f| {
+        crate::check::owners(&repo.config, f)
+            .iter()
+            .any(|o| *o == name)
+    }))
+}
+
+fn changed_reason(tag: &str) -> String {
+    format!("HEAD changed the source since {tag}: publish from ref={tag}")
 }
 
 fn outcome(
@@ -339,16 +361,15 @@ pub fn run(
                 }
                 if name == WORKSPACE {
                     // Skip the command only when every member is there.
-                    let mut all = true;
-                    for (m, v, _) in &c.members {
+                    let mut missing = Vec::new();
+                    for (m, v, t) in &c.members {
                         if registry::exists(registry::version_url(&repo.config, m, v), http)?
                             != Some(true)
                         {
-                            all = false;
-                            break;
+                            missing.push((m, t));
                         }
                     }
-                    if all {
+                    if missing.is_empty() {
                         done.insert(name.clone(), "exists");
                         for (m, v, t) in &c.members {
                             done.insert(m.clone(), "exists");
@@ -357,8 +378,34 @@ pub fn run(
                         resolved = true;
                         continue;
                     }
+                    // One changed member stops the command for every member.
+                    let mut changed = BTreeSet::new();
+                    if !options.allow_changed_source {
+                        for (m, t) in missing {
+                            if changed_since_tag(repo, m, t)? {
+                                changed.insert(m.clone());
+                            }
+                        }
+                    }
+                    if let Some(first) = changed.first() {
+                        done.insert(name.clone(), "failed");
+                        for (m, v, t) in &c.members {
+                            let reason = if changed.contains(m) {
+                                changed_reason(t)
+                            } else {
+                                format!(
+                                    "the workspace command did not run: HEAD changed {first} since its tag"
+                                )
+                            };
+                            done.insert(m.clone(), "failed");
+                            outcomes.push(outcome(m, v, t, "failed", reason));
+                        }
+                        resolved = true;
+                        continue;
+                    }
                 } else if c.command.is_empty() {
                     // goproxy: asking for the version makes the proxy fetch it.
+                    // The proxy serves the tag, not HEAD: nothing to compare.
                     let url = registry::version_url(&repo.config, name, &c.version);
                     let (status, reason) = if options.dry_run {
                         ("dry-run", format!("GET {}", url.unwrap_or_default()))
@@ -389,6 +436,18 @@ pub fn run(
                             &c.tag,
                             "exists",
                             "already on the registry",
+                        ));
+                        resolved = true;
+                        continue;
+                    }
+                    if !options.allow_changed_source && changed_since_tag(repo, name, &c.tag)? {
+                        done.insert(name.clone(), "failed");
+                        outcomes.push(outcome(
+                            name,
+                            &c.version,
+                            &c.tag,
+                            "failed",
+                            changed_reason(&c.tag),
                         ));
                         resolved = true;
                         continue;

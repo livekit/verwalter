@@ -148,6 +148,10 @@ Three terms:
   - A run by hand checks out the branch head. Give it a `ref` input,
     as the example workflow does, and set it to the merge commit or to
     any tag of that release.
+  - `verwalter publish` fails a package whose files changed since its
+    tag, and the reason names `ref=<tag>`. It does not compare files
+    outside the package path, such as a root lock file, so pin the
+    commit anyway.
   - A later release run can finish an older release: verwalter reports
     a draft on every run until it is public. A job that finishes such
     a draft checks out the tag of that release, not the commit of the

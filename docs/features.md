@@ -12,7 +12,7 @@ What the tool does, what it catches, and what to do when a step fails.
 | One release PR | Every package with a pending bump goes in one PR. Each push regenerates the branch from `main` and updates the PR in place. With nothing pending, the PR is closed. | `pr`, `[release].branch_prefix` |
 | Dependent bumps | A package whose in-repo dependency is released gets a bump too, transitively. Its dependency floor moves in its manifest and the lock files. | `[versioning].dependent_bump_level`, `[workspace].pin_files` |
 | Dependency order | Releases, tags and the handoff list go dependencies first. A failure stops before any dependent. | `release` |
-| Publish scheduler | Runs each package's publish command for the packages the run released, from the `releases` output, dependencies first, independent packages in parallel. A package with `publish.registry = "none"` and no command is released on GitHub only and left out. A failure blocks its transitive dependents and nothing else. A version the registry has is skipped before the command runs. Without `releases`, every tagged package runs. | `publish`, `[publish]`, `publish.registry`, `publish.command` |
+| Publish scheduler | Runs each package's publish command for the packages the run released, from the `releases` output, dependencies first, independent packages in parallel. A package with `publish.registry = "none"` and no command is released on GitHub only and left out. A failure blocks its transitive dependents and nothing else. A version the registry has is skipped before the command runs. A package whose files changed since its tag fails before the command runs. Without `releases`, every tagged package runs. | `publish`, `[publish]`, `publish.registry`, `publish.command`, `publish --allow-changed-source` |
 | Workspace publish | One recursive command for every package on the default registry, run once from the root, with per-package reporting from the registry afterwards. Per-package commands resolve workspace ranges too: the npm default is `pnpm publish` in a pnpm workspace. | `[publish].workspace` |
 | Registry check | One GET per registry answers whether a version exists. 200 skips, 404 publishes, anything else fails. On `goproxy` the GET is the publish: 200 is published, 404 or 410 fails and is re-run. `status` shows the answer. | `publish.registry`, `publish.exists_url` |
 | Fixed groups | Members release at one version: the highest in the group, bumped by the highest level any member needs. A member without a changeset gets a "Released with" line. | `[versioning].fixed` |
@@ -48,6 +48,7 @@ What the tool does, what it catches, and what to do when a step fails.
 | Two release runs race on the same tag | The run that loses the create sees the existing release and reports it. |
 | A publish fails for one package | Its transitive dependents are blocked and reported with the cause. Every other package publishes. The run exits non-zero. |
 | A publish is re-run | Versions the registry has are skipped before the command runs. The rest publish. |
+| A run by hand publishes from a commit after the release | A package whose files changed since its tag fails before its command runs. The reason names `ref=<tag>`. Its dependents are blocked. `publish --allow-changed-source` publishes the newer source anyway. |
 | The registry is down during a publish | A 503 is an error, not "not there yet". The package fails, its dependents are blocked. |
 
 ### When a step fails
@@ -75,8 +76,8 @@ it keeps the merge commit. A run by hand (`workflow_dispatch`) takes the
 workflow file from the branch, so use it when the workflow file needed
 a fix, and set its `ref` input to the release tag. Without `ref`, the
 run checks out the branch head. The tool then tags that commit if the
-tag is missing, and the publish command uploads its source under the
-released version.
+tag is missing. If the tag exists and the branch head changed a package
+since the tag, `publish` fails that package and names the tag.
 
 Running locally needs push rights and `gh auth login`. Fetch first so tags
 and `origin/<base>` are current.
