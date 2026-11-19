@@ -72,6 +72,13 @@ pub struct Package {
     /// of one of them bumps this package too.
     #[serde(default)]
     pub dependencies: Vec<String>,
+    /// The other forms in which a version of this package is distributed,
+    /// by a job of the workflow and not by the tool: the same version on
+    /// a second registry, or a binary package in another repository. The
+    /// key is the name in `status`. `status` asks each one, and `status
+    /// --check` fails while one that is not optional lacks the version.
+    #[serde(default)]
+    pub distributions: BTreeMap<String, Distribution>,
     /// The module path when the first versioned file is a go.mod: Go
     /// names dependencies and proxy entries by it. Set by `Config::load`.
     #[serde(skip)]
@@ -136,6 +143,50 @@ pub struct PackagePublish {
     /// Run in the package's `path`. Default: `[publish].command` when on
     /// the default registry, else the built-in command for the registry.
     pub command: Option<String>,
+}
+
+/// Spec: Package.distributions. One other form in which a version of the
+/// package is distributed.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Default)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+#[serde(default, deny_unknown_fields)]
+pub struct Distribution {
+    /// crates | npm | pypi | pubdev: the tool knows the URL, and `name`
+    /// is the package there. Unset or custom: `exists_url` is the URL.
+    pub registry: Option<crate::registry::Registry>,
+    /// The name on the registry, or several names that all carry the
+    /// version, such as the platform packages of an npm package.
+    pub name: Names,
+    /// A URL that answers 200 when the version is there and 404 when not,
+    /// with `{version}` and `{tag}`, and `{name}` for each name.
+    pub exists_url: Option<String>,
+    /// `status` shows the answer, and `status --check` does not fail for
+    /// it. For a place where the version appears later, such as one that
+    /// waits for a person.
+    pub optional: bool,
+}
+
+/// One name, or a list of names.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Default)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+#[serde(from = "OneOrMany")]
+pub struct Names(pub Vec<String>);
+
+#[derive(Deserialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+#[serde(untagged)]
+enum OneOrMany {
+    One(String),
+    Many(Vec<String>),
+}
+
+impl From<OneOrMany> for Names {
+    fn from(names: OneOrMany) -> Self {
+        Names(match names {
+            OneOrMany::One(name) => vec![name],
+            OneOrMany::Many(names) => names,
+        })
+    }
 }
 
 /// The package keys of `[check]`, the package's own values only.
@@ -588,6 +639,24 @@ impl Config {
                     || p.release.mode == ReleaseMode::TagAndRelease,
                 "{name}: release.required_assets needs release.mode = \"tag_and_release\": no other mode creates a GitHub release"
             );
+            for (label, d) in &p.distributions {
+                use crate::registry::Registry;
+                match d.registry.unwrap_or(Registry::Custom) {
+                    Registry::Custom => ensure!(
+                        d.exists_url
+                            .as_deref()
+                            .is_some_and(|u| u.contains("{version}") || u.contains("{tag}")),
+                        "{name}: distributions.{label} needs a registry with a name, or an exists_url with {{version}} or {{tag}}"
+                    ),
+                    Registry::None | Registry::Goproxy => bail!(
+                        "{name}: distributions.{label}: registry is crates, npm, pypi, pubdev or custom"
+                    ),
+                    _ => ensure!(
+                        !d.name.0.is_empty() && d.exists_url.is_none(),
+                        "{name}: distributions.{label} needs a name on its registry, and no exists_url"
+                    ),
+                }
+            }
             for dep in &p.dependencies {
                 ensure!(dep != name, "{name}: depends on itself");
                 ensure!(
@@ -635,6 +704,44 @@ impl Config {
             .exists_url
             .as_deref()
             .or(self.publish.exists_url.as_deref())
+    }
+
+    /// Spec: Package.distributions. For each distribution of the package,
+    /// the URLs that all answer 200 when `version` is there.
+    pub fn distribution_urls(
+        &self,
+        package: &str,
+        version: &crate::Version,
+        tag: &str,
+    ) -> Vec<(&str, &Distribution, Vec<String>)> {
+        use crate::registry::{Registry, registry_url};
+        self.packages[package]
+            .distributions
+            .iter()
+            .map(|(label, d)| {
+                let registry = d.registry.unwrap_or(Registry::Custom);
+                let fill = |name: &str| {
+                    d.exists_url
+                        .as_deref()
+                        .unwrap_or_default()
+                        .replace("{name}", name)
+                        .replace("{version}", &version.to_string())
+                        .replace("{tag}", tag)
+                };
+                let urls = match registry {
+                    // One URL, or one for each name that it holds.
+                    Registry::Custom if d.name.0.is_empty() => vec![fill(package)],
+                    Registry::Custom => d.name.0.iter().map(|n| fill(n)).collect(),
+                    _ => d
+                        .name
+                        .0
+                        .iter()
+                        .filter_map(|n| registry_url(registry, n, version))
+                        .collect(),
+                };
+                (label.as_str(), d, urls)
+            })
+            .collect()
     }
 
     /// Spec: Package.release_as_draft. The package's own `release.draft`,
@@ -858,6 +965,72 @@ release.mode = "tag"
                 Some("version = '(?<version>[^']+)'")
             )
         );
+    }
+
+    // Spec: Package.distributions. A known registry gives the URL for each
+    // name, an exists_url has its placeholders replaced, and an entry
+    // that names neither is an error.
+    #[test]
+    fn distributions_give_the_urls_of_a_version() {
+        let package = "[packages.ffi]\npath = \"ffi\"\nversioning.files = [\"Cargo.toml\"]\n";
+        let c = Config::parse(&format!(
+            r#"{package}
+[packages.ffi.distributions]
+npm = {{ registry = "npm", name = ["@x/ffi", "@x/ffi-linux"] }}
+dart = {{ registry = "pubdev", name = "x_ffi" }}
+maven = {{ exists_url = "https://m/io/x/ffi/{{version}}/" }}
+swift = {{ exists_url = "https://s/tree/{{tag}}", optional = true }}
+"#
+        ))
+        .unwrap();
+        let version: crate::Version = "1.2.0".parse().unwrap();
+        let seen: Vec<(&str, bool, Vec<String>)> = c
+            .distribution_urls("ffi", &version, "ffi/v1.2.0")
+            .into_iter()
+            .map(|(label, d, urls)| (label, d.optional, urls))
+            .collect();
+        let urls = |list: &[&str]| list.iter().map(|u| u.to_string()).collect::<Vec<_>>();
+        assert_eq!(
+            seen,
+            [
+                (
+                    "dart",
+                    false,
+                    urls(&["https://pub.dev/api/packages/x_ffi/versions/1.2.0"])
+                ),
+                ("maven", false, urls(&["https://m/io/x/ffi/1.2.0/"])),
+                (
+                    "npm",
+                    false,
+                    urls(&[
+                        "https://registry.npmjs.org/@x/ffi/1.2.0",
+                        "https://registry.npmjs.org/@x/ffi-linux/1.2.0"
+                    ])
+                ),
+                ("swift", true, urls(&["https://s/tree/ffi/v1.2.0"])),
+            ]
+        );
+
+        for (entry, message) in [
+            (
+                r#"maven = { exists_url = "https://m/io/x/ffi/" }"#,
+                "{version} or {tag}",
+            ),
+            (
+                r#"npm = { registry = "npm" }"#,
+                "needs a name on its registry",
+            ),
+            (
+                r#"go = { registry = "goproxy", name = "x" }"#,
+                "crates, npm, pypi, pubdev or custom",
+            ),
+        ] {
+            let err = Config::parse(&format!(
+                "{package}\n[packages.ffi.distributions]\n{entry}\n"
+            ))
+            .unwrap_err();
+            assert!(err.to_string().contains(message), "{entry}: {err}");
+        }
     }
 
     // obligation: entity-fields.Package (release_mode, release_as_draft, tag_template)

@@ -99,8 +99,9 @@ Three terms:
   - With verwalter, the last job is one step: `verwalter status --check`.
     The tag must be on the remote. The release must be public and
     have each name in `release.required_assets`. The registry must
-    have the version. A registry that verwalter does not handle needs
-    a step of its own.
+    have the version. A further place that gets the version, such as
+    a second registry, is an entry in `distributions` of the package:
+    the same step then asks it too.
     See [Check the end state](#check-the-end-state).
   - Check: delete one upload step in your head. Does the run go red?
 

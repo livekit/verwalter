@@ -71,16 +71,25 @@ pub fn curl(url: &str) -> Result<u16> {
 pub fn version_url(config: &Config, name: &str, version: &Version) -> Option<String> {
     let v = version.to_string();
     Some(match config.registry_of(name) {
-        Registry::None => return None,
-        Registry::Crates => format!("https://crates.io/api/v1/crates/{name}/{v}"),
-        Registry::Npm => format!("https://registry.npmjs.org/{name}/{v}"),
-        Registry::Pypi => format!("https://pypi.org/pypi/{name}/{}/json", to_pep440(version)),
-        Registry::Pubdev => format!("https://pub.dev/api/packages/{name}/versions/{v}"),
         Registry::Goproxy => format!("{}/@v/v{v}.info", goproxy_module_url(config, name)?),
         Registry::Custom => config
             .exists_url_of(name)?
             .replace("{name}", name)
             .replace("{version}", &v),
+        registry => return registry_url(registry, name, version),
+    })
+}
+
+/// The URL for `version` of `name` on a registry whose URL the tool
+/// knows. None for the others: they need the package's configuration.
+pub fn registry_url(registry: Registry, name: &str, version: &Version) -> Option<String> {
+    let v = version.to_string();
+    Some(match registry {
+        Registry::Crates => format!("https://crates.io/api/v1/crates/{name}/{v}"),
+        Registry::Npm => format!("https://registry.npmjs.org/{name}/{v}"),
+        Registry::Pypi => format!("https://pypi.org/pypi/{name}/{}/json", to_pep440(version)),
+        Registry::Pubdev => format!("https://pub.dev/api/packages/{name}/versions/{v}"),
+        Registry::None | Registry::Goproxy | Registry::Custom => return None,
     })
 }
 

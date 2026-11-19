@@ -31,6 +31,8 @@ pub struct PackageStatus {
     pub missing_assets: Vec<String>,
     /// Some(true|false) when the package has a registry configured.
     pub on_registry: Option<bool>,
+    /// The `distributions` of the package, by name.
+    pub distributions: std::collections::BTreeMap<String, DistributionStatus>,
     pub pending_changesets: Vec<String>,
     pub next_version: Option<String>,
     pub release_pr: Option<u64>,
@@ -43,7 +45,27 @@ pub struct PackageStatus {
     pub incomplete: Option<String>,
 }
 
+/// Spec: Package.distributions, for one of them and the current version.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct DistributionStatus {
+    /// Some(true) when every name has the version, Some(false) when one
+    /// lacks it. None when a request failed, or the version has no tag
+    /// yet and was not asked for.
+    pub present: Option<bool>,
+    pub optional: bool,
+}
+
 pub fn status(repo: &Repo, remote: &str, gh: &dyn github::Client) -> Result<Vec<PackageStatus>> {
+    status_with(repo, remote, gh, &crate::registry::curl)
+}
+
+/// `status` with the HTTP request injected, so tests need no network.
+pub fn status_with(
+    repo: &Repo,
+    remote: &str,
+    gh: &dyn github::Client,
+    http: crate::registry::Http,
+) -> Result<Vec<PackageStatus>> {
     let root = repo.root.as_path();
     let remote_tags: BTreeSet<String> = git::run(root, &["ls-remote", "--tags", remote])
         .map(|out| {
@@ -168,9 +190,32 @@ pub fn status(repo: &Repo, remote: &str, gh: &dyn github::Client) -> Result<Vec<
         } else {
             crate::registry::exists(
                 crate::registry::version_url(&repo.config, &p.name, &p.version),
-                &crate::registry::curl,
+                http,
             )
         };
+        // A distribution is asked once the version has a tag, like the
+        // registry. It has the version when each of its URLs answers 200.
+        let distributions: std::collections::BTreeMap<String, DistributionStatus> = repo
+            .config
+            .distribution_urls(&p.name, &p.version, &tag)
+            .into_iter()
+            .map(|(label, d, urls)| {
+                let present = (tag_state != "missing")
+                    .then(|| {
+                        urls.into_iter()
+                            .map(|url| crate::registry::exists(Some(url), http).ok().flatten())
+                            .try_fold(true, |all, one| one.map(|there| all && there))
+                    })
+                    .flatten();
+                (
+                    label.to_string(),
+                    DistributionStatus {
+                        present,
+                        optional: d.optional,
+                    },
+                )
+            })
+            .collect();
 
         // Spec: Release.is_complete. A version without a tag and without a
         // changelog entry is no release (ReleaseNeedsChangelogEntry).
@@ -209,6 +254,22 @@ pub fn status(repo: &Repo, remote: &str, gh: &dyn github::Client) -> Result<Vec<
                 _ => {}
             }
         }
+        // Spec: Release.is_complete, the distributions. The tool does not
+        // publish them, so the step is a job of the workflow.
+        let step = if lacks.is_empty() {
+            "run the workflow job that publishes it"
+        } else {
+            step
+        };
+        if package.release.mode != ReleaseMode::None && tag_state != "missing" {
+            for (label, d) in distributions.iter().filter(|(_, d)| !d.optional) {
+                match d.present {
+                    Some(true) => {}
+                    Some(false) => lacks.push(format!("{label} does not have the version")),
+                    None => lacks.push(format!("{label} did not answer")),
+                }
+            }
+        }
         let incomplete = (!lacks.is_empty()).then(|| format!("{} -> {step}", lacks.join(", ")));
         out.push(PackageStatus {
             package: p.name.clone(),
@@ -219,6 +280,7 @@ pub fn status(repo: &Repo, remote: &str, gh: &dyn github::Client) -> Result<Vec<
             assets,
             missing_assets,
             on_registry: registry.unwrap_or(None),
+            distributions,
             pending_changesets: pending,
             next_version,
             release_pr,
