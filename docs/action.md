@@ -65,6 +65,8 @@ If the release binary cannot be downloaded, the action builds verwalter
 from its own checkout instead. The build needs `cargo`, which GitHub-hosted
 Linux and macOS runners have.
 
+Hello World
+
 Repository settings the workflows need:
 
 - **Allow GitHub Actions to create and approve pull requests** (Settings →
