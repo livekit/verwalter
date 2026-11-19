@@ -1,6 +1,7 @@
 //! Spec: surface ReleaseStatus. Where every package stands and what
 //! finishes its release, so a maintainer can take over from a failed
-//! workflow run. Reads only.
+//! workflow run, and whether the release of each current version is
+//! complete, so the last job of a run can assert it. Reads only.
 
 use std::collections::BTreeSet;
 
@@ -25,6 +26,8 @@ pub struct PackageStatus {
     /// none | draft | published | not wanted
     pub release: String,
     pub assets: usize,
+    /// The `release.required_assets` that are not on the release.
+    pub missing_assets: Vec<String>,
     /// Some(true|false) when the package has a registry configured.
     pub on_registry: Option<bool>,
     pub pending_changesets: Vec<String>,
@@ -33,6 +36,10 @@ pub struct PackageStatus {
     pub rc_pr: Option<u64>,
     /// What finishes the release, in words, with the command.
     pub next_step: String,
+    /// Spec: Release.is_complete. None when the current version is
+    /// completely released or is no release. Else what is missing and
+    /// what finishes it, for `status --check`.
+    pub incomplete: Option<String>,
 }
 
 pub fn status(repo: &Repo, remote: &str, gh: &dyn github::Client) -> Result<Vec<PackageStatus>> {
@@ -70,16 +77,25 @@ pub fn status(repo: &Repo, remote: &str, gh: &dyn github::Client) -> Result<Vec<
             (false, true) => "remote",
             (false, false) => "missing",
         };
+        let mut missing_assets = Vec::new();
         let (release_state, assets) = if package.release.mode != ReleaseMode::TagAndRelease {
             ("not wanted".to_string(), 0)
         } else if !local && !on_remote {
             ("none".to_string(), 0)
         } else {
             match (github::ReleaseView { tag: &tag }).execute(gh) {
-                Ok(Some(r)) => (
-                    if r.draft { "draft" } else { "published" }.to_string(),
-                    r.asset_count,
-                ),
+                Ok(Some(r)) => {
+                    missing_assets = repo.config.missing_assets(
+                        &p.name,
+                        &p.version.to_string(),
+                        &tag,
+                        &r.assets,
+                    );
+                    (
+                        if r.draft { "draft" } else { "published" }.to_string(),
+                        r.asset_count,
+                    )
+                }
                 Ok(None) => ("none".to_string(), 0),
                 Err(_) => ("unknown".to_string(), 0),
             }
@@ -129,6 +145,12 @@ pub fn status(repo: &Repo, remote: &str, gh: &dyn github::Client) -> Result<Vec<
                 "draft release waits for the publish: verwalter publish, or with assets built later: verwalter release --package {} --asset <file>... --publish",
                 p.name
             )
+        } else if !missing_assets.is_empty() {
+            format!(
+                "the release lacks required assets ({}): verwalter release --package {} --asset <file>...",
+                missing_assets.join(", "),
+                p.name
+            )
         } else if let Some(n) = release_pr {
             format!(
                 "merge release PR #{n} for {}",
@@ -140,15 +162,53 @@ pub fn status(repo: &Repo, remote: &str, gh: &dyn github::Client) -> Result<Vec<
             "up to date".to_string()
         };
 
-        let on_registry = if tag_state == "missing" {
-            None
+        let registry = if tag_state == "missing" {
+            Ok(None)
         } else {
             crate::registry::exists(
                 crate::registry::version_url(&repo.config, &p.name, &p.version),
                 &crate::registry::curl,
             )
-            .unwrap_or(None)
         };
+
+        // Spec: Release.is_complete. A version without a tag and without a
+        // changelog entry is no release (ReleaseNeedsChangelogEntry).
+        // Pending changesets and open PRs are later releases.
+        let mut lacks: Vec<String> = Vec::new();
+        if package.release.mode != ReleaseMode::None
+            && !(tag_state == "missing"
+                && crate::release::lacks_changelog_entry(root, package, &p.version))
+        {
+            if !on_remote {
+                lacks.push(format!("tag {tag} is not on {remote}"));
+            }
+            match release_state.as_str() {
+                "none" => lacks.push("no GitHub release".into()),
+                "draft" => lacks.push("the GitHub release is a draft".into()),
+                "unknown" => lacks.push("the state of the GitHub release is unknown".into()),
+                _ => {}
+            }
+            if !missing_assets.is_empty() {
+                lacks.push(format!(
+                    "required assets are missing: {}",
+                    missing_assets.join(", ")
+                ));
+            }
+        }
+        // `next_step` does not look at the registry.
+        let step = if lacks.is_empty() {
+            "verwalter publish"
+        } else {
+            next_step.as_str()
+        };
+        if package.release.mode != ReleaseMode::None {
+            match &registry {
+                Ok(Some(false)) => lacks.push("the registry does not have the version".into()),
+                Err(e) => lacks.push(format!("the registry did not answer ({e:#})")),
+                _ => {}
+            }
+        }
+        let incomplete = (!lacks.is_empty()).then(|| format!("{} -> {step}", lacks.join(", ")));
         out.push(PackageStatus {
             package: p.name.clone(),
             version: p.version.to_string(),
@@ -156,12 +216,14 @@ pub fn status(repo: &Repo, remote: &str, gh: &dyn github::Client) -> Result<Vec<
             tag_state,
             release: release_state,
             assets,
-            on_registry,
+            missing_assets,
+            on_registry: registry.unwrap_or(None),
             pending_changesets: pending,
             next_version,
             release_pr,
             rc_pr,
             next_step,
+            incomplete,
         });
     }
     Ok(out)
