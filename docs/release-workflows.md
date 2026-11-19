@@ -78,6 +78,10 @@ Three terms:
     is: the `release` job makes the draft, the build jobs follow, and
     a last job runs
     `verwalter release --package <name> --asset <dir> --publish`.
+  - verwalter enforces the asset part with `release.required_assets`
+    on the package. `release --publish` and `publish` do not make the
+    release public while a listed name is missing. They fail and list
+    the missing names, and the release stays a draft.
   - A version number on the default branch is public too. If a
     consumer reads the version from a file there, the merge announces
     the release before the assets exist.
