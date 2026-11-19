@@ -101,6 +101,10 @@ Three terms:
     have each name in `release.required_assets`. The registry must
     have the version. A registry that verwalter does not handle needs
     a step of its own.
+  - A registry can show a version minutes after the publish. npm scans
+    a new version first. `verwalter publish` waits for it, five minutes
+    by default. For a registry with a longer delay, such as Maven
+    Central, give the check time: `status --check --wait 30m`.
     See [Check the end state](#check-the-end-state).
   - Check: delete one upload step in your head. Does the run go red?
 

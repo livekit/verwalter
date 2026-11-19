@@ -915,6 +915,15 @@ surface PreReleaseRequest {
 -- first: a version it has runs no command. A goproxy package is not
 -- compared, because the proxy serves the tag. allow_changed_source,
 -- from `publish --allow-changed-source`, turns the check off.
+-- PublishWaitsForTheRegistry: registry_shows_in_time(p) is true when the
+-- registry answers for p.version within the time of `publish --wait`
+-- (five minutes by default) after the command passed. npm scans a new
+-- version before it shows it, and a read answers 404 in that time, as
+-- for a version that was never published. A dependent starts after the
+-- wait, so its dependency can be installed. A package without a
+-- registry, on a custom registry, or with a wait of zero counts as
+-- shown. `status --check --wait` asks the whole end state again in the
+-- same way.
 rule WorkflowPublishesInDependencyOrder {
     when: WorkflowRunsPublish(workflow, repository, releases?, allow_changed_source)
     let candidates = filter(Packages, p => p.repository = repository and p.release_mode != none and GitTags.any(t => t.package = p and t.version = p.version) and (releases = none or p in releases))
@@ -935,7 +944,7 @@ rule WorkflowPublishesInDependencyOrder {
                 PublishOutcome.created(package: p, status: failed)
             else if p.dependencies.any(d => d in candidates and PublishOutcomes.any(o => o.package = d and o.status in {failed, blocked})):
                 PublishOutcome.created(package: p, status: blocked)
-            else if publish_command_succeeded(p):
+            else if publish_command_succeeded(p) and registry_shows_in_time(p):
                 PublishOutcome.created(package: p, status: published)
             else:
                 PublishOutcome.created(package: p, status: failed)

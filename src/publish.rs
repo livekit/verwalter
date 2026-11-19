@@ -34,6 +34,9 @@ pub struct Options {
     /// Spec: PublishBuildsTheTaggedSource. Run the command even when HEAD
     /// changed the package's files since its tag.
     pub allow_changed_source: bool,
+    /// Spec: PublishWaitsForTheRegistry. How long to wait for the registry
+    /// to show a version after its command passed. Zero does not ask.
+    pub wait: std::time::Duration,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -222,6 +225,51 @@ fn workspace_outcomes(repo: &Repo, c: &Candidate, ok: bool, http: Http) -> Resul
     Ok(out)
 }
 
+/// Time between two questions to a registry that does not show a version yet.
+pub const POLL: std::time::Duration = std::time::Duration::from_secs(15);
+
+/// Spec: PublishWaitsForTheRegistry. After a command that passed: the
+/// reason when the registry does not show a version within `wait`. A
+/// `custom` registry is not asked, because its delay is not known: Maven
+/// Central can take longer than the default wait.
+fn not_shown_by_registry(
+    repo: &Repo,
+    name: &str,
+    c: &Candidate,
+    http: Http,
+    wait: std::time::Duration,
+) -> Option<String> {
+    if wait.is_zero() {
+        return None;
+    }
+    let own = [(name.to_string(), c.version.clone(), c.tag.clone())];
+    let units = if c.members.is_empty() {
+        &own[..]
+    } else {
+        &c.members
+    };
+    let deadline = std::time::Instant::now() + wait;
+    for (m, v, _) in units {
+        if matches!(
+            repo.config.registry_of(m),
+            registry::Registry::None | registry::Registry::Custom | registry::Registry::Goproxy
+        ) {
+            continue;
+        }
+        let Some(url) = registry::version_url(&repo.config, m, v) else {
+            continue;
+        };
+        let left = deadline.saturating_duration_since(std::time::Instant::now());
+        if !registry::wait_for(&url, http, left, POLL) {
+            return Some(format!(
+                "the publish command passed, but the registry does not show {m} {v} after {}s. A registry can hold a new version for a scan. Run verwalter publish again later: it skips a version that the registry has",
+                wait.as_secs()
+            ));
+        }
+    }
+    None
+}
+
 fn run_command(repo: &Repo, name: &str, c: &Candidate, first: bool) -> (bool, String, String) {
     let command = c
         .command
@@ -356,6 +404,7 @@ pub fn run(
 ) -> Result<Vec<Outcome>> {
     let candidates = candidates(repo, options.only.as_ref())?;
     let jobs = options.jobs.unwrap_or(repo.config.publish.jobs).max(1);
+    let wait = options.wait;
     let mut done: BTreeMap<String, &'static str> = BTreeMap::new();
     let mut outcomes = Vec::new();
     let mut running: BTreeSet<String> = BTreeSet::new();
@@ -542,7 +591,13 @@ pub fn run(
                 running.insert(name.clone());
                 let tx = tx.clone();
                 scope.spawn(move || {
-                    let (ok, output, status) = run_command(repo, name, c, first);
+                    let (mut ok, output, mut status) = run_command(repo, name, c, first);
+                    // In this thread, so that packages wait at the same
+                    // time, and a dependent starts after the wait.
+                    if ok && let Some(why) = not_shown_by_registry(repo, name, c, http, wait) {
+                        ok = false;
+                        status = why;
+                    }
                     let _ = tx.send((name.clone(), ok, output, status));
                 });
             }

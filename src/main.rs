@@ -38,6 +38,9 @@ enum Command {
         /// Exit non-zero when the current version of a package is not completely released
         #[arg(long)]
         check: bool,
+        /// With --check: ask again every 15 seconds for this long, until every package is complete. `90s` or `5m`
+        #[arg(long, value_name = "TIME", value_parser = duration, requires = "check")]
+        wait: Option<std::time::Duration>,
         /// Print one JSON list in place of the table
         #[arg(long)]
         json: bool,
@@ -109,6 +112,9 @@ enum Command {
         /// Publish even when HEAD changed a package's files since its tag. Without it, such a package fails: check out the tag instead
         #[arg(long)]
         allow_changed_source: bool,
+        /// How long to wait for the registry to show a version after its command passed: `90s`, `5m`, or `0` for no wait. npm scans a new version before it shows it
+        #[arg(long, value_name = "TIME", value_parser = duration, default_value = "5m")]
+        wait: std::time::Duration,
     },
     /// Open an rc PR for every package with a pending changeset
     PreRelease {
@@ -136,6 +142,18 @@ fn checkout(arg: &str) -> Result<PathBuf, String> {
 /// for a successful re-run.
 fn only(releases: Option<BTreeSet<String>>) -> Option<BTreeSet<String>> {
     releases.filter(|r| !r.is_empty())
+}
+
+/// `90s`, `5m`, or a plain number of seconds.
+fn duration(text: &str) -> Result<std::time::Duration, String> {
+    let (digits, per) = match text.strip_suffix('m') {
+        Some(d) => (d, 60),
+        None => (text.strip_suffix('s').unwrap_or(text), 1),
+    };
+    let n: u64 = digits
+        .parse()
+        .map_err(|_| format!("{text}: use seconds or minutes, such as 90s or 5m"))?;
+    Ok(std::time::Duration::from_secs(n * per))
 }
 
 fn releases(text: &str) -> Result<BTreeSet<String>, serde_json::Error> {
@@ -297,14 +315,27 @@ fn run(cli: Cli) -> Result<()> {
         }
         Command::Status {
             check,
+            wait,
             json,
             package,
         } => {
-            let mut rows = status::status(&repo, &remote, gh)?;
-            if let Some(only) = &package {
-                rows.retain(|r| &r.package == only);
-                ensure!(!rows.is_empty(), "{only}: no such package");
-            }
+            // Spec: surface ReleaseStatus. --wait asks again until every
+            // package is complete or the time is over: a registry can
+            // show a new version minutes after the publish.
+            let deadline = std::time::Instant::now() + wait.unwrap_or_default();
+            let rows = loop {
+                let mut rows = status::status(&repo, &remote, gh)?;
+                if let Some(only) = &package {
+                    rows.retain(|r| &r.package == only);
+                    ensure!(!rows.is_empty(), "{only}: no such package");
+                }
+                let left = deadline.saturating_duration_since(std::time::Instant::now());
+                if left.is_zero() || rows.iter().all(|r| r.incomplete.is_none()) {
+                    break rows;
+                }
+                eprintln!("not complete yet, asking again");
+                std::thread::sleep(verwalter::publish::POLL.min(left));
+            };
             if json {
                 println!("{}", serde_json::to_string(&rows)?);
             }
@@ -377,12 +408,14 @@ fn run(cli: Cli) -> Result<()> {
             releases,
             jobs,
             allow_changed_source,
+            wait,
         } => {
             let options = verwalter::publish::Options {
                 jobs,
                 dry_run,
                 only: only(releases),
                 allow_changed_source,
+                wait,
             };
             let outcomes =
                 verwalter::publish::run(&repo, &options, &verwalter::registry::curl, gh)?;
