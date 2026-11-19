@@ -19,6 +19,11 @@ Three terms:
 - **One run owns one release.** Build, tag, release and publish are
   jobs of one workflow run, linked with `needs`.
   - Why: a failure in one job stops the next, and the run is red.
+  - The trigger covers every branch that can release. An rc PR or a
+    maintenance release can target another branch than `main`. A
+    `branches` filter on the trigger then starts no run for it: the
+    branch has the version, but no tag and no publish. Let the
+    condition on the first job decide which PRs release.
   - Check: can you reach every job of the release from one run page?
 
 - **Call, do not chain by event.** A shared build is a reusable
@@ -111,6 +116,13 @@ Three terms:
   - Why: their failure makes the run red, but the release jobs stay
     green, so it is clear that the release is complete.
   - Do not use `continue-on-error` for them: it hides the failure.
+  - A step that writes to one shared place, such as a docs site with
+    one version, checks three facts first: this run released the
+    package that the place belongs to, the version is not a
+    pre-release, and the run is for the main line. Read these from the
+    fields of the handoff, such as `package` and `prerelease` in
+    `releases`. Do not search the handoff for a substring: after an
+    rc, `previous_version` of the stable release contains `-rc.`.
   - A publish to a second registry is not such a step. It is part of
     the release.
 
@@ -138,10 +150,19 @@ Three terms:
     evaluated when the run starts and can use only `github`, `inputs`
     and `vars`.
   - Never use a constant group, or a group per branch, on a workflow
-    that also starts for other events. A group holds one running and
-    one waiting run. A third run cancels the waiting one, also with
-    `cancel-in-progress: false`. A closed pull request or a push can
-    then cancel a waiting release.
+    that also starts for other events. By default, a group holds one
+    running and one waiting run. A third run cancels the waiting one,
+    also with `cancel-in-progress: false`. A closed pull request or a
+    push can then cancel a waiting release. `queue: max` keeps every
+    waiting run.
+  - A registry with a moving pointer needs one group for all
+    versions. npm moves `latest` to the version that was published
+    last. With a group per tag, the publish jobs of two versions
+    overlap, and the older one can finish last and take `latest`. Give
+    the publish job one group per registry, with `queue: max`. A
+    waiting job checks out after the running one ends, so it sees the
+    newer tag. verwalter then gives the older version another
+    dist-tag. See [One publish at a time](#one-publish-at-a-time).
   - A run without a tag, such as a build on each push, gets a group of
     its own: `inputs.tag_name || github.run_id`.
   - Check: start the workflow twice for one tag in your head. Does the
@@ -233,6 +254,27 @@ jobs:
     concurrency:
       group: release-assets-${{ inputs.tag_name || github.run_id }}
       cancel-in-progress: false
+```
+
+### One publish at a time
+
+For a registry with a moving pointer, such as `latest` on npm.
+
+```yaml
+jobs:
+  publish:
+    needs: release
+    concurrency:
+      group: npm-publish
+      cancel-in-progress: false
+      queue: max
+    steps:
+      # The checkout is a step of this job. It runs after the wait,
+      # so it sees the tags of a release that finished in between.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha || inputs.ref || github.sha }}
+          fetch-depth: 0
 ```
 
 ### Pin a run by hand
