@@ -65,6 +65,7 @@ runs:
         private-key: ${{ inputs.app-private-key }}
 
     - name: Install verwalter
+      id: install
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.token }}
@@ -80,21 +81,51 @@ runs:
           *) TARGET="" ;;
         esac
         DIR="$RUNNER_TEMP/verwalter-$VERSION"
-        if [ ! -x "$DIR/verwalter" ]; then
-          mkdir -p "$DIR"
-          # No release binary to download: build from the action's own
-          # checkout instead.
-          if [ -z "$TARGET" ] || ! gh release download "v$VERSION" --repo livekit/verwalter --pattern "verwalter-$TARGET.tar.gz" --output - | tar -xz -C "$DIR"; then
-            if [ "$VERSION" != "$CHECKOUT" ]; then
-              echo "::error::cannot download verwalter v$VERSION, and the action checkout is v$CHECKOUT to build from"
-              exit 1
-            fi
-            echo "::notice::building verwalter v$VERSION from the action checkout"
-            cargo build --release --locked --quiet --manifest-path "$GITHUB_ACTION_PATH/Cargo.toml" --target-dir "$RUNNER_TEMP/verwalter-target"
-            cp "$RUNNER_TEMP/verwalter-target/release/verwalter" "$DIR/"
-          fi
+        if [ -x "$DIR/verwalter" ]; then
+          echo "$DIR" >> "$GITHUB_PATH"
+          exit 0
         fi
-        echo "$DIR" >> "$GITHUB_PATH"
+        mkdir -p "$DIR"
+        if [ -n "$TARGET" ] && gh release download "v$VERSION" --repo livekit/verwalter --pattern "verwalter-$TARGET.tar.gz" --output - | tar -xz -C "$DIR"; then
+          echo "$DIR" >> "$GITHUB_PATH"
+          exit 0
+        fi
+        # No release binary to download: build from the action's own
+        # checkout. The build is cached by the hash of the sources, not by
+        # the ref, because a branch ref moves.
+        if [ "$VERSION" != "$CHECKOUT" ]; then
+          echo "::error::cannot download verwalter v$VERSION, and the action checkout is v$CHECKOUT to build from"
+          exit 1
+        fi
+        HASH=$(cd "$GITHUB_ACTION_PATH" && find src Cargo.toml Cargo.lock rust-toolchain.toml -type f | LC_ALL=C sort | xargs sha256sum | sha256sum | cut -c1-16)
+        echo "build=true" >> "$GITHUB_OUTPUT"
+        echo "key=verwalter-build-$RUNNER_OS-$RUNNER_ARCH-$VERSION-$HASH" >> "$GITHUB_OUTPUT"
+        echo "$RUNNER_TEMP/verwalter-build" >> "$GITHUB_PATH"
+
+    - name: Restore the verwalter build
+      id: cache
+      if: steps.install.outputs.build == 'true'
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ runner.temp }}/verwalter-build
+        key: ${{ steps.install.outputs.key }}
+
+    - name: Build verwalter
+      if: steps.install.outputs.build == 'true' && steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        echo "::notice::building verwalter from the action checkout"
+        cargo build --release --locked --quiet --manifest-path "$GITHUB_ACTION_PATH/Cargo.toml" --target-dir "$RUNNER_TEMP/verwalter-target"
+        mkdir -p "$RUNNER_TEMP/verwalter-build"
+        cp "$RUNNER_TEMP/verwalter-target/release/verwalter" "$RUNNER_TEMP/verwalter-build/"
+
+    - name: Save the verwalter build
+      if: steps.install.outputs.build == 'true' && steps.cache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ runner.temp }}/verwalter-build
+        key: ${{ steps.install.outputs.key }}
 
     - name: Run verwalter ${{ inputs.command }}
       id: run
