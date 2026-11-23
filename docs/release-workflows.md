@@ -329,7 +329,7 @@ verify:
       with:
         ref: ${{ github.event.pull_request.merge_commit_sha || inputs.ref || github.sha }}
         fetch-depth: 0
-    - uses: livekit/verwalter@v0.31.0
+    - uses: livekit/verwalter@v0.32.0-rc.1
       with:
         command: status
         args: --check
