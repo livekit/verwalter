@@ -40,6 +40,18 @@ pub struct Check {
     /// without a changeset of their own, with the reason: a dependent,
     /// or a member of a fixed group. Filled by `also_bumped`.
     pub also: Vec<(String, String)>,
+    /// Release PRs: the publish dry runs that failed. Empty until
+    /// `dry_run_check` ran.
+    pub dry_run: Vec<DryRunFinding>,
+}
+
+/// A publish dry run that failed on a release PR. One cargo run covers
+/// every crate the PR releases, so it names them all.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DryRunFinding {
+    pub packages: Vec<String>,
+    pub command: String,
+    pub output: String,
 }
 
 /// Spec: value ApiFinding. A covered package whose changeset level is
@@ -54,12 +66,22 @@ pub struct ApiFinding {
 }
 
 impl Check {
-    /// Spec: ChangesetCheck.missing_packages.
+    /// Spec: ChangesetCheck.missing_packages. A release PR consumes
+    /// changesets, so it misses none.
     pub fn missing(&self) -> Vec<&str> {
+        if self.status == Status::ReleasePullRequest {
+            return Vec::new();
+        }
         self.affected
             .difference(&self.covered)
             .map(String::as_str)
             .collect()
+    }
+
+    /// Whether the PR fails: a contributor PR by its status, a release
+    /// PR by a failed dry run.
+    pub fn failed(&self) -> bool {
+        self.status == Status::Failed || !self.dry_run.is_empty()
     }
 }
 
@@ -110,6 +132,7 @@ pub fn evaluate(
         api: Vec::new(),
         bumps,
         also: Vec::new(),
+        dry_run: Vec::new(),
     }
 }
 
@@ -255,6 +278,104 @@ pub fn api_check(
         check.status = Status::Failed;
     }
     Ok(())
+}
+
+/// Spec: PublishDryRunOnReleasePullRequest. On a release PR, run the
+/// publish dry run (`Config::dry_run_command`) of every package the merge
+/// releases: those whose version has no tag yet, as `release` decides.
+/// The built-in cargo dry runs go into one run from the root, which needs
+/// no crate on crates.io that the same release publishes first.
+pub fn dry_run_check(root: &Path, config: &Config, check: &mut Check) -> Result<()> {
+    use crate::{config::CARGO_DRY_RUN, publish};
+    if check.status != Status::ReleasePullRequest {
+        return Ok(());
+    }
+    let packages = crate::repo::Repo::load_packages(root, config)?.0;
+    let repo = crate::repo::Repo {
+        root: root.to_path_buf(),
+        config: config.clone(),
+        packages,
+        changesets: Vec::new(),
+        warnings: Vec::new(),
+    };
+    let mut crates: Vec<&crate::plan::PackageState> = Vec::new();
+    for p in &repo.packages {
+        let cfg = &config.packages[&p.name];
+        let tag = config.tag_for(&p.name, &p.version);
+        if cfg.release.mode == crate::config::ReleaseMode::None
+            || crate::git::ref_exists(root, &tag)
+        {
+            continue;
+        }
+        let released = crate::prerelease::released_versions(&repo, &p.name)?;
+        let npm_tag = crate::version::npm_dist_tag(&p.version, &released);
+        let pnpm = publish::in_pnpm_workspace(root, &cfg.path);
+        let Some(command) = config.dry_run_command(&p.name, pnpm, npm_tag.as_deref()) else {
+            continue;
+        };
+        if command == CARGO_DRY_RUN && root.join("Cargo.toml").exists() {
+            crates.push(p);
+            continue;
+        }
+        let vars = publish::Vars {
+            package: &p.name,
+            registry: config.registry_of(&p.name),
+            version: &p.version,
+            tag: &tag,
+            npm_tag: npm_tag.as_deref().unwrap_or("latest"),
+            first: None,
+        };
+        let (ok, output, _) = publish::run_in(root, &cfg.path, &command, &vars);
+        log_dry_run(ok, &[p.name.as_str()], &command);
+        if !ok {
+            check.dry_run.push(DryRunFinding {
+                packages: vec![p.name.clone()],
+                command,
+                output: tail(&output),
+            });
+        }
+    }
+    if let Some(first) = crates.first() {
+        let command = crates.iter().fold(CARGO_DRY_RUN.to_string(), |c, p| {
+            format!("{c} --package {}", p.name)
+        });
+        let tag = config.tag_for(&first.name, &first.version);
+        let vars = publish::Vars {
+            package: &first.name,
+            registry: crate::registry::Registry::Crates,
+            version: &first.version,
+            tag: &tag,
+            npm_tag: "latest",
+            first: None,
+        };
+        let (ok, output, _) = publish::run_in(root, ".", &command, &vars);
+        let names: Vec<&str> = crates.iter().map(|p| p.name.as_str()).collect();
+        log_dry_run(ok, &names, &command);
+        if !ok {
+            check.dry_run.push(DryRunFinding {
+                packages: crates.iter().map(|p| p.name.clone()).collect(),
+                command,
+                output: tail(&output),
+            });
+        }
+    }
+    Ok(())
+}
+
+/// One log line per dry run, so a passing one leaves a trace too.
+fn log_dry_run(ok: bool, packages: &[&str], command: &str) {
+    let result = if ok { "passed" } else { "failed" };
+    println!(
+        "publish dry run {result}: {}: {command}",
+        packages.join(", ")
+    );
+}
+
+/// The end of a command's output, where the error is.
+// ponytail: last 60 lines; a PR comment holds 65536 characters.
+fn tail(output: &str) -> String {
+    let lines: Vec<&str> = output.trim().lines().collect();
+    lines[lines.len().saturating_sub(60)..].join("\n")
 }
 
 fn in_package(file: &str, package_path: &str) -> bool {
@@ -422,6 +543,19 @@ pub fn comment(
         }
         out.push('\n');
     }
+    if !check.dry_run.is_empty() {
+        out.push_str("### Publish dry run failed\n\nMerging this PR releases a version that its publish command rejects. Fix the cause on the base branch; the release PR follows.\n\n");
+        for f in &check.dry_run {
+            let names: Vec<String> = f.packages.iter().map(|p| format!("`{p}`")).collect();
+            out.push_str(&format!(
+                "- {}: `{}` failed.\n\n  <details><summary>Output</summary>\n\n  ```\n{}\n  ```\n  </details>\n",
+                names.join(", "),
+                f.command,
+                indent(&f.output)
+            ));
+        }
+        out.push('\n');
+    }
     if missing.is_empty() {
         return out;
     }
@@ -513,11 +647,11 @@ pub fn run(root: &Path, config: &Config, pr: u64, gh: &dyn github::Client) -> Re
     let mut check = evaluate(config, &pr.head, &pr.labels, &pr.files, &changesets);
     plan_also(root, config, &mut check, &changesets)?;
     api_check(root, config, &mut check, &changesets)?;
+    dry_run_check(root, config, &mut check)?;
 
     // The comment stays while it has something to say: a failure, or
     // the bumps the PR claims, as a sanity check for the reviewer.
-    if check.status == Status::Failed || (check.status == Status::Passed && !check.bumps.is_empty())
-    {
+    if check.failed() || (check.status == Status::Passed && !check.bumps.is_empty()) {
         // The PR branch lives in the head repository: on a fork PR that is
         // the fork, where the contributor can push and the base repo's
         // new-file page would 404.
@@ -753,6 +887,68 @@ versioning.files = ["Cargo.toml"]
     }
 
     // Spec: required_level. A change kind becomes the digit it moves.
+    // Issue #133: a release PR fails when a publish dry run fails, before
+    // the version reaches the base branch.
+    #[test]
+    fn release_pr_runs_the_publish_dry_run_of_each_untagged_package() {
+        let root = std::env::temp_dir().join(format!("verwalter-{}-dry-run", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let mut config = String::from(
+            "[publish]\nregistry = \"npm\"\n[check]\npublish_dry_run = 'echo dry {package} $VERWALTER_VERSION; test {package} = good'\n",
+        );
+        for (name, extra) in [
+            ("good", ""),
+            ("bad", ""),
+            ("done", ""),
+            ("off", "check.publish_dry_run = false\n"),
+        ] {
+            fs::create_dir_all(root.join(name)).unwrap();
+            fs::write(root.join(name).join("VERSION"), "1.0.0\n").unwrap();
+            config.push_str(&format!(
+                "[packages.{name}]\npath = \"{name}\"\nversioning.files = [{{ path = \"VERSION\", regex = '(?<version>[0-9.]+)' }}]\nversioning.changelog = false\n{extra}"
+            ));
+        }
+        let git = |args: &[&str]| {
+            assert!(
+                Command::new("git")
+                    .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+                    .args(args)
+                    .current_dir(&root)
+                    .status()
+                    .unwrap()
+                    .success()
+            )
+        };
+        git(&["init", "-q"]);
+        git(&["add", "-A"]);
+        git(&["commit", "-qm", "init"]);
+        git(&["tag", "done-v1.0.0"]);
+        let config = Config::parse(&config).unwrap();
+
+        let mut check = evaluate(
+            &config,
+            "release/main",
+            &[],
+            &s(&["good/VERSION", "bad/VERSION"]),
+            &[],
+        );
+        dry_run_check(&root, &config, &mut check).unwrap();
+
+        assert_eq!(check.dry_run.len(), 1, "{:?}", check.dry_run);
+        let f = &check.dry_run[0];
+        assert_eq!(f.packages, vec!["bad"]);
+        assert_eq!(f.output, "dry bad 1.0.0");
+        assert!(check.failed());
+        assert!(
+            check.missing().is_empty(),
+            "a release PR needs no changeset"
+        );
+        let body = comment(&check, &config, "o/r", "release/main", "t");
+        assert!(body.contains("### Publish dry run failed"), "{body}");
+        assert!(body.contains("- `bad`: `echo dry {package}"), "{body}");
+        assert!(!body.contains("Changeset missing"), "{body}");
+    }
+
     #[test]
     fn required_level_shifts_for_leading_zeros() {
         let v = |s: &str| -> Version { s.parse().unwrap() };

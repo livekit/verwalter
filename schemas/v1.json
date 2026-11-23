@@ -93,9 +93,31 @@
             "null"
           ],
           "default": null
+        },
+        "publish_dry_run": {
+          "description": "Release PRs: the dry run of the publish command, for each package\nthe PR releases. `true` takes the built-in dry run of each\nregistry. A command applies to the packages on the default\nregistry, in the package's path; the others take the built-in.\nA package's `check.publish_dry_run` overrides it. Default: off.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DryRun"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "additionalProperties": false
+    },
+    "DryRun": {
+      "description": "`publish_dry_run`: `true` for the built-in dry run of the registry,\nor a shell command.",
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "string"
+        }
+      ]
     },
     "Versioning": {
       "description": "What a release changes. `files` and `changelog` are defaults for\nevery package, relative to each package's own `path`.",
@@ -432,6 +454,17 @@
             "null"
           ],
           "default": null
+        },
+        "publish_dry_run": {
+          "description": "Overrides `[check].publish_dry_run`; `false` runs none.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DryRun"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "additionalProperties": false

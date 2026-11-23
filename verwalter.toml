@@ -23,6 +23,7 @@ registry = "crates"
 command = "cargo publish --locked"
 
 [check]
+publish_dry_run = "cargo publish --dry-run --locked"   # the release PR tries the publish command
 # The changeset level is the contributor's claim; cargo-semver-checks compares
 # the library API against the last release and fails a claim that is too low.
 api = "cargo semver-checks --baseline-rev $VERWALTER_BASELINE_TAG 2>&1 | tee /dev/stderr | sed -n 's/.*requires new \\([a-z]*\\) version.*/\\1/p'"

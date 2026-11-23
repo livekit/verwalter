@@ -92,6 +92,22 @@ Three terms:
   - Check: list everything that a consumer reads. For each item, when
     does it become visible, and is the release complete then?
 
+- **Try the publish before the merge.** The release PR runs the dry
+  run of each publish command, and a failed dry run blocks the merge.
+  - Why: a registry can reject a version that builds and passes the
+    tests. pub.dev treats every warning as an error, and npm refuses a
+    pre-release without a dist-tag. After the merge, the base branch
+    names a version that has no tag and is on no registry.
+  - With verwalter: `[check].publish_dry_run = true` in `verwalter.toml`.
+    `check` runs the dry runs on the release PR. Its job must have the
+    toolchain of each registry, and the release PR must be opened with
+    an [App token](action.md#a-github-app-token), or no check runs on it.
+  - A dry run does not prove the upload: a token or a trusted publisher
+    can still fail. The end-state check below finds that case.
+  - Check: break a field that the registry validates, such as the
+    license in the manifest, on the release branch. Does the release PR
+    go red?
+
 - **Check the end state.** The last job of the run asserts the result:
   the tag exists, the release is public, each required asset is there,
   and each registry has the version.
@@ -336,6 +352,7 @@ First find the cause of the failure. It decides the path.
 | Transient: a runner, the network, a registry that was down | Re-run the failed jobs of the same run: `gh run rerun <run-id> --failed`. The run keeps its event, its inputs and its commit. Only the failed jobs and the jobs after them run again. GitHub permits this for 30 days after the first run. The build artifacts of the first run must still exist. |
 | The workflow file was wrong: a missing secret, a wrong setup step | A re-run uses the old workflow file. Merge the fix, then start a new run by hand with the tag: `gh workflow run <file> -f ref=<tag>`. The workflow file comes from the branch, and the source comes from the tag. Every job builds again. |
 | The release configuration was wrong: a publish command in `verwalter.toml` | A run with `ref=<tag>` reads the old configuration from the tag. Merge the fix, then start a run by hand from the branch head. verwalter compares the package's files with the tag. If they changed, `publish` and `release --asset` fail and name the tag. Then release the next version. |
+| The publish command rejects the version, before the tag: a registry rule, a validation warning | The base branch has the version, but nothing has a tag. Merge the fix without a changeset. Then run `verwalter release --package <name>` on the fix commit, or start a run by hand from the branch head. `[check].publish_dry_run` finds most of these causes on the release PR, before the merge. |
 | The released commit is wrong: the source does not build or the package is broken | Do not publish a fixed copy of that version. If no registry has the version, remove the release and the tag (`verwalter release --abandon <tag>`). Then merge the fix with a changeset and release the next version. |
 
 A workflow supports these paths when it follows three rules above.
