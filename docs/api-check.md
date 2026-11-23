@@ -54,7 +54,7 @@ needs the baseline tag:
   with:
     fetch-depth: 0
 - uses: taiki-e/install-action@cargo-semver-checks
-- uses: livekit/verwalter@v0.32.0-rc.1
+- uses: livekit/verwalter@v0.32.0-rc.2
   with:
     command: check
 ```
