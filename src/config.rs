@@ -252,7 +252,7 @@ pub struct Versioning {
     /// member needs. `fixed = [["play-core", "play-ffi"]]`.
     pub fixed: Vec<Vec<String>>,
     pub dependent_bump_level: BumpLevel,
-    /// Pre-release label: `1.6.0-rc.1`. Written as PEP 440 in pyproject.toml
+    /// Pre-release label: `1.6.0-rc.1`. Written as PEP 440 in pyproject.toml and .py files
     /// (`1.6.0rc1`; `alpha` and `beta` become `a` and `b`).
     pub prerelease_label: String,
 }

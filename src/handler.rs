@@ -240,7 +240,7 @@ pub fn read_version(path: &str, regex: Option<&str>, content: &str) -> Result<Ve
             .captures(content)
             .and_then(|c| c.name("version"))
             .with_context(|| format!("{path}: regex `{re}` has no `version` match"))?;
-        return Ok(m.as_str().parse()?);
+        return Ok(from_pep440(m.as_str()).parse()?);
     }
     if is_go_mod(path) {
         let (module, version) =
@@ -264,9 +264,15 @@ pub fn read_version(path: &str, regex: Option<&str>, content: &str) -> Result<Ve
 
 /// A regex file: the `version` group of every match becomes `version`,
 /// nothing else moves. The regex wins over the file name, so a Cargo.lock
-/// entry or a README line can be addressed directly.
+/// entry or a README line can be addressed directly. A `.py` file gets the
+/// PEP 440 spelling, the one the build backend and PyPI use.
 fn regex_write(path: &str, re: &str, content: &str, version: &Version) -> Result<String> {
     let re = regex::Regex::new(re)?;
+    let version = if path.ends_with(".py") {
+        to_pep440(version)
+    } else {
+        version.to_string()
+    };
     let mut out = String::with_capacity(content.len());
     let mut last = 0;
     let mut matched = false;
@@ -276,7 +282,7 @@ fn regex_write(path: &str, re: &str, content: &str, version: &Version) -> Result
         };
         matched = true;
         out.push_str(&content[last..group.start()]);
-        out.push_str(&version.to_string());
+        out.push_str(&version);
         last = group.end();
     }
     ensure!(matched, "{path}: regex `{re}` matches nothing");
@@ -982,6 +988,24 @@ dev = ["livekit-test-utils~=0.3"]
         assert_eq!(
             write_version("lib/src/livekit.dart", re, DART, Some("other"), &v("9.9.9")).unwrap(),
             DART
+        );
+
+        // python-sdks: dynamic version in version.py, PEP 440 like pyproject.toml.
+        let re = Some(r#"__version__ = "(?<version>[^"]+)""#);
+        let py = "__version__ = \"2.0.1\"\n";
+        let written = write_version(
+            "livekit/protocol/version.py",
+            re,
+            py,
+            None,
+            &v("2.1.0-rc.1"),
+        )
+        .unwrap();
+        assert_eq!(written, "__version__ = \"2.1.0rc1\"\n");
+        assert_eq!(
+            read_version("version.py", re, &written).unwrap(),
+            v("2.1.0-rc.1"),
+            "Roundtrip"
         );
 
         assert!(read_version("gradle.properties", Some("VERSION_NAME=(.+)"), GRADLE).is_err());
