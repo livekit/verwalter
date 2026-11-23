@@ -82,13 +82,16 @@ pub fn apply(
     // without being listed. Only its own format: a Python package can be
     // named like a crate from crates.io, whose lock entry is not ours.
     let key = config.dependency_key(name);
-    let manifests: Vec<&str> = package
+    let mut manifests: Vec<&str> = package
         .versioning
         .files
         .iter()
         .filter(|f| f.regex().is_none())
         .filter_map(|f| f.path().rsplit('/').next())
         .collect();
+    if crate::repo::dynamic_pyproject(root, package).is_some() {
+        manifests.push("pyproject.toml");
+    }
     let locks = ROOT_LOCKS
         .iter()
         .filter(|(manifest, _)| manifests.contains(manifest))
@@ -132,6 +135,9 @@ pub fn apply(
                 .filter(|f| !is_lock_file(f.path()))
             {
                 rewrite(file.path(), file.regex(), Some(key))?;
+            }
+            if let Some((file, _)) = crate::repo::dynamic_pyproject(root, d) {
+                rewrite(&file, None, Some(key))?;
             }
         }
     }
@@ -500,6 +506,60 @@ versioning.changelog = "CHANGELOG.md"
         assert!(
             lock.contains("name = \"krisp-sys\"\nversion = \"1.2.0\""),
             "a crate with its own version stays"
+        );
+    }
+
+    // Issue #128: python-sdks keeps each version in version.py, so the
+    // dynamic pyproject.toml is in no versioning.files list. Its
+    // requirement still makes livekit-api a dependent, and a major release
+    // moves the whole range in pyproject.toml and uv.lock.
+    #[test]
+    fn dynamic_pyproject_requirement_is_a_dependency_and_moves() {
+        let root =
+            std::env::temp_dir().join(format!("verwalter-{}-dynamic-py", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let pyproject = |name: &str, deps: &str| {
+            format!(
+                "[project]\nname = \"{name}\"\ndynamic = [\"version\"]\ndependencies = [{deps}]\n"
+            )
+        };
+        let files = [
+            ("livekit-protocol/pyproject.toml", pyproject("livekit-protocol", "")),
+            ("livekit-protocol/livekit/protocol/version.py", "__version__ = \"2.0.1\"\n".into()),
+            ("livekit-api/pyproject.toml", pyproject("livekit-api", "\"livekit-protocol>=2.0.1,<3.0.0\"")),
+            ("livekit-api/livekit/api/version.py", "__version__ = \"1.0.0\"\n".into()),
+            (
+                "uv.lock",
+                "version = 1\n\n[[package]]\nname = \"livekit-api\"\nsource = { editable = \"livekit-api\" }\n\n[package.metadata]\nrequires-dist = [{ name = \"livekit-protocol\", editable = \"livekit-protocol\", specifier = \">=2.0.1,<3.0.0\" }]\n\n[[package]]\nname = \"livekit-protocol\"\nsource = { editable = \"livekit-protocol\" }\n".into(),
+            ),
+        ];
+        for (rel, content) in files {
+            let p = root.join(rel);
+            fs::create_dir_all(p.parent().unwrap()).unwrap();
+            fs::write(p, content).unwrap();
+        }
+        let config = Config::parse(
+            "[packages.livekit-protocol]\npath = \"livekit-protocol\"\nversioning.files = [{ path = \"livekit/protocol/version.py\", regex = '__version__ = \"(?<version>[^\"]+)\"' }]\nversioning.changelog = false\n\n[packages.livekit-api]\npath = \"livekit-api\"\nversioning.files = [{ path = \"livekit/api/version.py\", regex = '__version__ = \"(?<version>[^\"]+)\"' }]\nversioning.changelog = false\n",
+        )
+        .unwrap();
+        let (state, _) = crate::repo::Repo::load_packages(&root, &config).unwrap();
+        let api = state.iter().find(|p| p.name == "livekit-api").unwrap();
+        assert_eq!(api.dependencies, vec!["livekit-protocol"]);
+
+        let changesets =
+            [Changeset::parse("a.md", "---\nlivekit-protocol: major\n---\nx\n").unwrap()];
+        let p = plan(&state, &changesets, BumpLevel::Patch);
+        assert_eq!(p.len(), 2, "livekit-api gets a dependent bump");
+        for release in &p {
+            apply(&root, &config, &state, &changesets, &p, release).unwrap();
+        }
+        let read = |rel: &str| fs::read_to_string(root.join(rel)).unwrap();
+        assert!(read("livekit-api/pyproject.toml").contains("\"livekit-protocol>=3.0.0,<4.0.0\""));
+        let lock = read("uv.lock");
+        assert!(lock.contains("specifier = \">=3.0.0,<4.0.0\""), "{lock}");
+        assert!(
+            !lock.contains("version = \"3.0.0\""),
+            "uv leaves dynamic versions out"
         );
     }
 }
