@@ -303,6 +303,8 @@ pub struct Release {
     pub branch_prefix: String,
     /// Release PRs carry this label.
     pub label: String,
+    /// The login that opens the release PR. `gate` accepts no other.
+    pub author: String,
     /// Default for `release.tag` of every package.
     pub tag: Option<String>,
     /// Default for `release.mode` of every package: none | tag |
@@ -318,6 +320,7 @@ impl Default for Release {
         Self {
             branch_prefix: "release/".into(),
             label: "release".into(),
+            author: "verwalter-release[bot]".into(),
             tag: None,
             mode: None,
             draft: None,
@@ -878,6 +881,7 @@ release.mode = "tag"
         assert_eq!(c.check.exempt_label, "internal");
         assert_eq!(c.release.branch_prefix, "release/");
         assert_eq!(c.release.label, "release");
+        assert_eq!(c.release.author, "verwalter-release[bot]");
         assert_eq!(c.versioning.dependent_bump_level, BumpLevel::Patch);
         assert_eq!(c.versioning.prerelease_label, "rc");
         assert_eq!(c.workspace.pin_files, vec!["Cargo.toml", "Cargo.lock"]);

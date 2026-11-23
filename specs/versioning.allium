@@ -29,6 +29,11 @@ external entity PullRequest {
     base_branch: String
     labels: Set<String>
     changed_files: Set<String>
+    -- For the gate: the login that opened the PR, its description, and
+    -- whether it was merged.
+    author: String
+    body: String
+    merged: Boolean
 }
 
 -- A tag belongs to a package when its name matches the package's
@@ -413,10 +418,13 @@ config {
     versioning: { files: Set<VersionedFile>?, changelog: String? = "CHANGELOG.md", fixed: Set<Set<Package>> = {}, dependent_bump_level: BumpLevel = patch, prerelease_label: String = "rc" }
     -- The release PR, the tag and the GitHub release. Release PRs are
     -- recognisable by branch prefix and label so that repo workflows can
-    -- gate them (approvals, registry checks). Gating itself is a workflow
-    -- concern, not the tool's. tag, mode and draft are the defaults for
+    -- gate them (approvals, registry checks). That gating is a workflow
+    -- concern, not the tool's. The tool answers one question for the
+    -- workflow: whether a run is a release run (WorkflowReleaseGate).
+    -- author: the login that opens the release PR, a GitHub App by
+    -- default. tag, mode and draft are the defaults for
     -- Package.tag_template, release_mode and release_as_draft.
-    release: { branch_prefix: String = "release/", label: String = "release", tag: String?, mode: none | tag | tag_and_release = tag_and_release, draft: Boolean? }
+    release: { branch_prefix: String = "release/", label: String = "release", author: String = "verwalter-release[bot]", tag: String?, mode: none | tag | tag_and_release = tag_and_release, draft: Boolean? }
     -- Defaults for `verwalter publish`: how many independent packages run
     -- at once, the registry and the command every package takes unless
     -- it sets its own.
@@ -890,6 +898,30 @@ surface PreReleaseRequest {
 
     provides:
         MaintainerRequestsPreRelease(maintainer, repository, target_branch)
+}
+
+-- The gate: the release workflow asks whether its run is a release run,
+-- before any job builds or publishes. A run by hand is one. A run for a
+-- pull request is one only when the PR is merged, its body carries the
+-- marker the tool writes into every release PR and rc PR, its branch is
+-- the release branch (<prefix><base branch>) or the rc branch
+-- (<prefix><target>-rc), and its author is config.release.author. A
+-- branch name alone proves nothing: anyone with write access can push
+-- one. Every other event is no release run. The answer comes with the
+-- reason. The tool reads the config only for a merged PR with the
+-- marker: a closed PR from a fork can carry any config, and gets its
+-- "no" from the event alone.
+surface WorkflowReleaseGate {
+    facing workflow: Workflow
+    context pr: PullRequest
+
+    exposes:
+        pr.merged
+        has_release_marker(pr.body)
+        pr.head_branch = config.release.branch_prefix + pr.repository.base_branch
+        pr.head_branch = config.release.branch_prefix + pr.base_branch + "-rc"
+        pr.author = config.release.author
+        is_release_run(workflow, pr)
 }
 
 -- After a merge the workflow receives every release the merge produced,

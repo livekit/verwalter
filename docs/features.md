@@ -42,7 +42,7 @@ What the tool does, what it catches, and what to do when a step fails.
 | A fixed group drifts | Every command warns. The next release aligns the group. |
 | A PR changes a package without a changeset | The check fails with the comment and link. The `internal` label exempts the PR. |
 | A changeset claims `patch` for a breaking change | With a `check.api` command configured, the check fails and the comment names the level to use and the fix command. |
-| Someone merges a branch named `release/*` by hand | The example release workflow runs only for a PR that the bot authored, with the verwalter marker in its body. |
+| Someone merges a branch named `release/*` by hand | `gate` answers no, and the example release workflow skips every job. A release run needs a merged PR from the tool's own branch that `[release].author` opened, with the verwalter marker in its body. |
 | Two pushes to `main` in quick succession | The concurrency group cancels the first run. One PR results. |
 | The release PR is closed without merging, or its branch deleted | The next push regenerates the branch and opens a new PR. |
 | An rc is requested twice, or by another member of the group | One branch per package or group, updated in place. The number continues. |

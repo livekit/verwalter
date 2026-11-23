@@ -6,7 +6,7 @@ use std::{
 use anyhow::{Context, Result, anyhow, bail, ensure};
 use clap::Parser;
 use verwalter::{
-    branches, check, git, github, plan::plan, prerelease, release, repo::Repo, status,
+    branches, check, gate, git, github, plan::plan, prerelease, release, repo::Repo, status,
     version::BumpLevel, workspace,
 };
 
@@ -122,6 +122,8 @@ enum Command {
         #[arg(long, value_name = "BRANCH")]
         target: Option<String>,
     },
+    /// In a GitHub Actions workflow: say whether this run is a release run
+    Gate,
 }
 
 /// A file as the checkout is most often a glob that the shell expanded
@@ -189,16 +191,19 @@ fn run(cli: Cli) -> Result<()> {
         remote,
         dry_run,
     } = cli;
-    let root = match root {
-        Some(root) => root,
-        None => git::run(Path::new("."), &["rev-parse", "--show-toplevel"])?.into(),
-    };
-    // Commands run in package paths see VERWALTER_ROOT: it must be
-    // absolute, or `$VERWALTER_ROOT/dist` resolves inside the package.
-    let root = root
-        .canonicalize()
-        .with_context(|| root.display().to_string())?;
-    let config_path = config.unwrap_or_else(|| root.join(verwalter::repo::CONFIG_FILE));
+    // Spec: WorkflowReleaseGate. The event decides first. The checkout
+    // and its config are read only for a merged PR with the marker.
+    if let Command::Gate = command {
+        let event = github_event()?;
+        let decision = gate::decide(&event.0, &event.1, || {
+            let (root, config_path) = locate(root, config)?;
+            verwalter::config::Config::load(&root, &config_path)
+        })?;
+        let answer = if decision.release { "yes" } else { "no" };
+        println!("release run: {answer}: {}", decision.reason);
+        return gate::write_output(&decision);
+    }
+    let (root, config_path) = locate(root, config)?;
     // Under `--dry-run`, every gh write is printed instead of run.
     let client = github::SystemClient::new(&root, &remote);
     let gh: &dyn github::Client = if dry_run {
@@ -460,8 +465,35 @@ fn run(cli: Cli) -> Result<()> {
             println!("{}", release::write_outputs(&released)?);
             Ok(())
         }
-        Command::Check { .. } => unreachable!("check returned above"),
+        Command::Check { .. } | Command::Gate => unreachable!("returned above"),
     }
+}
+
+/// The checkout and the config file in it.
+fn locate(root: Option<PathBuf>, config: Option<PathBuf>) -> Result<(PathBuf, PathBuf)> {
+    let root = match root {
+        Some(root) => root,
+        None => git::run(Path::new("."), &["rev-parse", "--show-toplevel"])?.into(),
+    };
+    // Commands run in package paths see VERWALTER_ROOT: it must be
+    // absolute, or `$VERWALTER_ROOT/dist` resolves inside the package.
+    let root = root
+        .canonicalize()
+        .with_context(|| root.display().to_string())?;
+    let config_path = config.unwrap_or_else(|| root.join(verwalter::repo::CONFIG_FILE));
+    Ok((root, config_path))
+}
+
+/// The name and the payload of the event that started the workflow run.
+fn github_event() -> Result<(String, serde_json::Value)> {
+    let var = |name: &str| {
+        std::env::var(name)
+            .map_err(|_| anyhow!("{name} is not set: `gate` runs in a GitHub Actions workflow"))
+    };
+    let (name, path) = (var("GITHUB_EVENT_NAME")?, var("GITHUB_EVENT_PATH")?);
+    let text = std::fs::read_to_string(&path).with_context(|| path.clone())?;
+    let event = serde_json::from_str(&text).with_context(|| path.clone())?;
+    Ok((name, event))
 }
 
 fn workspace_error(findings: &[workspace::Finding]) -> anyhow::Error {

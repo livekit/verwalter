@@ -3,7 +3,7 @@
 ```yaml
 - uses: livekit/verwalter@v0.22.0
   with:
-    command: pr        # check | changeset | plan | pr | release | publish | pre-release | status
+    command: pr        # check | changeset | plan | pr | gate | release | publish | pre-release | status
     app-client-id: ${{ secrets.VERWALTER_RELEASE_CLIENT_ID }}
     app-private-key: ${{ secrets.VERWALTER_RELEASE_APP_KEY }}
     dry-run: "false"   # "true" prints every push, tag and GitHub write instead
@@ -20,6 +20,10 @@
 | `dry-run` | `"true"` passes `--dry-run`. Reads still run, writes are printed. |
 | `args` | Extra arguments passed to the command. |
 | `releases` | `publish` only: the `releases` output of the `release` step. Only those packages are published. Without it, or with an empty list, every tagged package is, and the registry check skips the versions it has. |
+
+| Output (`gate` only) | Meaning |
+|---|---|
+| `release` | `true` if this workflow run is a release run, else `false`. |
 
 | Output (`release` only) | Meaning |
 |---|---|
@@ -41,7 +45,7 @@ per registry for `verwalter.toml`:
 |---|---|---|
 | `changeset-check.yml` | `pull_request` on `main` | `check` |
 | `release-pr.yml` | `push` to `main` | `pr` |
-| `release.yml` | `pull_request` closed on any base branch, merged, head `release/*`, author `verwalter-release[bot]`, body with the verwalter marker | `release`, then `publish` |
+| `release.yml` | `pull_request` closed on any base branch | `gate`, then `release`, then `publish` |
 | `pre-release.yml` | `workflow_dispatch` | `pre-release --target ${{ github.ref_name }}`, with `fetch-depth: 0` because the tags number the rc. The pending changesets decide what is in it and how far it moves. |
 
 To ship releases from a maintenance branch such as `v1` next to `main`:
@@ -57,9 +61,22 @@ built-in npm command keeps it off npm's `latest` dist-tag.
 `release.yml` has no `branches` filter, because an rc PR targets the
 branch that `pre-release.yml` was run on. With `branches: [main]`, an rc
 PR merged into another branch starts no release run: the branch has the
-rc version, but no tag and no GitHub release. The condition on the first
-job (head `release/*`, the bot author, the marker) decides which PRs
-release.
+rc version, but no tag and no GitHub release. The `gate` job decides
+which PRs release.
+
+`gate` answers whether the workflow run is a release run. A run by hand
+(`workflow_dispatch`) is one. A closed PR is one only if all of these
+hold:
+
+- The PR is merged.
+- Its body has the verwalter marker.
+- Its branch is the release branch or the rc branch that the tool names
+  with `[release].branch_prefix`.
+- Its author is `[release].author`.
+
+The first job of `release.yml` runs `gate`. The next job needs it and
+runs if its `release` output is `true`. `gate` reads `verwalter.toml`
+only for a merged PR with the marker.
 
 If the release binary cannot be downloaded, the action builds verwalter
 from its own checkout instead. The build needs `cargo`, which GitHub-hosted
@@ -86,10 +103,10 @@ removes this limit. The action uses the token for the GitHub API and for
 `git push`.
 
 1. Create an App in the organization settings (Developer settings →
-   GitHub Apps → New GitHub App). Name it `verwalter-release`: the
-   example `release.yml` publishes only PRs from `verwalter-release[bot]`.
-   For another name, or without an App (`github-actions[bot]`), change
-   that login in the guard. Clear **Webhook → Active**. Give it
+   GitHub Apps → New GitHub App). Name it `verwalter-release`: `gate`
+   releases only PRs from `verwalter-release[bot]`. For another name, or
+   without an App (`github-actions[bot]`), set that login as
+   `[release].author` in `verwalter.toml`. Clear **Webhook → Active**. Give it
    these repository permissions: Contents read and write, Pull requests
    read and write.
 2. Under **Key pairs**, click **New key**. Keep the downloaded `.pem` file
