@@ -47,7 +47,7 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.merge_commit_sha || inputs.ref || github.sha }}
       - id: verwalter
-        uses: livekit/verwalter@v0.31.0
+        uses: livekit/verwalter@v0.32.0-rc.1
         with:
           command: gate
 
@@ -90,7 +90,7 @@ jobs:
           name: dist
           path: dist
       - id: verwalter
-        uses: livekit/verwalter@v0.31.0
+        uses: livekit/verwalter@v0.32.0-rc.1
         with:
           command: release
           # Every file in dist/ is attached to the GitHub release when it
@@ -134,7 +134,7 @@ jobs:
       # cargo, pip and pub keep pre-releases away from default resolution
       # by the version alone. npm does not: publish an rc with a dist-tag
       # (`--tag next` when VERWALTER_PRERELEASE is true).
-      - uses: livekit/verwalter@v0.31.0
+      - uses: livekit/verwalter@v0.32.0-rc.1
         env:
           GH_TOKEN: ${{ github.token }}
         with:
@@ -156,7 +156,7 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.merge_commit_sha || inputs.ref || github.sha }}
           fetch-depth: 0
-      - uses: livekit/verwalter@v0.31.0
+      - uses: livekit/verwalter@v0.32.0-rc.1
         with:
           command: status
           args: --check
