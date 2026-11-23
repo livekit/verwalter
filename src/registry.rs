@@ -68,13 +68,28 @@ pub fn curl(url: &str) -> Result<u16> {
 
 /// The URL that answers 200 when `version` of `name` is on the registry.
 /// None when the package has no registry configured.
+///
+/// A package's own `publish.exists_url` replaces the built-in URL of its
+/// registry, for example to call a PyPI version present only when its
+/// sdist is there, not after its first file. `{version}` is the version
+/// as the registry writes it: PEP 440 for PyPI (`1.6.0rc1`), semver
+/// elsewhere. `[publish].exists_url` is the default for `custom` only.
+/// goproxy keeps its URL: the request is what publishes the module.
 pub fn version_url(config: &Config, name: &str, version: &Version) -> Option<String> {
-    let v = version.to_string();
-    Some(match config.registry_of(name) {
+    let registry = config.registry_of(name);
+    let v = match registry {
+        Registry::Pypi => to_pep440(version),
+        _ => version.to_string(),
+    };
+    let own = config.packages[name].publish.exists_url.as_deref();
+    if let Some(url) = own.filter(|_| !matches!(registry, Registry::None | Registry::Goproxy)) {
+        return Some(url.replace("{name}", name).replace("{version}", &v));
+    }
+    Some(match registry {
         Registry::None => return None,
         Registry::Crates => format!("https://crates.io/api/v1/crates/{name}/{v}"),
         Registry::Npm => format!("https://registry.npmjs.org/{name}/{v}"),
-        Registry::Pypi => format!("https://pypi.org/pypi/{name}/{}/json", to_pep440(version)),
+        Registry::Pypi => format!("https://pypi.org/pypi/{name}/{v}/json"),
         Registry::Pubdev => format!("https://pub.dev/api/packages/{name}/versions/{v}"),
         Registry::Goproxy => format!("{}/@v/v{v}.info", goproxy_module_url(config, name)?),
         Registry::Custom => config
@@ -227,6 +242,31 @@ mod tests {
             )
             .unwrap(),
             "https://r/x/1.6.0-rc.1/"
+        );
+        // Issue #138: a package's own URL replaces the built-in check, and
+        // `{version}` is PEP 440 on PyPI. The sdist means every file is up.
+        let sdist = "publish.registry = \"pypi\"\npublish.exists_url = \"https://files.pythonhosted.org/packages/source/x/{name}/{name}-{version}.tar.gz\"";
+        assert_eq!(
+            version_url(&config("", sdist), "x", &v).unwrap(),
+            "https://files.pythonhosted.org/packages/source/x/x/x-1.6.0rc1.tar.gz"
+        );
+        // The first-release check still asks PyPI for the package.
+        assert_eq!(
+            package_url(&config("", sdist), "x").unwrap(),
+            "https://pypi.org/pypi/x/json"
+        );
+        // [publish].exists_url is for custom packages, not for the others.
+        assert_eq!(
+            version_url(
+                &config(
+                    "[publish]\nexists_url = \"https://r/{name}/{version}\"",
+                    "publish.registry = \"crates\""
+                ),
+                "x",
+                &v
+            )
+            .unwrap(),
+            "https://crates.io/api/v1/crates/x/1.6.0-rc.1"
         );
         assert_eq!(
             package_url(&config("", "publish.registry = \"pubdev\""), "x").unwrap(),

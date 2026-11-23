@@ -62,7 +62,7 @@ jobs = 4                         # default: independent packages published at on
 registry = "crates"              # none (default) | crates | npm | pypi | pubdev | goproxy | custom
 command = "cargo publish --no-verify"   # for packages on that registry, run in their path
 workspace = "cargo publish --workspace" # or: one command from the root for all of them (pnpm -r publish)
-exists_url = "https://r/{name}/{version}"  # for custom: 200 when the version exists, 404 when not
+exists_url = "https://r/{name}/{version}"  # for custom packages: 200 when the version exists, 404 when not
 
 [packages.livekit-protocol]
 path = "livekit-protocol"        # the only required key, unless `members` finds the package
@@ -78,7 +78,7 @@ release.mode = "tag"
 release.draft = false            # public on creation, before the publish
 publish.registry = "npm"         # "none" with no command: released on GitHub only
 publish.command = "pnpm publish --no-git-checks"   # else the built-in one for the registry
-publish.exists_url = "https://r/{name}/{version}"
+publish.exists_url = "https://r/{name}/{version}"   # replaces the built-in check of any registry but goproxy. {version} is PEP 440 on PyPI
 check.api = "griffe check pkg -a $VERWALTER_BASELINE_TAG >/dev/null || echo major"
 check.publish_dry_run = "uv build && twine check dist/*"   # or false
 ```
@@ -120,7 +120,7 @@ of a release.
 The publish command for a package is its own `publish.command`, else
 `[publish].command` when the package is on the default registry, else the
 built-in command for its registry: `cargo publish`,
-`npm publish --provenance --access public`, `python -m twine upload dist/*`,
+`npm publish --provenance --access public`, `python -m twine upload --skip-existing dist/*`,
 `dart pub publish --force`. On `goproxy`, the registry request is the
 publish: verwalter asks the Go module proxy for the version, which makes
 the proxy fetch the tag, and no command runs. The built-in npm command adds `--tag next` for

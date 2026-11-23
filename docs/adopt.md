@@ -448,14 +448,16 @@ members = ["packages/*"]            # `*` matches one whole path component; memb
 files = ["pyproject.toml"]
 
 [publish]
-registry = "pypi"                   # built-in: python -m twine upload dist/*, so the publish job builds into dist/ first
+registry = "pypi"                   # built-in: python -m twine upload --skip-existing dist/*, so the publish job builds into dist/ first
 ```
 
 The rc label `rc` is the default and is written as `1.6.0rc1` in
-`pyproject.toml`. A package built on a matrix (wheels per platform) is
-better uploaded with `pypa/gh-action-pypi-publish` and
-`skip-existing: true` in the publish job, driven by the `releases`
-output, so that a half-uploaded version completes on re-run.
+`pyproject.toml`. A package built on a matrix (wheels per platform) has
+many files per version, and PyPI shows the version after the first one.
+Set `publish.exists_url` to its sdist, which twine uploads last, so that
+a half upload does not count as published. A re-run then uploads the
+missing files. See the PyPI section of
+[examples/publish/README.md](../examples/publish/README.md).
 
 **Delete.** The scripts, `manual-version-bump.yml`, the `pip install
 click packaging` steps, and the `release-gate.yml` if the branch
@@ -546,7 +548,7 @@ this release unless `CHANGELOG.md` already exists.
 |---|---|---|
 | npm | `npm publish --provenance --access public`, or `pnpm publish` in a pnpm workspace | `--tag next` for an rc, `--tag latest-1` for a maintenance release. `id-token: write` for trusted publishing and provenance. No `registry-url` on `setup-node`: its placeholder token breaks the fallback. |
 | crates.io | `cargo publish` | `[publish] workspace = "cargo publish --workspace"` on cargo 1.90 and later. Else per crate, dependencies first, which the tool orders. |
-| PyPI | `python -m twine upload dist/*` | Build first. `pypa/gh-action-pypi-publish` with `skip-existing: true` is the alternative for multi-wheel packages. |
+| PyPI | `python -m twine upload --skip-existing dist/*` | Build first. A package with several files sets `publish.exists_url` to its sdist. The built-in command signs no attestations: add `pypi-attestations sign` and `--attestations` to keep them. |
 | pub.dev | `dart pub publish --force` | `setup-dart` mints the token from OIDC. |
 | Maven Central | none: `publish.registry = "custom"` with `exists_url`, and the gradle command | `exists_url = "https://repo1.maven.org/maven2/<group path>/{name}/{version}/{name}-{version}.pom"`. Ask for the `.pom` file, not for the directory: the directory listing is a page for browsers and can answer 404 for a version that is there. |
 | CocoaPods | none: `publish.command = "pod trunk push ..."` without a registry | No stable existence API. The command fails on a duplicate, which is a real failure to the tool. |

@@ -266,7 +266,7 @@
           "$ref": "#/$defs/Registry"
         },
         "exists_url": {
-          "description": "For `registry = \"custom\"`: a URL with `{name}` and `{version}` that\nanswers 200 when the version exists and 404 when it does not.",
+          "description": "For `registry = \"custom\"`: a URL with `{name}` and `{version}` that\nanswers 200 when the version exists and 404 when it does not. A\npackage on another registry sets its own `publish.exists_url`.",
           "type": [
             "string",
             "null"
@@ -426,6 +426,7 @@
           ]
         },
         "exists_url": {
+          "description": "A URL with `{name}` and `{version}` that answers 200 when the\nversion exists and 404 when it does not. Replaces the built-in\ncheck of the registry, except goproxy. `{version}` is PEP 440 on\nPyPI (`1.6.0rc1`), semver elsewhere.",
           "type": [
             "string",
             "null"
