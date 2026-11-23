@@ -713,7 +713,7 @@ pub fn sync(
     }
     .execute(gh)?;
 
-    let existing = open_pr(gh, &branches::branch_name(repo))?;
+    let existing = open_pr(gh, &branches::branch_name(&repo.config))?;
     let existing = existing.as_ref();
 
     if let Some(branch) = branch {
