@@ -451,7 +451,7 @@ fn discover(table: &mut toml::Table, root: &Path, workspace: &Workspace) -> Resu
 
 /// `file` relative to a package `path`, as a repo-relative path. `..`
 /// is resolved, so a sibling directory's file is `../sibling/file`.
-fn under(path: &str, file: &str) -> String {
+pub(crate) fn under(path: &str, file: &str) -> String {
     let mut parts: Vec<&str> = Vec::new();
     for c in path.split('/').chain(file.split('/')) {
         match c {
