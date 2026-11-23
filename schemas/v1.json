@@ -134,7 +134,7 @@
           "$ref": "#/$defs/BumpLevel"
         },
         "prerelease_label": {
-          "description": "Pre-release label: `1.6.0-rc.1`. Written as PEP 440 in pyproject.toml\n(`1.6.0rc1`; `alpha` and `beta` become `a` and `b`).",
+          "description": "Pre-release label: `1.6.0-rc.1`. Written as PEP 440 in pyproject.toml and .py files\n(`1.6.0rc1`; `alpha` and `beta` become `a` and `b`).",
           "type": "string",
           "default": "rc"
         }
