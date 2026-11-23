@@ -80,7 +80,10 @@ only for a merged PR with the marker.
 
 If the release binary cannot be downloaded, the action builds verwalter
 from its own checkout instead. The build needs `cargo`, which GitHub-hosted
-Linux and macOS runners have.
+Linux and macOS runners have. The action caches the build in the GitHub Actions
+cache, keyed by a hash of its sources, so a pin to an unreleased commit
+builds once. GitHub shares a cache from the default branch with every
+branch, and a cache from a PR branch only with that PR.
 
 Repository settings the workflows need:
 
