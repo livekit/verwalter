@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.32.0-rc.2
+
+### Minor Changes
+
+- A Python package with `dynamic = ["version"]` is a dependent of the packages its `pyproject.toml` requires, and those requirements move with each release, in `uv.lock` too. A `<` bound that would exclude a new major moves to the next major - [#132](https://github.com/livekit/verwalter/pull/132) ([@lukasIO](https://github.com/lukasIO))
+- New command `verwalter gate`: it says whether a workflow run is a release run. With `command: gate`, the action has the output `release`. The example `release.yml` uses it in a first job in place of the long `if:` condition. New config key `[release] author`, the login that opens the release PR, default `verwalter-release[bot]`. A repository without the GitHub App sets `[release] author = "github-actions[bot]"`. - [#115](https://github.com/livekit/verwalter/pull/115) ([@lukasIO](https://github.com/lukasIO))
+- `check` on a release PR runs the dry run of the publish command for each package that the merge releases, with `[check].publish_dry_run = true` or a command. A failed dry run fails the check and shows its output in the PR comment. The built-in cargo dry run covers every crate of the release in one run, so a crate can depend on a version that is not on crates.io yet - [#134](https://github.com/livekit/verwalter/pull/134) ([@lukasIO](https://github.com/lukasIO))
+- A package's own `publish.exists_url` replaces the built-in check of its registry, and `{version}` in it is the PEP 440 form on PyPI. A PyPI package with several files can check for its sdist, so a half upload does not count as published. The built-in PyPI command uploads with `--skip-existing`, so a re-run completes a half upload - [#139](https://github.com/livekit/verwalter/pull/139) ([@lukasIO](https://github.com/lukasIO))
+- A regex-versioned `.py` file, for example a `version.py` with `__version__`, gets the PEP 440 pre-release form (`2.1.0rc1`) like `pyproject.toml`, not the semver form (`2.1.0-rc.1`) - [#131](https://github.com/livekit/verwalter/pull/131) ([@lukasIO](https://github.com/lukasIO))
+- `publish` waits until the registry shows a version after its command passed, five minutes by default (`--wait`), because npm scans a new version before it shows it. `status --check --wait <time>` asks again until every package is complete - [#124](https://github.com/livekit/verwalter/pull/124) ([@lukasIO](https://github.com/lukasIO))
+
+### Patch Changes
+
+- The action caches the build from its own checkout, keyed by a hash of the sources, so a pin to an unreleased commit builds once instead of in every run - [#135](https://github.com/livekit/verwalter/pull/135) ([@lukasIO](https://github.com/lukasIO))
+
 ## 0.32.0-rc.1
 
 ### Minor Changes
