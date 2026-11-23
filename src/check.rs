@@ -326,6 +326,7 @@ pub fn dry_run_check(root: &Path, config: &Config, check: &mut Check) -> Result<
             first: None,
         };
         let (ok, output, _) = publish::run_in(root, &cfg.path, &command, &vars);
+        log_dry_run(ok, &[p.name.as_str()], &command);
         if !ok {
             check.dry_run.push(DryRunFinding {
                 packages: vec![p.name.clone()],
@@ -348,6 +349,8 @@ pub fn dry_run_check(root: &Path, config: &Config, check: &mut Check) -> Result<
             first: None,
         };
         let (ok, output, _) = publish::run_in(root, ".", &command, &vars);
+        let names: Vec<&str> = crates.iter().map(|p| p.name.as_str()).collect();
+        log_dry_run(ok, &names, &command);
         if !ok {
             check.dry_run.push(DryRunFinding {
                 packages: crates.iter().map(|p| p.name.clone()).collect(),
@@ -357,6 +360,15 @@ pub fn dry_run_check(root: &Path, config: &Config, check: &mut Check) -> Result<
         }
     }
     Ok(())
+}
+
+/// One log line per dry run, so a passing one leaves a trace too.
+fn log_dry_run(ok: bool, packages: &[&str], command: &str) {
+    let result = if ok { "passed" } else { "failed" };
+    println!(
+        "publish dry run {result}: {}: {command}",
+        packages.join(", ")
+    );
 }
 
 /// The end of a command's output, where the error is.
