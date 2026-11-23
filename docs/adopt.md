@@ -65,6 +65,9 @@ tag = "{package}@{version}"        # the existing tags. The default is {package}
 
 [publish]
 registry = "npm"                   # the built-in publish command and the existence check
+
+[check]
+publish_dry_run = true             # the release PR dry-runs each publish command
 ```
 
 A single package in another language lists itself:
@@ -164,8 +167,12 @@ Then:
   back to it fails with 404. The command publishes
   what is on disk, so the job installs and builds first, or downloads
   the build job's artifact.
-- In `changeset-check.yml`, drop the `taiki-e/install-action` step and
-  `fetch-depth: 0` unless `[check].api` is set.
+- In `changeset-check.yml`, drop the `taiki-e/install-action` step
+  unless `[check].api` is set. Keep `fetch-depth: 0`: the publish dry run
+  reads the tags to find what the release PR releases. Set up the
+  toolchain of each dry run (`setup-dart`, `setup-node`, `uv`). For a
+  PyPI package, set `check.publish_dry_run` to the build and
+  `twine check dist/*`.
 - Keep what ran after the old publish (docs upload, downstream
   dispatch) as steps at the end of the publish job. The installed
   workspace is there. Move the secrets or the OIDC role those

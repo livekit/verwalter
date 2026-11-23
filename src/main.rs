@@ -220,7 +220,7 @@ fn run(cli: Cli) -> Result<()> {
             "{:?}: affected {:?}, covered {:?}",
             c.status, c.affected, c.covered
         );
-        if c.status == check::Status::Failed {
+        if c.failed() {
             let mut why = Vec::new();
             if !c.missing().is_empty() {
                 why.push(format!("changeset missing for: {}", c.missing().join(", ")));
@@ -233,6 +233,14 @@ fn run(cli: Cli) -> Result<()> {
                     ),
                     None => format!("{}: the API check did not run: {}", f.package, f.output),
                 });
+            }
+            for f in &c.dry_run {
+                why.push(format!(
+                    "{}: publish dry run failed: {}\n{}",
+                    f.packages.join(", "),
+                    f.command,
+                    f.output
+                ));
             }
             bail!(why.join("\n"));
         }

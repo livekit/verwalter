@@ -37,9 +37,10 @@ members = ["packages/*"]         # optional: every publishable workspace member 
 exclude = ["examples/*", "packages/internal-tools"]  # by name or path: not a package, not reported
 pin_files = ["Cargo.toml"]       # workspace manifests; each release updates its own entry. Root lock files need no entry
 
-[check]                          # contributor PRs, for `verwalter check`
+[check]                          # contributor and release PRs, for `verwalter check`
 exempt_label = "internal"       # default: PRs with this label need no changeset
 api = "cargo semver-checks --baseline-rev $VERWALTER_BASELINE_TAG 2>&1 | tee /dev/stderr | sed -n 's/.*requires new \\([a-z]*\\) version.*/\\1/p'"
+publish_dry_run = true          # release PRs: dry-run each publish command. Default: off
 
 [versioning]                     # what a release changes
 files = ["Cargo.toml"]           # default for every package; relative to its path. Unset: a found member takes its own manifest
@@ -78,6 +79,7 @@ publish.registry = "npm"         # "none" with no command: released on GitHub on
 publish.command = "pnpm publish --no-git-checks"   # else the built-in one for the registry
 publish.exists_url = "https://r/{name}/{version}"
 check.api = "griffe check pkg -a $VERWALTER_BASELINE_TAG >/dev/null || echo major"
+check.publish_dry_run = "uv build && twine check dist/*"   # or false
 ```
 
 `members` takes directories, with `*` as a whole path component. Each
@@ -232,3 +234,29 @@ files = ["go.mod"]
 [publish]
 registry = "goproxy"             # public modules only; a private module stays on none
 ```
+
+**Publish dry run.** With `[check].publish_dry_run`, `verwalter check` on a release PR runs
+the dry run of the publish command for each package that the merge
+releases: each package whose version has no tag yet. A failed dry run
+fails the check and shows its output in the PR comment. So a version
+that its registry rejects does not reach the base branch.
+
+`true` takes the built-in dry run of each registry:
+
+| Registry | Dry run |
+|---|---|
+| crates.io | `cargo publish --dry-run --package <a> --package <b>`, once from the root for every crate in the release. A crate can then depend on a version of another crate that is not on crates.io yet. The crates must be members of the root Cargo workspace. |
+| npm | `npm publish --dry-run`, or `pnpm publish --dry-run --no-git-checks` in a pnpm workspace, with `--tag` for a pre-release or a maintenance release |
+| pub.dev | `dart pub publish --dry-run` |
+| PyPI, custom | None. Set a command, for example `uv build && twine check dist/*`. |
+
+A command in `[check]` applies to the packages on the default registry.
+It runs in the package's path and sees the same `{placeholders}` and
+`VERWALTER_*` variables as the publish command, except
+`VERWALTER_FIRST_RELEASE`. The packages on other registries take the
+built-in dry run. A package's `check.publish_dry_run` overrides both,
+and `false` turns it off for that package.
+
+The check job must have the toolchain of each dry run, for example
+Dart or Node. The release PR must be opened with an
+[App token](action.md#a-github-app-token), or the check does not run on it.

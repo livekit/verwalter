@@ -62,6 +62,9 @@ files = ["Cargo.toml"]             # for every package; a package can set its ow
 [publish]
 registry = "crates"                # none | crates | npm | pypi | pubdev | goproxy | custom
 
+[check]
+publish_dry_run = true             # the release PR dry-runs each publish command
+
 [packages.livekit-protocol]
 path = "livekit-protocol"
 
