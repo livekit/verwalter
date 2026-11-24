@@ -447,7 +447,7 @@ fn pyproject_pin(content: &str, dep: &str, version: &Version) -> String {
     let wanted = normalise_py(dep);
     let clause = r"(?:===|[<>!=~]=|<|>)\s*[0-9][0-9A-Za-z.+!*-]*";
     let re = regex::Regex::new(&format!(
-        r#"(["'])\s*([A-Za-z0-9][A-Za-z0-9._-]*)(\[[^\]]*\])?\s*({clause}(?:\s*,\s*{clause})*)"#
+        r#"(["'])\s*([A-Za-z0-9][A-Za-z0-9._-]*)(\[[^\]]*\])?\s*\(?\s*({clause}(?:\s*,\s*{clause})*)"#
     ))
     .expect("static regex");
     re.replace_all(content, |caps: &regex::Captures| {
@@ -468,7 +468,7 @@ fn pyproject_pin(content: &str, dep: &str, version: &Version) -> String {
 
 /// A PEP 440 specifier list on an in-repo dependency, moved to `version`:
 /// the first lower bound (`>=`, `==`, `~=`) becomes `version`, and `~=`
-/// keeps its number of release parts. An upper bound (`<`, `<=`) that
+/// and a `==` wildcard keep their number of release parts. An upper bound (`<`, `<=`) that
 /// would exclude `version` moves to the next version at the level of the
 /// old bound: `>=2.0.1,<3.0.0` for 3.0.0 becomes `>=3.0.0,<4.0.0`, and
 /// `<2.5` for 2.5.0 becomes `<2.6.0`. Everything else stays.
@@ -488,10 +488,16 @@ fn move_specifier(spec: &str, version: &Version) -> String {
             _ if floor => c[0].to_string(),
             _ => {
                 floor = true;
-                let new = if op == "~=" {
-                    compatible(old, &new)
-                } else {
-                    new.clone()
+                let new = match old.strip_suffix(".*") {
+                    // `==2.*` for 3.0.0 is `==3.*`.
+                    Some(prefix) => {
+                        format!(
+                            "{}.*",
+                            compatible(prefix, &version.stable_component().to_string())
+                        )
+                    }
+                    None if op == "~=" => compatible(old, &new),
+                    None => new.clone(),
                 };
                 format!("{op}{space}{new}")
             }
@@ -968,47 +974,345 @@ dev = ["livekit-test-utils~=0.3"]
         assert_eq!(none, PYPROJECT);
     }
 
+    // Spec: write_dependency_version for pyproject.toml and uv.lock. Each
+    // row is a specifier, the release, and the specifier after the move.
     #[test]
-    fn specifier_upper_bound_moves_only_when_it_excludes_the_release() {
-        let m = |spec: &str, to: &str| move_specifier(spec, &v(to));
-        assert_eq!(m(">=2.0.1,<3.0.0", "2.1.0"), ">=2.1.0,<3.0.0");
-        assert_eq!(m(">=2.0.1,<3.0.0", "3.0.0"), ">=3.0.0,<4.0.0");
-        assert_eq!(m(">=2.0.1, <3", "3.0.0-rc.1"), ">=3.0.0rc1, <4.0.0");
-        assert_eq!(m(">=0.4.0,<0.5.0", "0.5.0"), ">=0.5.0,<0.6.0");
-        assert_eq!(m(">=1.0,!=1.5.0", "2.1.0"), ">=2.1.0,!=1.5.0");
-        // Any order, and an upper bound alone.
-        assert_eq!(m("<3, >=2.0.1", "3.0.0"), "<4.0.0, >=3.0.0");
-        assert_eq!(m("<3.0.0", "3.0.0"), "<4.0.0");
-        // `<=` moves too, when it excludes the release.
-        assert_eq!(m(">=2.0.1,<=2.9", "3.0.0"), ">=3.0.0,<3.1.0");
-        assert_eq!(m(">=2.0.1,<=2.9", "2.5.0"), ">=2.5.0,<=2.9");
-        // A bound keeps its level: a narrow cap stays narrow.
-        assert_eq!(m(">=2.0,<2.5", "2.5.0"), ">=2.5.0,<2.6.0");
-        assert_eq!(m("<0.0.3", "0.0.3"), "<0.0.4");
-        // `~=` keeps its number of parts, so `~=3.0` still allows 3.1.
-        assert_eq!(m("~=2.0", "3.0.0"), "~=3.0");
-        assert_eq!(m("~=2.0", "3.0.0-rc.1"), "~=3.0rc1");
-        assert_eq!(m("~=2.0.1", "2.1.0"), "~=2.1.0");
+    fn move_specifier_table() {
+        let rows = [
+            // The first lower bound becomes the release.
+            (">=2.0.1", "2.0.2", ">=2.0.2"),
+            ("==2.0.1", "2.1.0", "==2.1.0"),
+            (">= 2.0.1", "2.1.0", ">= 2.1.0"),
+            (">=2.0.1,>=2.0.0", "2.1.0", ">=2.1.0,>=2.0.0"),
+            // An upper bound that allows the release stays.
+            (">=2.0.1,<3.0.0", "2.1.0", ">=2.1.0,<3.0.0"),
+            (">=2.0.1,<=2.9", "2.5.0", ">=2.5.0,<=2.9"),
+            (">=2.0.1,<=3.0.0", "3.0.0", ">=3.0.0,<=3.0.0"),
+            // One that excludes it moves to the next version at its level.
+            (">=2.0.1,<3.0.0", "3.0.0", ">=3.0.0,<4.0.0"),
+            (">=2.0.1,<3", "3.0.0", ">=3.0.0,<4.0.0"),
+            (">=2.0.1,<3.0", "3.0.0", ">=3.0.0,<4.0.0"),
+            (">=2.0,<2.5", "2.5.0", ">=2.5.0,<2.6.0"),
+            (">=2.0,<2.5", "3.0.0", ">=3.0.0,<3.1.0"),
+            (">=2.0.1,<2.0.5", "2.0.5", ">=2.0.5,<2.0.6"),
+            (">=2.0.1,<=2.9", "3.0.0", ">=3.0.0,<3.1.0"),
+            (">=2.0.1,<=2.9.0", "2.9.1", ">=2.9.1,<2.10.0"),
+            (">=0.4.0,<0.5.0", "0.5.0", ">=0.5.0,<0.6.0"),
+            (">=0.4.0,<1.0.0", "1.0.0", ">=1.0.0,<2.0.0"),
+            (">=0.0.2,<0.0.3", "0.0.3", ">=0.0.3,<0.0.4"),
+            ("<3.0.0", "3.0.0", "<4.0.0"),
+            ("<= 2.9", "3.0.0", "< 3.1.0"),
+            // PEP 440: `<3.0.0` excludes 3.0.0rc1 too.
+            (">=2.0.1,<3.0.0", "3.0.0-rc.1", ">=3.0.0rc1,<4.0.0"),
+            (">=2.0.1,<3.0.0", "3.0.0-beta.2", ">=3.0.0b2,<4.0.0"),
+            (">=2.0.1,<=3.0.0", "3.0.0-rc.1", ">=3.0.0rc1,<=3.0.0"),
+            // Any order and spacing.
+            ("<3, >=2.0.1", "3.0.0", "<4.0.0, >=3.0.0"),
+            ("<3 , >= 2.0.1", "3.0.0", "<4.0.0 , >= 3.0.0"),
+            // `~=` keeps its number of release parts.
+            ("~=2.0", "3.0.0", "~=3.0"),
+            ("~=2.0", "2.1.0", "~=2.1"),
+            ("~=2.0", "2.0.2", "~=2.0"),
+            ("~=2.0", "3.0.0-rc.1", "~=3.0rc1"),
+            ("~=2.0.1", "2.1.0", "~=2.1.0"),
+            ("~=0.3", "0.4.0", "~=0.4"),
+            ("~=2.0,<2.5", "2.5.0", "~=2.5,<2.6.0"),
+            // `==` with a wildcard keeps it.
+            ("==2.*", "3.0.0", "==3.*"),
+            ("==2.0.*", "2.1.0", "==2.1.*"),
+            ("==2.*", "3.0.0-rc.1", "==3.*"),
+            // Other operators stay, as does a `!=` on an older release.
+            (">=1.0,!=1.5.0", "2.1.0", ">=2.1.0,!=1.5.0"),
+            ("!=2.*,>=1.0", "3.0.0", "!=2.*,>=3.0.0"),
+            (">2.0.0", "3.0.0", ">2.0.0"),
+            ("!=2.0.3", "3.0.0", "!=2.0.3"),
+        ];
+        let mut failures = Vec::new();
+        for (spec, release, expected) in rows {
+            let moved = move_specifier(spec, &v(release));
+            if moved != expected {
+                failures.push(format!("{spec} for {release}: {moved}, want {expected}"));
+            }
+        }
+        assert!(failures.is_empty(), "\n{}", failures.join("\n"));
     }
 
+    // Every combination of lower and upper bound, for every kind of
+    // release, against pep440_rs, an independent PEP 440 implementation.
+    // A moved specifier admits the release, a moved `>=` or `==` floor
+    // admits no older version, an upper bound that allowed the release
+    // stays, and a second move changes nothing.
+    #[test]
+    fn moved_specifiers_admit_the_release() {
+        use pep440_rs::{Version as Pep, VersionSpecifiers};
+        use std::str::FromStr;
+        let admits = |spec: &str, version: &str| {
+            VersionSpecifiers::from_str(spec)
+                .unwrap_or_else(|e| panic!("{spec}: {e}"))
+                .contains(&Pep::from_str(version).unwrap())
+        };
+        let groups = [
+            (
+                vec![
+                    ">=2.0.1", "==2.0.1", "~=2.0", "~=2.0.1", "==2.*", "==2.0.*", ">2.0.0",
+                ],
+                vec![
+                    "<3.0.0", "<3", "<2.5", "<2.0.5", "<=2.9", "<=3.0.0", "!=2.0.0",
+                ],
+                vec![
+                    "2.0.2",
+                    "2.0.5",
+                    "2.1.0",
+                    "2.5.0",
+                    "2.9.0",
+                    "2.9.1",
+                    "2.10.0",
+                    "3.0.0",
+                    "3.0.0-rc.1",
+                    "3.0.0-beta.2",
+                    "3.1.0",
+                    "3.1.0-alpha.1",
+                    "4.0.0",
+                    "10.0.0",
+                ],
+            ),
+            (
+                vec![">=0.4.0", "==0.4.0", "~=0.4", "~=0.4.0", "==0.*", ">=0.0.2"],
+                vec!["<0.5.0", "<1.0.0", "<1", "<0.0.3", "<=0.4.9"],
+                vec![
+                    "0.0.3",
+                    "0.4.1",
+                    "0.5.0",
+                    "0.5.0-rc.1",
+                    "0.6.0",
+                    "1.0.0",
+                    "1.0.0-rc.1",
+                ],
+            ),
+        ];
+        let mut failures = Vec::new();
+        for (floors, caps, releases) in &groups {
+            let mut specs: Vec<String> = Vec::new();
+            for floor in floors.iter() {
+                specs.push(floor.to_string());
+                for cap in caps.iter() {
+                    specs.push(cap.to_string());
+                    specs.push(format!("{floor},{cap}"));
+                    specs.push(format!("{cap}, {floor}"));
+                }
+            }
+            specs.sort();
+            specs.dedup();
+            let probes: Vec<String> = releases.iter().map(|r| to_pep440(&v(r))).collect();
+            for spec in &specs {
+                for release in releases.iter() {
+                    let new = to_pep440(&v(release));
+                    let moved = move_specifier(spec, &v(release));
+                    let case = format!("{spec} for {release} gives {moved}");
+                    if !admits(&moved, &new) {
+                        failures.push(format!("{case}: excludes {new}"));
+                    }
+                    if move_specifier(&moved, &v(release)) != moved {
+                        failures.push(format!("{case}: a second move changes it"));
+                    }
+                    let floor = spec.split(',').map(str::trim).find(|c| {
+                        (c.starts_with(">=") || c.starts_with("==")) && !c.ends_with('*')
+                    });
+                    if floor.is_some() {
+                        let new = Pep::from_str(&new).unwrap();
+                        for older in probes.iter().filter(|p| Pep::from_str(p).unwrap() < new) {
+                            if admits(&moved, older) {
+                                failures.push(format!("{case}: admits older {older}"));
+                            }
+                        }
+                    }
+                    let caps = |s: &str| -> Vec<String> {
+                        s.split(',')
+                            .map(|c| c.trim().to_string())
+                            .filter(|c| c.starts_with('<'))
+                            .collect()
+                    };
+                    let old_caps = caps(spec);
+                    if !old_caps.is_empty()
+                        && admits(&old_caps.join(","), &new)
+                        && caps(&moved) != old_caps
+                    {
+                        failures.push(format!("{case}: moved a cap that allowed {new}"));
+                    }
+                }
+            }
+        }
+        assert!(failures.is_empty(), "\n{}", failures.join("\n"));
+    }
+
+    // pyproject.toml and uv.lock must move the same specifiers, or
+    // `uv sync --locked` rejects the lock.
     #[test]
     fn pyproject_and_uv_lock_move_the_same_specifiers() {
-        let lock = |spec: &str| {
-            format!(
-                "version = 1\n\n[[package]]\nname = \"livekit-api\"\nsource = {{ editable = \"livekit-api\" }}\n\n[package.metadata]\nrequires-dist = [{{ name = \"livekit-protocol\", specifier = \"{spec}\" }}]\n"
-            )
-        };
-        for spec in ["<3.0.0", "<3,>=2.0.1", ">=2.0.1,<=2.9"] {
-            let pyproject = format!(
-                "[project]\nname = \"livekit-api\"\ndependencies = [\"livekit-protocol{spec}\"]\n"
-            );
-            let py = pyproject_pin(&pyproject, "livekit-protocol", &v("3.0.0"));
-            let uv = uv_lock_pin(&lock(spec), "livekit-protocol", &v("3.0.0")).unwrap();
-            let moved = move_specifier(spec, &v("3.0.0"));
-            assert_ne!(moved, spec);
-            assert!(py.contains(&format!("\"livekit-protocol{moved}\"")), "{py}");
-            assert!(uv.contains(&format!("specifier = \"{moved}\"")), "{uv}");
+        let specs = [
+            ">=2.0.1",
+            ">=2.0.1,<3.0.0",
+            "<3.0.0",
+            "<3,>=2.0.1",
+            ">=2.0.1,<=2.9",
+            "~=2.0",
+            "==2.*",
+            "==2.0.1",
+            ">=2.0,<2.5",
+            "!=2.0.0,>=2.0.1",
+            ">2.0.0",
+        ];
+        let releases = ["2.0.2", "2.5.0", "3.0.0", "3.0.0-rc.1"];
+        let mut failures = Vec::new();
+        for spec in specs {
+            for release in releases {
+                let pyproject = format!(
+                    "[project]\nname = \"livekit-api\"\ndependencies = [\"livekit-protocol{spec}\"]\n"
+                );
+                let lock = format!(
+                    "version = 1\n\n[[package]]\nname = \"livekit-api\"\nsource = {{ editable = \"livekit-api\" }}\n\n[package.metadata]\nrequires-dist = [{{ name = \"livekit-protocol\", specifier = \"{spec}\" }}]\n"
+                );
+                let moved = move_specifier(spec, &v(release));
+                let py = pyproject_pin(&pyproject, "livekit-protocol", &v(release));
+                let uv = uv_lock_pin(&lock, "livekit-protocol", &v(release)).unwrap();
+                if !py.contains(&format!("\"livekit-protocol{moved}\"")) {
+                    failures.push(format!("pyproject {spec} for {release}:\n{py}"));
+                }
+                if !uv.contains(&format!("specifier = \"{moved}\"")) {
+                    failures.push(format!("uv.lock {spec} for {release}:\n{uv}"));
+                }
+            }
         }
+        assert!(failures.is_empty(), "\n{}", failures.join("\n"));
+    }
+
+    // Each row is one requirement line in pyproject.toml, and the line
+    // after a 3.0.0 release of livekit-protocol.
+    #[test]
+    fn pyproject_pin_requirement_forms() {
+        let rows = [
+            (
+                r#""livekit-protocol>=2.0.1,<3.0.0","#,
+                r#""livekit-protocol>=3.0.0,<4.0.0","#,
+            ),
+            (
+                r#""livekit-protocol >= 2.0.1, < 3","#,
+                r#""livekit-protocol >= 3.0.0, < 4.0.0","#,
+            ),
+            (
+                r#"'livekit-protocol>=2.0.1',"#,
+                r#"'livekit-protocol>=3.0.0',"#,
+            ),
+            (
+                r#""LiveKit_Protocol>=2.0.1","#,
+                r#""LiveKit_Protocol>=3.0.0","#,
+            ),
+            (
+                r#""livekit.protocol>=2.0.1","#,
+                r#""livekit.protocol>=3.0.0","#,
+            ),
+            (
+                r#""livekit-protocol[codecs]>=2.0.1","#,
+                r#""livekit-protocol[codecs]>=3.0.0","#,
+            ),
+            (
+                r#"'livekit-protocol>=2.0.1; python_version >= "3.9"',"#,
+                r#"'livekit-protocol>=3.0.0; python_version >= "3.9"',"#,
+            ),
+            (
+                r#""livekit-protocol (>=2.0.1,<3.0.0)","#,
+                r#""livekit-protocol (>=3.0.0,<4.0.0)","#,
+            ),
+            (
+                r#""livekit-protocol>=2.0.1", # keep in sync"#,
+                r#""livekit-protocol>=3.0.0", # keep in sync"#,
+            ),
+            (
+                r#""livekit-protocol>=2.0.1", "livekit-api>=1.0","#,
+                r#""livekit-protocol>=3.0.0", "livekit-api>=1.0","#,
+            ),
+            // Not a requirement on livekit-protocol: no change.
+            (r#""livekit-protocol","#, r#""livekit-protocol","#),
+            (
+                r#""livekit-protocol-ext>=2.0.1","#,
+                r#""livekit-protocol-ext>=2.0.1","#,
+            ),
+            (r#""livekit>=2.0.1","#, r#""livekit>=2.0.1","#),
+        ];
+        let mut failures = Vec::new();
+        for (line, expected) in rows {
+            let file = |line: &str| {
+                format!(
+                    "[project]\nname = \"livekit-api\"\nrequires-python = \">=3.9\"\ndependencies = [\n    {line}\n]\n"
+                )
+            };
+            let pinned = pyproject_pin(&file(line), "livekit-protocol", &v("3.0.0"));
+            if pinned != file(expected) {
+                failures.push(format!("{line}\n  gives {pinned}\n  want  {expected}"));
+            }
+        }
+        assert!(failures.is_empty(), "\n{}", failures.join("\n"));
+    }
+
+    // Each row is one requires-dist entry in uv.lock, and the entry after
+    // a 3.0.0 release of livekit-protocol.
+    #[test]
+    fn uv_lock_pin_requires_dist_forms() {
+        let rows = [
+            (
+                r#"{ name = "livekit-protocol", specifier = ">=2.0.1,<3.0.0" }"#,
+                r#"{ name = "livekit-protocol", specifier = ">=3.0.0,<4.0.0" }"#,
+            ),
+            (
+                r#"{ name = "livekit-protocol", editable = "livekit-protocol", specifier = "<3,>=2.0.1" }"#,
+                r#"{ name = "livekit-protocol", editable = "livekit-protocol", specifier = "<4.0.0,>=3.0.0" }"#,
+            ),
+            (
+                r#"{ name = "livekit-protocol", marker = "python_full_version >= '3.9'", specifier = ">=2.0.1" }"#,
+                r#"{ name = "livekit-protocol", marker = "python_full_version >= '3.9'", specifier = ">=3.0.0" }"#,
+            ),
+            (
+                r#"{ name = "livekit-protocol", extras = ["codecs"], specifier = "~=2.0" }"#,
+                r#"{ name = "livekit-protocol", extras = ["codecs"], specifier = "~=3.0" }"#,
+            ),
+            (
+                r#"{ name = "LiveKit_Protocol", specifier = ">=2.0.1" }"#,
+                r#"{ name = "LiveKit_Protocol", specifier = ">=3.0.0" }"#,
+            ),
+            // Not a requirement with a specifier on livekit-protocol.
+            (
+                r#"{ name = "livekit-protocol", editable = "livekit-protocol" }"#,
+                r#"{ name = "livekit-protocol", editable = "livekit-protocol" }"#,
+            ),
+            (
+                r#"{ name = "livekit-protocol-ext", specifier = ">=2.0.1" }"#,
+                r#"{ name = "livekit-protocol-ext", specifier = ">=2.0.1" }"#,
+            ),
+        ];
+        let mut failures = Vec::new();
+        for (entry, expected) in rows {
+            let lock = |entry: &str| {
+                format!(
+                    "version = 1\n\n[[package]]\nname = \"livekit-api\"\nsource = {{ editable = \"livekit-api\" }}\n\n[package.metadata]\nrequires-dist = [{entry}]\n"
+                )
+            };
+            let pinned = uv_lock_pin(&lock(entry), "livekit-protocol", &v("3.0.0")).unwrap();
+            if pinned != lock(expected) {
+                failures.push(format!("{entry}\n  gives {pinned}\n  want  {expected}"));
+            }
+        }
+        assert!(failures.is_empty(), "\n{}", failures.join("\n"));
+    }
+
+    // The package entry gets the version only where uv wrote one: uv
+    // leaves dynamic versions out of the lock.
+    #[test]
+    fn uv_lock_pin_own_version_only_where_present() {
+        let fixed = "version = 1\n\n[[package]]\nname = \"livekit-protocol\"\nversion = \"2.0.1\"\nsource = { editable = \"livekit-protocol\" }\n";
+        let dynamic = "version = 1\n\n[[package]]\nname = \"livekit-protocol\"\nsource = { editable = \"livekit-protocol\" }\n";
+        let pin = |lock: &str| uv_lock_pin(lock, "livekit-protocol", &v("3.0.0-rc.1")).unwrap();
+        assert_eq!(pin(fixed), fixed.replace("2.0.1", "3.0.0rc1"));
+        assert_eq!(pin(dynamic), dynamic);
     }
 
     #[test]
