@@ -100,15 +100,18 @@ contract VersionedFileHandler {
     -- the `require` entry; go.sum is left alone and gets the new sum once
     -- the tag exists.
 
-    -- pyproject.toml and the requires-dist entries of uv.lock:
-    -- write_dependency_version moves the same specifiers in both files,
-    -- in any order, also in the PEP 508 form with parentheses. The first
-    -- lower bound (>=, ==, ~=) becomes the version, and ~= and a ==
+    -- pyproject.toml and the requires-dist and requires-dev entries of
+    -- uv.lock: write_dependency_version moves the same specifiers in both
+    -- files, in any order, also in the PEP 508 form with parentheses. The
+    -- first lower bound (>=, ==, ~=) becomes the version, and ~= and a ==
     -- wildcard keep their number of release parts (==2.* becomes ==3.*
-    -- for 3.0.0). An upper bound
-    -- (<, <=) that excludes the version moves to the next version at the
-    -- level of the old bound: <3.0.0 for 3.0.0 becomes <4.0.0, <2.5 for
-    -- 2.5.0 becomes <2.6.0. Other bounds stay.
+    -- for 3.0.0). An upper bound (<, <=) that excludes the version moves
+    -- to the next version at the level of the old bound: <3.0.0 for 3.0.0
+    -- becomes <4.0.0, <2.5 for 2.5.0 becomes <2.6.0. Other bounds stay.
+    -- A release that moves uv.lock also moves the pin in the
+    -- pyproject.toml of every project uv.lock lists (an editable or
+    -- virtual source), also one that is no package, so that both files
+    -- agree.
 }
 
 ------------------------------------------------------------

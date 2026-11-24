@@ -540,9 +540,9 @@ fn compatible(old: &str, new: &str) -> String {
 
 /// Spec: write_dependency_version for uv.lock, which knope does not know.
 /// The `[[package]]` entry of `dep` gets `version`, unless uv left it out
-/// for a dynamic version, and every `requires-dist` specifier on `dep`
-/// moves as the pyproject pin does. Without that, `uv sync --locked`
-/// rejects the lock.
+/// for a dynamic version, and every `requires-dist` and `requires-dev`
+/// specifier on `dep` moves as the pyproject pin does. Without that,
+/// `uv sync --locked` rejects the lock.
 fn uv_lock_pin(content: &str, dep: &str, version: &Version) -> Result<String> {
     let wanted = normalise_py(dep);
     let new = to_pep440(version);
@@ -558,14 +558,26 @@ fn uv_lock_pin(content: &str, dep: &str, version: &Version) -> Result<String> {
         if normalise_py(name) == wanted && entry.contains_key("version") {
             entry["version"] = toml_edit::value(new.as_str());
         }
-        let Some(requires) = entry
+        let Some(metadata) = entry
             .get_mut("metadata")
-            .and_then(|m| m.get_mut("requires-dist"))
-            .and_then(|r| r.as_array_mut())
+            .and_then(|m| m.as_table_like_mut())
         else {
             continue;
         };
-        for req in requires.iter_mut() {
+        let lists: Vec<&mut toml_edit::Array> = metadata
+            .iter_mut()
+            .flat_map(|(key, item)| match key.get() {
+                "requires-dist" => item.as_array_mut().into_iter().collect(),
+                "requires-dev" => item
+                    .as_table_like_mut()
+                    .into_iter()
+                    .flat_map(|groups| groups.iter_mut())
+                    .filter_map(|(_, group)| group.as_array_mut())
+                    .collect(),
+                _ => Vec::new(),
+            })
+            .collect();
+        for req in lists.into_iter().flat_map(|list| list.iter_mut()) {
             let Some(table) = req.as_inline_table_mut() else {
                 continue;
             };
@@ -584,6 +596,25 @@ fn uv_lock_pin(content: &str, dep: &str, version: &Version) -> Result<String> {
         }
     }
     Ok(doc.to_string())
+}
+
+/// The directory of every project in a uv workspace, from its uv.lock:
+/// the `editable` or `virtual` source of each `[[package]]`, relative to
+/// the lock. Their pyproject.toml files hold the pins uv.lock records.
+pub fn uv_lock_projects(content: &str) -> Vec<String> {
+    let Ok(doc) = content.parse::<toml::Table>() else {
+        return Vec::new();
+    };
+    let Some(packages) = doc.get("package").and_then(|p| p.as_array()) else {
+        return Vec::new();
+    };
+    packages
+        .iter()
+        .filter_map(|p| p.get("source"))
+        .filter_map(|s| s.get("editable").or_else(|| s.get("virtual")))
+        .filter_map(|path| path.as_str())
+        .map(String::from)
+        .collect()
 }
 
 /// Spec: internal_dependencies. Which of `candidates` (the other package
@@ -1163,23 +1194,35 @@ dev = ["livekit-test-utils~=0.3"]
             ">2.0.0",
         ];
         let releases = ["2.0.2", "2.5.0", "3.0.0", "3.0.0-rc.1"];
+        // A runtime requirement is in requires-dist, a dev group in
+        // requires-dev.
+        let sections = [
+            (
+                "[project]\ndependencies",
+                "[package.metadata]\nrequires-dist",
+            ),
+            (
+                "[dependency-groups]\ndev",
+                "[package.metadata.requires-dev]\ndev",
+            ),
+        ];
         let mut failures = Vec::new();
         for spec in specs {
             for release in releases {
-                let pyproject = format!(
-                    "[project]\nname = \"livekit-api\"\ndependencies = [\"livekit-protocol{spec}\"]\n"
-                );
-                let lock = format!(
-                    "version = 1\n\n[[package]]\nname = \"livekit-api\"\nsource = {{ editable = \"livekit-api\" }}\n\n[package.metadata]\nrequires-dist = [{{ name = \"livekit-protocol\", specifier = \"{spec}\" }}]\n"
-                );
-                let moved = move_specifier(spec, &v(release));
-                let py = pyproject_pin(&pyproject, "livekit-protocol", &v(release));
-                let uv = uv_lock_pin(&lock, "livekit-protocol", &v(release)).unwrap();
-                if !py.contains(&format!("\"livekit-protocol{moved}\"")) {
-                    failures.push(format!("pyproject {spec} for {release}:\n{py}"));
-                }
-                if !uv.contains(&format!("specifier = \"{moved}\"")) {
-                    failures.push(format!("uv.lock {spec} for {release}:\n{uv}"));
+                for (py_section, lock_section) in sections {
+                    let pyproject = format!("{py_section} = [\"livekit-protocol{spec}\"]\n");
+                    let lock = format!(
+                        "version = 1\n\n[[package]]\nname = \"livekit-api\"\nsource = {{ editable = \"livekit-api\" }}\n\n{lock_section} = [{{ name = \"livekit-protocol\", specifier = \"{spec}\" }}]\n"
+                    );
+                    let moved = move_specifier(spec, &v(release));
+                    let py = pyproject_pin(&pyproject, "livekit-protocol", &v(release));
+                    let uv = uv_lock_pin(&lock, "livekit-protocol", &v(release)).unwrap();
+                    if !py.contains(&format!("\"livekit-protocol{moved}\"")) {
+                        failures.push(format!("pyproject {spec} for {release}:\n{py}"));
+                    }
+                    if !uv.contains(&format!("specifier = \"{moved}\"")) {
+                        failures.push(format!("uv.lock {spec} for {release}:\n{uv}"));
+                    }
                 }
             }
         }
@@ -1302,6 +1345,52 @@ dev = ["livekit-test-utils~=0.3"]
             }
         }
         assert!(failures.is_empty(), "\n{}", failures.join("\n"));
+    }
+
+    // Every dev group moves, and other packages in it stay.
+    #[test]
+    fn uv_lock_pin_requires_dev_groups() {
+        let lock = r#"version = 1
+
+[[package]]
+name = "python-sdks"
+source = { virtual = "." }
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "livekit-protocol", specifier = ">=2.0.1,<3.0.0" },
+    { name = "pytest", specifier = ">=8" },
+]
+test = [{ name = "livekit-protocol", marker = "python_full_version >= '3.11'", specifier = "~=2.0" }]
+"#;
+        let pinned = uv_lock_pin(lock, "livekit-protocol", &v("3.0.0")).unwrap();
+        let expected = lock
+            .replace(">=2.0.1,<3.0.0", ">=3.0.0,<4.0.0")
+            .replace("~=2.0", "~=3.0");
+        assert_eq!(pinned, expected);
+    }
+
+    // Every project of the workspace, by its source in uv.lock. A package
+    // from a registry has none of its own.
+    #[test]
+    fn uv_lock_projects_are_the_editable_and_virtual_sources() {
+        let lock = r#"version = 1
+
+[[package]]
+name = "aiohttp"
+version = "3.9.0"
+source = { registry = "https://pypi.org/simple" }
+
+[[package]]
+name = "livekit-api"
+source = { editable = "livekit-api" }
+
+[[package]]
+name = "python-sdks"
+source = { virtual = "." }
+"#;
+        assert_eq!(uv_lock_projects(lock), vec!["livekit-api", "."]);
+        assert!(uv_lock_projects("not toml [").is_empty());
     }
 
     // The package entry gets the version only where uv wrote one: uv

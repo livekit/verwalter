@@ -122,6 +122,18 @@ pub fn apply(
                 rewrite(file, None, Some(&member.name))?;
             }
         }
+        // uv.lock moves the pin of every project in the workspace, also a
+        // dev group or a project that is no package here. Their
+        // pyproject.toml must move with it, or `uv sync --locked` fails.
+        if file.rsplit('/').next() == Some("uv.lock")
+            && let Ok(lock) = fs::read_to_string(root.join(file))
+        {
+            let dir = file.rsplit_once('/').map_or(".", |(dir, _)| dir);
+            for project in handler::uv_lock_projects(&lock) {
+                let pyproject = crate::config::under(dir, &format!("{project}/pyproject.toml"));
+                rewrite(&pyproject, None, Some(key))?;
+            }
+        }
     }
     let dependents = packages.iter().filter(|p| {
         p.dependencies.iter().any(|d| d == name) && plan.iter().any(|r| r.package == p.name)
@@ -534,9 +546,15 @@ versioning.changelog = "CHANGELOG.md"
             ("livekit-protocol/livekit/protocol/version.py", "__version__ = \"2.0.1\"\n".into()),
             ("livekit-api/pyproject.toml", pyproject("livekit-api", "\"livekit-protocol>=2.0.1,<3.0.0\"")),
             ("livekit-api/livekit/api/version.py", "__version__ = \"1.0.0\"\n".into()),
+            // The workspace root is no package, but its dev group pins
+            // livekit-protocol in pyproject.toml and in uv.lock.
+            (
+                "pyproject.toml",
+                "[project]\nname = \"python-sdks\"\nversion = \"0.1.0\"\n\n[dependency-groups]\ndev = [\"livekit-protocol>=2.0.1,<3.0.0\"]\n".into(),
+            ),
             (
                 "uv.lock",
-                "version = 1\n\n[[package]]\nname = \"livekit-api\"\nsource = { editable = \"livekit-api\" }\n\n[package.metadata]\nrequires-dist = [{ name = \"livekit-protocol\", editable = \"livekit-protocol\", specifier = \">=2.0.1,<3.0.0\" }]\n\n[[package]]\nname = \"livekit-protocol\"\nsource = { editable = \"livekit-protocol\" }\n".into(),
+                "version = 1\n\n[[package]]\nname = \"livekit-api\"\nsource = { editable = \"livekit-api\" }\n\n[package.metadata]\nrequires-dist = [{ name = \"livekit-protocol\", editable = \"livekit-protocol\", specifier = \">=2.0.1,<3.0.0\" }]\n\n[[package]]\nname = \"livekit-protocol\"\nsource = { editable = \"livekit-protocol\" }\n\n[[package]]\nname = \"python-sdks\"\nversion = \"0.1.0\"\nsource = { virtual = \".\" }\n\n[package.metadata.requires-dev]\ndev = [{ name = \"livekit-protocol\", editable = \"livekit-protocol\", specifier = \">=2.0.1,<3.0.0\" }]\n".into(),
             ),
         ];
         for (rel, content) in files {
@@ -563,8 +581,12 @@ versioning.changelog = "CHANGELOG.md"
         }
         let read = |rel: &str| fs::read_to_string(root.join(rel)).unwrap();
         assert!(read("livekit-api/pyproject.toml").contains("\"livekit-protocol>=3.0.0,<4.0.0\""));
+        assert!(read("pyproject.toml").contains("\"livekit-protocol>=3.0.0,<4.0.0\""));
         let lock = read("uv.lock");
-        assert!(lock.contains("specifier = \">=3.0.0,<4.0.0\""), "{lock}");
+        assert!(
+            !lock.contains("<3.0.0"),
+            "requires-dist and requires-dev move: {lock}"
+        );
         assert!(
             !lock.contains("version = \"3.0.0\""),
             "uv leaves dynamic versions out"
