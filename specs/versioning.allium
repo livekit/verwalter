@@ -99,6 +99,14 @@ contract VersionedFileHandler {
     -- for dependents is its module path. write_dependency_version moves
     -- the `require` entry; go.sum is left alone and gets the new sum once
     -- the tag exists.
+
+    -- pyproject.toml and the requires-dist entries of uv.lock:
+    -- write_dependency_version moves the same specifiers in both files,
+    -- in any order. The first lower bound (>=, ==, ~=) becomes the
+    -- version, and ~= keeps its number of release parts. An upper bound
+    -- (<, <=) that excludes the version moves to the next version at the
+    -- level of the old bound: <3.0.0 for 3.0.0 becomes <4.0.0, <2.5 for
+    -- 2.5.0 becomes <2.6.0. Other bounds stay.
 }
 
 ------------------------------------------------------------
@@ -140,6 +148,10 @@ entity Package {
     -- The in-repo packages this one depends on: the ones its versioned
     -- manifests name, plus the configured `dependencies`, for a package
     -- that links another at build time without naming it in a manifest.
+    -- The pyproject.toml in the package path counts as a manifest when
+    -- its version is dynamic and versioning.files leaves it out: its
+    -- `[project]` dependencies and optional-dependencies name packages,
+    -- its `[dependency-groups]` do not.
     dependencies: Set<Package>
     -- Template for the tag name. Default: config.release.tag, else
     -- "v{version}" in a single-package repo, "{package}-v{version}" in a

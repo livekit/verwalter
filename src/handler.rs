@@ -439,11 +439,17 @@ fn requirement_name(req: &str) -> &str {
 }
 
 /// Spec: write_dependency_version for pyproject.toml. Moves every
-/// requirement on `dep` to `version` (move_specifier). Line-based, so
-/// formatting, comments and markers are preserved.
+/// requirement on `dep` to `version` (move_specifier). The whole
+/// specifier list goes to move_specifier, in any order, as uv_lock_pin
+/// does, so both files stay in sync. Line-based, so formatting, comments
+/// and markers are preserved.
 fn pyproject_pin(content: &str, dep: &str, version: &Version) -> String {
     let wanted = normalise_py(dep);
-    let re = regex::Regex::new(r#"(["'])\s*([A-Za-z0-9][A-Za-z0-9._-]*)(\[[^\]]*\])?\s*((?:>=|==|~=)\s*[0-9][0-9A-Za-z.+!*-]*(?:\s*,\s*(?:[<>!=~]=|<|>)\s*[0-9][0-9A-Za-z.+!*-]*)*)"#).expect("static regex");
+    let clause = r"(?:===|[<>!=~]=|<|>)\s*[0-9][0-9A-Za-z.+!*-]*";
+    let re = regex::Regex::new(&format!(
+        r#"(["'])\s*([A-Za-z0-9][A-Za-z0-9._-]*)(\[[^\]]*\])?\s*({clause}(?:\s*,\s*{clause})*)"#
+    ))
+    .expect("static regex");
     re.replace_all(content, |caps: &regex::Captures| {
         let whole = caps.get(0).expect("match");
         if normalise_py(&caps[2]) == wanted {
@@ -461,28 +467,34 @@ fn pyproject_pin(content: &str, dep: &str, version: &Version) -> String {
 }
 
 /// A PEP 440 specifier list on an in-repo dependency, moved to `version`:
-/// the first lower bound (`>=`, `==`, `~=`) becomes `version`, and a `<`
-/// bound that would exclude it moves to the next breaking version, as a
-/// Cargo caret requirement does. `>=2.0.1,<3.0.0` for 3.0.0 becomes
-/// `>=3.0.0,<4.0.0`. Everything else stays.
+/// the first lower bound (`>=`, `==`, `~=`) becomes `version`, and `~=`
+/// keeps its number of release parts. An upper bound (`<`, `<=`) that
+/// would exclude `version` moves to the next version at the level of the
+/// old bound: `>=2.0.1,<3.0.0` for 3.0.0 becomes `>=3.0.0,<4.0.0`, and
+/// `<2.5` for 2.5.0 becomes `<2.6.0`. Everything else stays.
 fn move_specifier(spec: &str, version: &Version) -> String {
     let new = to_pep440(version);
-    let [major, minor, _] = release(&version.stable_component().to_string());
-    let ceiling = if major > 0 {
-        format!("{}.0.0", major + 1)
-    } else {
-        format!("0.{}.0", minor + 1)
-    };
-    let re = regex::Regex::new(r"(>=|==|~=|<)(\s*)([0-9][0-9A-Za-z.+!*-]*)").expect("static regex");
+    let target = release(&new);
+    let re =
+        regex::Regex::new(r"(>=|==|~=|<=|<)(\s*)([0-9][0-9A-Za-z.+!*-]*)").expect("static regex");
     let mut floor = false;
-    re.replace_all(spec, |c: &regex::Captures| match &c[1] {
-        // PEP 440: `<3.0.0` also excludes 3.0.0rc1, so compare releases.
-        "<" if release(&new) >= release(&c[3]) => format!("<{}{ceiling}", &c[2]),
-        "<" => c[0].to_string(),
-        _ if floor => c[0].to_string(),
-        op => {
-            floor = true;
-            format!("{op}{}{new}", &c[2])
+    re.replace_all(spec, |c: &regex::Captures| {
+        let (op, space, old) = (&c[1], &c[2], &c[3]);
+        match op {
+            // PEP 440: `<3.0.0` also excludes 3.0.0rc1, so compare releases.
+            "<" if target >= release(old) => format!("<{space}{}", ceiling(old, target)),
+            "<=" if target > release(old) => format!("<{space}{}", ceiling(old, target)),
+            "<" | "<=" => c[0].to_string(),
+            _ if floor => c[0].to_string(),
+            _ => {
+                floor = true;
+                let new = if op == "~=" {
+                    compatible(old, &new)
+                } else {
+                    new.clone()
+                };
+                format!("{op}{space}{new}")
+            }
         }
     })
     .into_owned()
@@ -496,6 +508,28 @@ fn release(v: &str) -> [u64; 3] {
         *slot = digits.parse().unwrap_or(0);
     }
     out
+}
+
+/// The next version after `target` at the level of the upper bound
+/// `bound`, given by its last non-zero part: `3.0.0` is a major bound,
+/// `2.5` a minor one, `0.0.3` a patch one.
+fn ceiling(bound: &str, [major, minor, patch]: [u64; 3]) -> String {
+    match release(bound).iter().rposition(|&n| n > 0) {
+        Some(2) => format!("{major}.{minor}.{}", patch + 1),
+        Some(1) => format!("{major}.{}.0", minor + 1),
+        _ => format!("{}.0.0", major + 1),
+    }
+}
+
+/// `new` cut to the number of release parts in `old`, pre-release kept:
+/// `~=2.0` for 3.0.0 is `~=3.0`, so it still allows 3.1.
+fn compatible(old: &str, new: &str) -> String {
+    let end = new
+        .find(|c: char| !c.is_ascii_digit() && c != '.')
+        .unwrap_or(new.len());
+    let (numbers, pre) = new.split_at(end);
+    let parts: Vec<&str> = numbers.split('.').take(old.split('.').count()).collect();
+    format!("{}{pre}", parts.join("."))
 }
 
 /// Spec: write_dependency_version for uv.lock, which knope does not know.
@@ -921,7 +955,7 @@ dev = ["livekit-test-utils~=0.3"]
             &v("0.4.0"),
         )
         .unwrap();
-        assert!(tilde.contains(r#""livekit-test-utils~=0.4.0""#));
+        assert!(tilde.contains(r#""livekit-test-utils~=0.4""#), "{tilde}");
 
         let none = write_version(
             "livekit-api/pyproject.toml",
@@ -942,6 +976,39 @@ dev = ["livekit-test-utils~=0.3"]
         assert_eq!(m(">=2.0.1, <3", "3.0.0-rc.1"), ">=3.0.0rc1, <4.0.0");
         assert_eq!(m(">=0.4.0,<0.5.0", "0.5.0"), ">=0.5.0,<0.6.0");
         assert_eq!(m(">=1.0,!=1.5.0", "2.1.0"), ">=2.1.0,!=1.5.0");
+        // Any order, and an upper bound alone.
+        assert_eq!(m("<3, >=2.0.1", "3.0.0"), "<4.0.0, >=3.0.0");
+        assert_eq!(m("<3.0.0", "3.0.0"), "<4.0.0");
+        // `<=` moves too, when it excludes the release.
+        assert_eq!(m(">=2.0.1,<=2.9", "3.0.0"), ">=3.0.0,<3.1.0");
+        assert_eq!(m(">=2.0.1,<=2.9", "2.5.0"), ">=2.5.0,<=2.9");
+        // A bound keeps its level: a narrow cap stays narrow.
+        assert_eq!(m(">=2.0,<2.5", "2.5.0"), ">=2.5.0,<2.6.0");
+        assert_eq!(m("<0.0.3", "0.0.3"), "<0.0.4");
+        // `~=` keeps its number of parts, so `~=3.0` still allows 3.1.
+        assert_eq!(m("~=2.0", "3.0.0"), "~=3.0");
+        assert_eq!(m("~=2.0", "3.0.0-rc.1"), "~=3.0rc1");
+        assert_eq!(m("~=2.0.1", "2.1.0"), "~=2.1.0");
+    }
+
+    #[test]
+    fn pyproject_and_uv_lock_move_the_same_specifiers() {
+        let lock = |spec: &str| {
+            format!(
+                "version = 1\n\n[[package]]\nname = \"livekit-api\"\nsource = {{ editable = \"livekit-api\" }}\n\n[package.metadata]\nrequires-dist = [{{ name = \"livekit-protocol\", specifier = \"{spec}\" }}]\n"
+            )
+        };
+        for spec in ["<3.0.0", "<3,>=2.0.1", ">=2.0.1,<=2.9"] {
+            let pyproject = format!(
+                "[project]\nname = \"livekit-api\"\ndependencies = [\"livekit-protocol{spec}\"]\n"
+            );
+            let py = pyproject_pin(&pyproject, "livekit-protocol", &v("3.0.0"));
+            let uv = uv_lock_pin(&lock(spec), "livekit-protocol", &v("3.0.0")).unwrap();
+            let moved = move_specifier(spec, &v("3.0.0"));
+            assert_ne!(moved, spec);
+            assert!(py.contains(&format!("\"livekit-protocol{moved}\"")), "{py}");
+            assert!(uv.contains(&format!("specifier = \"{moved}\"")), "{uv}");
+        }
     }
 
     #[test]

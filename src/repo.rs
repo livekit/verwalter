@@ -12,18 +12,22 @@ use crate::{Version, changeset::Changeset, config::Config, handler, plan::Packag
 
 /// The package's own `pyproject.toml` when its version is dynamic and
 /// versioning.files leaves it out: it carries no version, but its
-/// requirements still make dependencies and move as pins.
+/// requirements still make dependencies and move as pins. A missing file
+/// is no error, an unreadable one is.
 pub fn dynamic_pyproject(
     root: &Path,
     package: &crate::config::Package,
-) -> Option<(String, String)> {
+) -> Result<Option<(String, String)>> {
     let file = crate::config::under(&package.path, "pyproject.toml");
     if package.versioning.files.iter().any(|f| f.path() == file) {
-        return None;
+        return Ok(None);
     }
-    let content = fs::read_to_string(root.join(&file)).ok()?;
-    handler::pyproject_dynamic_version(&content)?;
-    Some((file, content))
+    let content = match fs::read_to_string(root.join(&file)) {
+        Ok(content) => content,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(e).with_context(|| format!("read {file}")),
+    };
+    Ok(handler::pyproject_dynamic_version(&content).map(|_| (file, content)))
 }
 
 pub const CONFIG_FILE: &str = "verwalter.toml";
@@ -114,7 +118,7 @@ impl Repo {
                 }
                 add_dependencies(file, &content)?;
             }
-            if let Some((file, content)) = dynamic_pyproject(root, package) {
+            if let Some((file, content)) = dynamic_pyproject(root, package)? {
                 add_dependencies(&file, &content)?;
             }
             // A go.mod before its first release with the tool has no version

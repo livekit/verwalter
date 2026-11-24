@@ -89,7 +89,7 @@ pub fn apply(
         .filter(|f| f.regex().is_none())
         .filter_map(|f| f.path().rsplit('/').next())
         .collect();
-    if crate::repo::dynamic_pyproject(root, package).is_some() {
+    if crate::repo::dynamic_pyproject(root, package)?.is_some() {
         manifests.push("pyproject.toml");
     }
     let locks = ROOT_LOCKS
@@ -136,7 +136,7 @@ pub fn apply(
             {
                 rewrite(file.path(), file.regex(), Some(key))?;
             }
-            if let Some((file, _)) = crate::repo::dynamic_pyproject(root, d) {
+            if let Some((file, _)) = crate::repo::dynamic_pyproject(root, d)? {
                 rewrite(&file, None, Some(key))?;
             }
         }
@@ -518,13 +518,19 @@ versioning.changelog = "CHANGELOG.md"
         let root =
             std::env::temp_dir().join(format!("verwalter-{}-dynamic-py", std::process::id()));
         let _ = fs::remove_dir_all(&root);
+        let _cleanup = Repo(root.clone());
         let pyproject = |name: &str, deps: &str| {
             format!(
                 "[project]\nname = \"{name}\"\ndynamic = [\"version\"]\ndependencies = [{deps}]\n"
             )
         };
         let files = [
-            ("livekit-protocol/pyproject.toml", pyproject("livekit-protocol", "")),
+            // A dev group on livekit-api makes no dependency, so no cycle.
+            (
+                "livekit-protocol/pyproject.toml",
+                pyproject("livekit-protocol", "")
+                    + "\n[dependency-groups]\ndev = [\"livekit-api>=1.0.0\"]\n",
+            ),
             ("livekit-protocol/livekit/protocol/version.py", "__version__ = \"2.0.1\"\n".into()),
             ("livekit-api/pyproject.toml", pyproject("livekit-api", "\"livekit-protocol>=2.0.1,<3.0.0\"")),
             ("livekit-api/livekit/api/version.py", "__version__ = \"1.0.0\"\n".into()),
@@ -545,6 +551,8 @@ versioning.changelog = "CHANGELOG.md"
         let (state, _) = crate::repo::Repo::load_packages(&root, &config).unwrap();
         let api = state.iter().find(|p| p.name == "livekit-api").unwrap();
         assert_eq!(api.dependencies, vec!["livekit-protocol"]);
+        let protocol = state.iter().find(|p| p.name == "livekit-protocol").unwrap();
+        assert!(protocol.dependencies.is_empty());
 
         let changesets =
             [Changeset::parse("a.md", "---\nlivekit-protocol: major\n---\nx\n").unwrap()];
