@@ -481,9 +481,7 @@ fn move_specifier(spec: &str, version: &Version) -> String {
     re.replace_all(spec, |c: &regex::Captures| {
         let (op, space, old) = (&c[1], &c[2], &c[3]);
         match op {
-            // PEP 440: `<3.0.0` also excludes 3.0.0rc1, so compare releases.
-            "<" if target >= release(old) => format!("<{space}{}", ceiling(old, target)),
-            "<=" if target > release(old) => format!("<{space}{}", ceiling(old, target)),
+            "<" | "<=" if !admits(&c[0], &new) => format!("<{space}{}", ceiling(old, target)),
             "<" | "<=" => c[0].to_string(),
             _ if floor => c[0].to_string(),
             _ => {
@@ -516,14 +514,32 @@ fn release(v: &str) -> [u64; 3] {
     out
 }
 
+/// Whether the specifier `clause` admits `version`, by pep440_rs. It knows
+/// the PEP 440 rules for pre-releases: `<3.0.0` excludes 3.0.0rc1, and
+/// `<=3.0.0rc1` excludes 3.0.0. A clause that does not parse stays.
+fn admits(clause: &str, version: &str) -> bool {
+    use std::str::FromStr;
+    match (
+        pep440_rs::VersionSpecifier::from_str(clause),
+        pep440_rs::Version::from_str(version),
+    ) {
+        (Ok(clause), Ok(version)) => clause.contains(&version),
+        _ => true,
+    }
+}
+
 /// The next version after `target` at the level of the upper bound
-/// `bound`, given by its last non-zero part: `3.0.0` is a major bound,
-/// `2.5` a minor one, `0.0.3` a patch one.
+/// `bound`, given by its last non-zero release part: `3.0.0` is a major
+/// bound, `2.5` a minor one, `0.0.3` and `2.0.0.1` patch ones.
 fn ceiling(bound: &str, [major, minor, patch]: [u64; 3]) -> String {
-    match release(bound).iter().rposition(|&n| n > 0) {
-        Some(2) => format!("{major}.{minor}.{}", patch + 1),
+    use std::str::FromStr;
+    let parts = pep440_rs::Version::from_str(bound)
+        .map(|v| v.release().to_vec())
+        .unwrap_or_default();
+    match parts.iter().rposition(|&n| n > 0) {
+        None | Some(0) => format!("{}.0.0", major + 1),
         Some(1) => format!("{major}.{}.0", minor + 1),
-        _ => format!("{}.0.0", major + 1),
+        Some(_) => format!("{major}.{minor}.{}", patch + 1),
     }
 }
 
@@ -1037,6 +1053,16 @@ dev = ["livekit-test-utils~=0.3"]
             (">=2.0.1,<3.0.0", "3.0.0-rc.1", ">=3.0.0rc1,<4.0.0"),
             (">=2.0.1,<3.0.0", "3.0.0-beta.2", ">=3.0.0b2,<4.0.0"),
             (">=2.0.1,<=3.0.0", "3.0.0-rc.1", ">=3.0.0rc1,<=3.0.0"),
+            (">=2.0.1,<=3.0.0rc1", "3.0.0", ">=3.0.0,<4.0.0"),
+            (">=2.0.1,<3.0.0rc2", "3.0.0-rc.2", ">=3.0.0rc2,<4.0.0"),
+            // uv, and so pep440_rs, read `<3.0.0rc2` as excluding every
+            // 3.0.0 pre-release, 3.0.0rc1 too.
+            (">=2.0.1,<3.0.0rc2", "3.0.0-rc.1", ">=3.0.0rc1,<4.0.0"),
+            // More than three release parts, and post-releases.
+            (">=2.0.1,<3.0.0.1", "3.0.0", ">=3.0.0,<3.0.0.1"),
+            (">=2.0.1,<3.0.0.post1", "3.0.0", ">=3.0.0,<3.0.0.post1"),
+            (">=2.0.1,<2.0.0.1", "2.0.2", ">=2.0.2,<2.0.3"),
+            (">=2.0.1,<=2.0.1.post1", "2.0.2", ">=2.0.2,<2.0.3"),
             // Any order and spacing.
             ("<3, >=2.0.1", "3.0.0", "<4.0.0, >=3.0.0"),
             ("<3 , >= 2.0.1", "3.0.0", "<4.0.0 , >= 3.0.0"),
