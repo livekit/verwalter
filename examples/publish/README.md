@@ -41,6 +41,27 @@ stops early with a clear message:
 publish.command = "[ \"$VERWALTER_FIRST_RELEASE\" != true ] || { echo 'first release: publish by hand' >&2; exit 1; }; cargo publish"
 ```
 
+## Dry run on the release PR
+
+A registry can reject a version that builds and passes the tests.
+pub.dev treats every warning as an error, for example. Turn on the dry
+run, and `verwalter check` tries each publish command on the release PR,
+before the version reaches the base branch:
+
+```toml
+[check]
+publish_dry_run = true                                # built-in for crates.io, npm and pub.dev
+
+[packages.livekit-rtc]
+check.publish_dry_run = "uv build && uvx twine check dist/*"   # PyPI has no built-in
+```
+
+One cargo run covers every crate of the release, so a crate can depend
+on a version that is not on crates.io yet. A dry run sees the same
+placeholders and variables as the publish command, except
+`VERWALTER_FIRST_RELEASE`. The table of built-in dry runs is in
+[configuration.md](../../docs/configuration.md).
+
 ## Workspaces
 
 If the ecosystem's tool walks the workspace itself, let it. `pnpm -r publish`

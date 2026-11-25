@@ -25,7 +25,7 @@ This file holds what is specific to this repository.
 
 | File | Starts when | Does |
 |---|---|---|
-| `changeset-check.yml` | A PR is opened or updated | Fails a PR that changes a package without a changeset. |
+| `changeset-check.yml` | A PR is opened or updated | Fails a PR that changes a package without a changeset. Fails the release PR when a publish dry run fails. |
 | `release-pr.yml` | A push to `main` | Keeps the release PR `release/main` current. |
 | `release.yml` | The release PR merges | Tags, creates the GitHub releases, publishes. |
 | `<other>.yml` | <called by `release.yml`, or run by hand> | <builds the assets, publishes to a second registry> |
