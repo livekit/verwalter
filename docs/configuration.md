@@ -46,7 +46,7 @@ files = ["Cargo.toml"]           # default for every package; relative to its pa
 changelog = "CHANGELOG.md"       # default; relative to the package's path. `false` keeps no changelog
 fixed = [["livekit-ffi", "livekit-ffi-node"]]  # groups that release at one shared version
 dependent_bump_level = "patch"   # default
-prerelease_label = "rc"          # 1.6.0-rc.1, written as 1.6.0rc1 in pyproject.toml
+prerelease_label = "rc"          # 1.6.0-rc.1, written as 1.6.0rc1 in pyproject.toml and .py files
 
 [release]                        # the release PR, the tag and the GitHub release
 branch_prefix = "release/"       # default
