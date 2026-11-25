@@ -125,6 +125,38 @@ Its exit code differs between npm versions, so the output is compared. `pnpm pub
 
 ## PyPI
 
+A PyPI version can have many files, for example one wheel per platform
+and an sdist. The built-in check asks `https://pypi.org/pypi/{name}/{version}/json`,
+which answers 200 after the first file. So a publish that stops after two
+of seven files looks complete, and a re-run skips the version.
+
+Check for the sdist instead. twine uploads the wheels first and the sdist
+last, and stops at the first error, so the sdist means that every file is
+there:
+
+```toml
+[packages.livekit]
+publish.registry = "pypi"
+publish.exists_url = "https://files.pythonhosted.org/packages/source/l/livekit/livekit-{version}.tar.gz"
+```
+
+`{version}` is the PEP 440 form on PyPI: `1.6.0rc1` for `1.6.0-rc.1`.
+The sdist name follows the build backend: `livekit_api-{version}.tar.gz`
+for `livekit-api` with a current setuptools or hatchling. A re-run after a
+half upload finds no sdist and runs the command again. The built-in
+command, `python -m twine upload --skip-existing dist/*`, then uploads
+only the missing files.
+
+The built-in command signs no attestations (PEP 740).
+`pypa/gh-action-pypi-publish` signs them by default. To keep them, sign
+in the command:
+
+```toml
+publish.command = "uvx pypi-attestations sign dist/* && uvx twine upload --attestations --skip-existing dist/*"
+```
+
+For a check outside `verwalter publish`, in a workflow step of its own:
+
 ```yaml
 - name: Publish ${{ matrix.release.package }} ${{ matrix.release.version }}
   env:
@@ -148,7 +180,7 @@ Its exit code differs between npm versions, so the output is compared. `pnpm pub
 same check inside twine. It is fine for a single package. A package with several
 wheels can fail halfway through the upload. The preflight above then skips
 the whole version, but `skip-existing` uploads the missing files. Prefer
-`skip-existing` there. For a pre-release, the PyPI URL
+`skip-existing` there, or the sdist check above. For a pre-release, the PyPI URL
 takes the PEP 440 spelling (`1.6.0rc1`). That is what the version file
 carries. The `version` in the handoff is the semver spelling. Convert with
 `VER=$(echo "$VER" | sed -E 's/-rc\.([0-9]+)$/rc\1/')`.

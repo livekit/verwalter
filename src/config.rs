@@ -132,6 +132,10 @@ pub struct PackageRelease {
 #[serde(default, deny_unknown_fields)]
 pub struct PackagePublish {
     pub registry: Option<crate::registry::Registry>,
+    /// A URL with `{name}` and `{version}` that answers 200 when the
+    /// version exists and 404 when it does not. Replaces the built-in
+    /// check of the registry, except goproxy. `{version}` is PEP 440 on
+    /// PyPI (`1.6.0rc1`), semver elsewhere.
     pub exists_url: Option<String>,
     /// Run in the package's `path`. Default: `[publish].command` when on
     /// the default registry, else the built-in command for the registry.
@@ -312,7 +316,8 @@ pub struct Publish {
     pub jobs: usize,
     pub registry: crate::registry::Registry,
     /// For `registry = "custom"`: a URL with `{name}` and `{version}` that
-    /// answers 200 when the version exists and 404 when it does not.
+    /// answers 200 when the version exists and 404 when it does not. A
+    /// package on another registry sets its own `publish.exists_url`.
     pub exists_url: Option<String>,
     /// Shell command, run in the package's path. Applies to packages on
     /// the default registry; others take the built-in default for theirs.
@@ -725,7 +730,8 @@ impl Config {
                 format!("pnpm publish --provenance --access public --no-git-checks{tag}")
             }
             Registry::Npm => format!("npm publish --provenance --access public{tag}"),
-            Registry::Pypi => "python -m twine upload dist/*".into(),
+            // Safe to run twice: a re-run after a half upload sends only the missing files.
+            Registry::Pypi => "python -m twine upload --skip-existing dist/*".into(),
             Registry::Pubdev => "dart pub publish --force".into(),
             Registry::None | Registry::Custom | Registry::Goproxy => return None,
         })
