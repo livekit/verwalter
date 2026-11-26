@@ -71,7 +71,7 @@ const WORKSPACE: &str = "[workspace]";
 
 /// pnpm finds its workspace by walking up from the package directory to
 /// the nearest `pnpm-workspace.yaml`, which need not be at the repo root.
-fn in_pnpm_workspace(root: &std::path::Path, path: &str) -> bool {
+pub(crate) fn in_pnpm_workspace(root: &std::path::Path, path: &str) -> bool {
     let mut dir = root.join(path);
     loop {
         if dir.join("pnpm-workspace.yaml").exists() {
@@ -271,38 +271,72 @@ fn not_shown_by_registry(
 }
 
 fn run_command(repo: &Repo, name: &str, c: &Candidate, first: bool) -> (bool, String, String) {
-    let command = c
-        .command
-        .replace("{package}", name)
-        .replace("{version}", &c.version.to_string())
-        .replace("{tag}", &c.tag)
-        .replace("{npm_tag}", &c.dist_tag);
-    let registry = format!(
-        "{:?}",
-        if name == WORKSPACE {
-            repo.config.publish.registry
-        } else {
-            repo.config.registry_of(name)
-        }
+    let registry = if name == WORKSPACE {
+        repo.config.publish.registry
+    } else {
+        repo.config.registry_of(name)
+    };
+    run_in(
+        &repo.root,
+        &c.path,
+        &c.command,
+        &Vars {
+            package: name,
+            registry,
+            version: &c.version,
+            tag: &c.tag,
+            npm_tag: &c.dist_tag,
+            first: Some(first),
+        },
     )
-    .to_lowercase();
-    let out = Command::new("sh")
-        .arg("-c")
+}
+
+/// What a publish command, or its dry run, sees: as `{placeholders}` in
+/// the command and as `VERWALTER_*` variables.
+pub(crate) struct Vars<'a> {
+    pub package: &'a str,
+    pub registry: registry::Registry,
+    pub version: &'a crate::Version,
+    pub tag: &'a str,
+    pub npm_tag: &'a str,
+    /// `VERWALTER_FIRST_RELEASE`; the dry run does not ask the registry.
+    pub first: Option<bool>,
+}
+
+/// Run `command` with `sh` in `dir` under `root`. Returns whether it
+/// passed, its stdout and stderr, and its exit status.
+pub(crate) fn run_in(
+    root: &std::path::Path,
+    dir: &str,
+    command: &str,
+    v: &Vars,
+) -> (bool, String, String) {
+    let command = command
+        .replace("{package}", v.package)
+        .replace("{version}", &v.version.to_string())
+        .replace("{tag}", v.tag)
+        .replace("{npm_tag}", v.npm_tag);
+    let mut cmd = Command::new("sh");
+    cmd.arg("-c")
         .arg(&command)
-        .current_dir(repo.root.join(&c.path))
-        .env("VERWALTER_PACKAGE", name)
-        .env("VERWALTER_REGISTRY", registry)
-        .env("VERWALTER_ROOT", &repo.root)
-        .env("VERWALTER_VERSION", c.version.to_string())
-        .env("VERWALTER_TAG", &c.tag)
-        .env("VERWALTER_NPM_TAG", &c.dist_tag)
+        .current_dir(root.join(dir))
+        .env("VERWALTER_PACKAGE", v.package)
+        .env(
+            "VERWALTER_REGISTRY",
+            format!("{:?}", v.registry).to_lowercase(),
+        )
+        .env("VERWALTER_ROOT", root)
+        .env("VERWALTER_VERSION", v.version.to_string())
+        .env("VERWALTER_TAG", v.tag)
+        .env("VERWALTER_NPM_TAG", v.npm_tag)
         .env(
             "VERWALTER_PRERELEASE",
-            c.version.is_prerelease().to_string(),
-        )
-        .env("VERWALTER_FIRST_RELEASE", first.to_string())
-        .output();
-    match out {
+            v.version.is_prerelease().to_string(),
+        );
+    if let Some(first) = v.first {
+        cmd.env("VERWALTER_FIRST_RELEASE", first.to_string());
+    }
+    match cmd.output() {
         Ok(o) => (
             o.status.success(),
             String::from_utf8_lossy(&o.stdout).into_owned() + &String::from_utf8_lossy(&o.stderr),

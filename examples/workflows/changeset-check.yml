@@ -4,7 +4,10 @@
 # With `[check].api` in verwalter.toml, the same run checks the public
 # API of each covered package against its changeset level. The tool it
 # names must be installed first, and the baseline tag must be in the
-# checkout.
+# checkout. With `[check].publish_dry_run`, the run on the release PR
+# dry-runs each publish command and fails the PR when one fails, before
+# the version reaches main. Install the toolchains it needs below, and
+# open the release PR with an App token so this workflow runs on it.
 name: Changeset check
 
 on:
@@ -22,10 +25,18 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          fetch-depth: 0                       # the API check needs the baseline tag
+          fetch-depth: 0                       # the API check needs the baseline tag, the dry run the tags
       - uses: taiki-e/install-action@v2   # only with [check].api
         with:
           tool: cargo-semver-checks
+
+      # The toolchains of the publish dry runs: keep the ones the
+      # repository publishes with. cargo is on the runner.
+      - uses: actions/setup-node@v6       # npm publish --dry-run
+        with:
+          node-version: 24
+      - uses: dart-lang/setup-dart@v1     # dart pub publish --dry-run
+      - uses: astral-sh/setup-uv@v7       # a PyPI command: uv build && uvx twine check dist/*
       - uses: livekit/verwalter@v0.31.0
         with:
           command: check

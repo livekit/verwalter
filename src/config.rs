@@ -132,6 +132,10 @@ pub struct PackageRelease {
 #[serde(default, deny_unknown_fields)]
 pub struct PackagePublish {
     pub registry: Option<crate::registry::Registry>,
+    /// A URL with `{name}` and `{version}` that answers 200 when the
+    /// version exists and 404 when it does not. Replaces the built-in
+    /// check of the registry, except goproxy. `{version}` is PEP 440 on
+    /// PyPI (`1.6.0rc1`), semver elsewhere.
     pub exists_url: Option<String>,
     /// Run in the package's `path`. Default: `[publish].command` when on
     /// the default registry, else the built-in command for the registry.
@@ -145,7 +149,24 @@ pub struct PackagePublish {
 pub struct PackageCheck {
     /// Spec: Package.api_command.
     pub api: Option<String>,
+    /// Overrides `[check].publish_dry_run`; `false` runs none.
+    pub publish_dry_run: Option<DryRun>,
 }
+
+/// `publish_dry_run`: `true` for the built-in dry run of the registry,
+/// or a shell command.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+#[serde(untagged)]
+pub enum DryRun {
+    On(bool),
+    Command(String),
+}
+
+/// The built-in dry run for crates.io. `check` runs it once from the root
+/// for every crate the release PR releases, so a crate can depend on a
+/// version of another that is not on crates.io yet.
+pub const CARGO_DRY_RUN: &str = "cargo publish --dry-run";
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
@@ -224,6 +245,12 @@ pub struct Check {
     /// `patch`, or nothing when it cannot tell. A package's `check.api`
     /// overrides it.
     pub api: Option<String>,
+    /// Release PRs: the dry run of the publish command, for each package
+    /// the PR releases. `true` takes the built-in dry run of each
+    /// registry. A command applies to the packages on the default
+    /// registry, in the package's path; the others take the built-in.
+    /// A package's `check.publish_dry_run` overrides it. Default: off.
+    pub publish_dry_run: Option<DryRun>,
 }
 
 impl Default for Check {
@@ -231,6 +258,7 @@ impl Default for Check {
         Self {
             exempt_label: "internal".into(),
             api: None,
+            publish_dry_run: None,
         }
     }
 }
@@ -252,7 +280,7 @@ pub struct Versioning {
     /// member needs. `fixed = [["play-core", "play-ffi"]]`.
     pub fixed: Vec<Vec<String>>,
     pub dependent_bump_level: BumpLevel,
-    /// Pre-release label: `1.6.0-rc.1`. Written as PEP 440 in pyproject.toml
+    /// Pre-release label: `1.6.0-rc.1`. Written as PEP 440 in pyproject.toml and .py files
     /// (`1.6.0rc1`; `alpha` and `beta` become `a` and `b`).
     pub prerelease_label: String,
 }
@@ -312,7 +340,8 @@ pub struct Publish {
     pub jobs: usize,
     pub registry: crate::registry::Registry,
     /// For `registry = "custom"`: a URL with `{name}` and `{version}` that
-    /// answers 200 when the version exists and 404 when it does not.
+    /// answers 200 when the version exists and 404 when it does not. A
+    /// package on another registry sets its own `publish.exists_url`.
     pub exists_url: Option<String>,
     /// Shell command, run in the package's path. Applies to packages on
     /// the default registry; others take the built-in default for theirs.
@@ -620,6 +649,40 @@ impl Config {
             .or(self.check.api.as_deref())
     }
 
+    /// Spec: Package.publish_dry_run. The command `check` runs for
+    /// `package` on a release PR, None for none. The package's own value,
+    /// else `[check]`'s: a command for a package on the default registry,
+    /// else the built-in dry run of the registry. PyPI and custom
+    /// registries have no built-in: `dist/` is built by the release
+    /// workflow, not in the check. `pnpm` and `npm_tag` as for
+    /// `publish_command`; npm refuses a pre-release without `--tag`.
+    pub fn dry_run_command(
+        &self,
+        package: &str,
+        pnpm: bool,
+        npm_tag: Option<&str>,
+    ) -> Option<String> {
+        use crate::registry::Registry;
+        let own = self.packages[package].check.publish_dry_run.as_ref();
+        match own.or(self.check.publish_dry_run.as_ref())? {
+            DryRun::On(false) => return None,
+            DryRun::Command(c)
+                if own.is_some() || self.registry_of(package) == self.publish.registry =>
+            {
+                return Some(c.clone());
+            }
+            _ => {}
+        }
+        let tag = npm_tag.map(|t| format!(" --tag {t}")).unwrap_or_default();
+        Some(match self.registry_of(package) {
+            Registry::Crates => CARGO_DRY_RUN.into(),
+            Registry::Npm if pnpm => format!("pnpm publish --dry-run --no-git-checks{tag}"),
+            Registry::Npm => format!("npm publish --dry-run{tag}"),
+            Registry::Pubdev => "dart pub publish --dry-run".into(),
+            Registry::Pypi | Registry::None | Registry::Custom | Registry::Goproxy => return None,
+        })
+    }
+
     /// Spec: Package.registry. The package's own, else the default.
     pub fn registry_of(&self, package: &str) -> crate::registry::Registry {
         self.packages[package]
@@ -725,7 +788,8 @@ impl Config {
                 format!("pnpm publish --provenance --access public --no-git-checks{tag}")
             }
             Registry::Npm => format!("npm publish --provenance --access public{tag}"),
-            Registry::Pypi => "python -m twine upload dist/*".into(),
+            // Safe to run twice: a re-run after a half upload sends only the missing files.
+            Registry::Pypi => "python -m twine upload --skip-existing dist/*".into(),
             Registry::Pubdev => "dart pub publish --force".into(),
             Registry::None | Registry::Custom | Registry::Goproxy => return None,
         })
@@ -1069,6 +1133,71 @@ release.mode = "tag_and_release"
             "[packages.a]\npath = \"a\"\nversioning.files = [\"Cargo.toml\"]\nversioning.changelog = true\n"
         )
         .is_err());
+    }
+
+    #[test]
+    fn publish_dry_run_resolves_like_the_publish_command() {
+        let pkg = |name: &str, extra: &str| {
+            format!(
+                "[packages.{name}]\npath = \"{name}\"\nversioning.files = [\"Cargo.toml\"]\n{extra}\n"
+            )
+        };
+        let packages = [
+            pkg("crate", ""),
+            pkg("py", "publish.registry = \"pypi\""),
+            pkg("js", "publish.registry = \"npm\""),
+            pkg("off", "check.publish_dry_run = false"),
+            pkg("own", "check.publish_dry_run = \"make dry\""),
+        ]
+        .concat();
+        let c = |check: &str| {
+            Config::parse(&format!(
+                "[publish]\nregistry = \"crates\"\n{check}\n{packages}"
+            ))
+            .unwrap()
+        };
+
+        let none = c("");
+        assert_eq!(
+            none.dry_run_command("crate", false, None),
+            None,
+            "off by default"
+        );
+        assert_eq!(
+            none.dry_run_command("own", false, None).as_deref(),
+            Some("make dry")
+        );
+
+        let on = c("[check]\npublish_dry_run = true");
+        assert_eq!(
+            on.dry_run_command("crate", false, None).as_deref(),
+            Some(CARGO_DRY_RUN)
+        );
+        assert_eq!(
+            on.dry_run_command("py", false, None),
+            None,
+            "no built-in for PyPI"
+        );
+        assert_eq!(
+            on.dry_run_command("js", false, Some("next")).as_deref(),
+            Some("npm publish --dry-run --tag next")
+        );
+        assert_eq!(
+            on.dry_run_command("js", true, None).as_deref(),
+            Some("pnpm publish --dry-run --no-git-checks")
+        );
+        assert_eq!(on.dry_run_command("off", false, None), None);
+
+        // A command is for the default registry; the others keep the built-in.
+        let cmd = c("[check]\npublish_dry_run = \"cargo publish --dry-run --locked\"");
+        assert_eq!(
+            cmd.dry_run_command("crate", false, None).as_deref(),
+            Some("cargo publish --dry-run --locked")
+        );
+        assert_eq!(
+            cmd.dry_run_command("js", false, None).as_deref(),
+            Some("npm publish --dry-run")
+        );
     }
 
     #[test]

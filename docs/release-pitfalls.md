@@ -29,6 +29,7 @@ Source: the git history, pull requests, issues and workflow runs of rust-sdks, p
 | 21 | Post-publish jobs fail the run after the registry step succeeded. | agents (deploy-examples in four releases), android (notify dispatch) | Workflow design. | Note in the example: steps after publish use `continue-on-error`. |
 | 22 | Release notes drafted by hand or by an LLM. | agents `release_notes.py` | Notes come from changesets with PR and author links. | None. |
 | 23 | Cross-repo version coupling. | livekit-cli needs server-sdk-go major.minor, flutter pins `flutter_webrtc` to the WebRTC pod, python-sdks pins the FFI by submodule | Out of scope. | A workflow precondition; nothing for the tool. |
+| 24 | The registry rejects a version only at publish time, after the merge. | flutter v2.8.0 to v2.9.0 (`dart pub publish --dry-run` failed on an exact pin warning, five versions published by hand) | `[check].publish_dry_run` runs each dry run on the release PR. One cargo run covers every crate of the release. | PyPI has no built-in dry run: the repository sets a build and `twine check` command. |
 
 ## Gaps, ranked
 
