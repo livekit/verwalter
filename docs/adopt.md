@@ -547,7 +547,7 @@ this release unless `CHANGELOG.md` already exists.
 | crates.io | `cargo publish` | `[publish] workspace = "cargo publish --workspace"` on cargo 1.90 and later. Else per crate, dependencies first, which the tool orders. |
 | PyPI | `python -m twine upload --skip-existing dist/*` | Build first. A package with several files sets `publish.exists_url` to its sdist. The built-in command signs no attestations: add `pypi-attestations sign` and `--attestations` to keep them. |
 | pub.dev | `dart pub publish --force` | `setup-dart` mints the token from OIDC. |
-| Maven Central | none: `publish.registry = "custom"` with `exists_url`, and the gradle command | `exists_url = "https://repo1.maven.org/maven2/<group path>/{name}/{version}/"` |
+| Maven Central | none: `publish.registry = "custom"` with `exists_url`, and the gradle command | `exists_url = "https://repo1.maven.org/maven2/<group path>/{name}/{version}/{name}-{version}.pom"`. Ask for the `.pom` file, not for the directory: the directory listing is a page for browsers and can answer 404 for a version that is there. |
 | CocoaPods | none: `publish.command = "pod trunk push ..."` without a registry | No stable existence API. The command fails on a duplicate, which is a real failure to the tool. |
 | Go modules | none: `publish.registry = "goproxy"` | The proxy request is the publish. A private module stays on `none`: the tag is the release. |
 | GitHub only | none: `[publish]` stays out | Binaries go on the release as `--asset`. |
