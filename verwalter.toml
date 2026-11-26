@@ -2,7 +2,20 @@
 # verwalter versions itself.
 [packages.verwalter]
 path = "."
-versioning.files = ["Cargo.toml", "Cargo.lock"]
+# The docs and the examples name the release to use. Each release
+# moves them, so they always name the latest one.
+versioning.files = [
+  "Cargo.toml",
+  "Cargo.lock",
+  { path = "README.md", regex = '(?:livekit/verwalter@|--tag )v(?<version>\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)' },
+  { path = "docs/action.md", regex = '(?:livekit/verwalter@|--tag )v(?<version>\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)' },
+  { path = "docs/api-check.md", regex = '(?:livekit/verwalter@|--tag )v(?<version>\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)' },
+  { path = "docs/release-workflows.md", regex = '(?:livekit/verwalter@|--tag )v(?<version>\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)' },
+  { path = "examples/workflows/changeset-check.yml", regex = '(?:livekit/verwalter@|--tag )v(?<version>\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)' },
+  { path = "examples/workflows/pre-release.yml", regex = '(?:livekit/verwalter@|--tag )v(?<version>\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)' },
+  { path = "examples/workflows/release-pr.yml", regex = '(?:livekit/verwalter@|--tag )v(?<version>\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)' },
+  { path = "examples/workflows/release.yml", regex = '(?:livekit/verwalter@|--tag )v(?<version>\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)' },
+]
 release.draft = false                          # release.yml builds first and attaches the binaries on creation
 
 [publish]

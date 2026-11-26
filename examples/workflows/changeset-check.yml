@@ -29,6 +29,7 @@ jobs:
       - uses: taiki-e/install-action@v2   # only with [check].api
         with:
           tool: cargo-semver-checks
+
       # The toolchains of the publish dry runs: keep the ones the
       # repository publishes with. cargo is on the runner.
       - uses: actions/setup-node@v6       # npm publish --dry-run
@@ -36,6 +37,6 @@ jobs:
           node-version: 24
       - uses: dart-lang/setup-dart@v1     # dart pub publish --dry-run
       - uses: astral-sh/setup-uv@v7       # a PyPI command: uv build && uvx twine check dist/*
-      - uses: livekit/verwalter@v0.22.0
+      - uses: livekit/verwalter@v0.31.0
         with:
           command: check
