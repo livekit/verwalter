@@ -78,7 +78,7 @@ release.draft = false            # public on creation, before the publish
 publish.registry = "npm"         # "none" with no command: released on GitHub only
 publish.command = "pnpm publish --no-git-checks"   # else the built-in one for the registry
 publish.exists_url = "https://r/{name}/{version}"   # replaces the built-in check of any registry but goproxy. {version} is PEP 440 on PyPI
-check.api = "griffe check pkg -a $VERWALTER_BASELINE_TAG >/dev/null || echo major"
+check.api = "griffe check pkg -a $VERWALTER_BASELINE_TAG >/dev/null || echo major"   # or false
 check.publish_dry_run = "uv build && twine check dist/*"   # or false
 ```
 

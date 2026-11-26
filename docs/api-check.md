@@ -11,6 +11,9 @@ api = "cargo semver-checks --baseline-rev $VERWALTER_BASELINE_TAG 2>&1 | tee /de
 
 [packages.livekit-rtc]
 check.api = "griffe check livekit.rtc -a $VERWALTER_BASELINE_TAG >/dev/null || echo major"   # overrides [check].api
+
+[packages.livekit-ffi]
+check.api = false   # no API check for this package
 ```
 
 ## The contract
