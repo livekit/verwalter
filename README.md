@@ -62,6 +62,9 @@ files = ["Cargo.toml"]             # for every package; a package can set its ow
 [publish]
 registry = "crates"                # none | crates | npm | pypi | pubdev | goproxy | custom
 
+[check]
+publish_dry_run = true             # the release PR dry-runs each publish command
+
 [packages.livekit-protocol]
 path = "livekit-protocol"
 
@@ -86,7 +89,7 @@ file takes a regex: `{ path = "version.go", regex = 'Version = "(?<version>[^"]+
 Each one is a single step of the action:
 
 ```yaml
-- uses: livekit/verwalter@v0.22.0
+- uses: livekit/verwalter@v0.31.0
   with:
     command: pr        # check | pr | release | publish | pre-release | status
 ```
@@ -141,7 +144,9 @@ missing.
 | [docs/features.md](docs/features.md) | The full feature list, the mistakes the tool catches, what to do when a step fails, what is not covered. |
 | [docs/api-check.md](docs/api-check.md) | Verifying the changeset level with cargo-semver-checks, griffe or break-check. |
 | [docs/commands.md](docs/commands.md) | Every command and flag. |
+| [docs/cheat-sheet.md](docs/cheat-sheet.md) | The command for each situation: a changeset, the state, a release, a failed release. |
 | [examples/publish/README.md](examples/publish/README.md) | Publish commands per registry. |
+| [examples/RELEASING.md](examples/RELEASING.md) | A template for the release notes of a repository that uses verwalter: its workflows, packages, repair commands and consumers. |
 | [docs/release-workflows.md](docs/release-workflows.md) | Rules for a release with several jobs, workflows or repositories, each with a reason and a check: job order, workflow calls, drafts, re-runs, recovery. |
 | [docs/release-pitfalls.md](docs/release-pitfalls.md) | The release history of the LiveKit SDKs and how each pitfall maps to the tool. |
 
@@ -155,4 +160,4 @@ or install it with `npx skills add livekit/verwalter`.
 
 Install the binary from the
 [releases page](https://github.com/livekit/verwalter/releases) to run any
-command locally, or `cargo install --git https://github.com/livekit/verwalter --tag v0.22.0`.
+command locally, or `cargo install --git https://github.com/livekit/verwalter --tag v0.31.0`.

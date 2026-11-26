@@ -68,13 +68,28 @@ pub fn curl(url: &str) -> Result<u16> {
 
 /// The URL that answers 200 when `version` of `name` is on the registry.
 /// None when the package has no registry configured.
+///
+/// A package's own `publish.exists_url` replaces the built-in URL of its
+/// registry, for example to call a PyPI version present only when its
+/// sdist is there, not after its first file. `{version}` is the version
+/// as the registry writes it: PEP 440 for PyPI (`1.6.0rc1`), semver
+/// elsewhere. `[publish].exists_url` is the default for `custom` only.
+/// goproxy keeps its URL: the request is what publishes the module.
 pub fn version_url(config: &Config, name: &str, version: &Version) -> Option<String> {
-    let v = version.to_string();
-    Some(match config.registry_of(name) {
+    let registry = config.registry_of(name);
+    let v = match registry {
+        Registry::Pypi => to_pep440(version),
+        _ => version.to_string(),
+    };
+    let own = config.packages[name].publish.exists_url.as_deref();
+    if let Some(url) = own.filter(|_| !matches!(registry, Registry::None | Registry::Goproxy)) {
+        return Some(url.replace("{name}", name).replace("{version}", &v));
+    }
+    Some(match registry {
         Registry::None => return None,
         Registry::Crates => format!("https://crates.io/api/v1/crates/{name}/{v}"),
         Registry::Npm => format!("https://registry.npmjs.org/{name}/{v}"),
-        Registry::Pypi => format!("https://pypi.org/pypi/{name}/{}/json", to_pep440(version)),
+        Registry::Pypi => format!("https://pypi.org/pypi/{name}/{v}/json"),
         Registry::Pubdev => format!("https://pub.dev/api/packages/{name}/versions/{v}"),
         Registry::Goproxy => format!("{}/@v/v{v}.info", goproxy_module_url(config, name)?),
         Registry::Custom => config
@@ -117,6 +132,29 @@ fn goproxy_module_url(config: &Config, name: &str) -> Option<String> {
     Some(format!("{GOPROXY}/{escaped}"))
 }
 
+/// Spec: PublishWaitsForTheRegistry. Asks until the URL answers 200 or
+/// `wait` is over. npm scans a new version before it shows it, and reads
+/// answer 404 in that time, as for a version that was never published.
+/// Any other answer than 200 counts as "not yet".
+pub fn wait_for(
+    url: &str,
+    http: Http,
+    wait: std::time::Duration,
+    interval: std::time::Duration,
+) -> bool {
+    let deadline = std::time::Instant::now() + wait;
+    loop {
+        if matches!(exists(Some(url.to_string()), http), Ok(Some(true))) {
+            return true;
+        }
+        let left = deadline.saturating_duration_since(std::time::Instant::now());
+        if left.is_zero() {
+            return false;
+        }
+        std::thread::sleep(interval.min(left));
+    }
+}
+
 /// Some(true) on 200, Some(false) on 404, None without a registry, an
 /// error for any other answer: a registry outage must not look like
 /// "not there yet".
@@ -137,6 +175,37 @@ pub fn exists(url: Option<String>, http: Http) -> Result<Option<bool>> {
 mod tests {
     use super::*;
     use crate::config::Config;
+
+    // Spec: PublishWaitsForTheRegistry.
+    #[test]
+    fn wait_for_asks_until_the_version_shows() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::time::Duration;
+        let asks = AtomicUsize::new(0);
+        // 404, then an error, then 200.
+        let http = |_: &str| -> Result<u16> {
+            match asks.fetch_add(1, Ordering::SeqCst) {
+                0 => Ok(404),
+                1 => Ok(503),
+                _ => Ok(200),
+            }
+        };
+        assert!(wait_for(
+            "u",
+            &http,
+            Duration::from_secs(60),
+            Duration::from_millis(1)
+        ));
+        assert_eq!(asks.load(Ordering::SeqCst), 3);
+
+        let never = |_: &str| -> Result<u16> { Ok(404) };
+        assert!(!wait_for(
+            "u",
+            &never,
+            Duration::from_millis(5),
+            Duration::from_millis(1)
+        ));
+    }
 
     fn config(top: &str, extra: &str) -> Config {
         Config::parse(&format!(
@@ -173,6 +242,31 @@ mod tests {
             )
             .unwrap(),
             "https://r/x/1.6.0-rc.1/"
+        );
+        // Issue #138: a package's own URL replaces the built-in check, and
+        // `{version}` is PEP 440 on PyPI. The sdist means every file is up.
+        let sdist = "publish.registry = \"pypi\"\npublish.exists_url = \"https://files.pythonhosted.org/packages/source/x/{name}/{name}-{version}.tar.gz\"";
+        assert_eq!(
+            version_url(&config("", sdist), "x", &v).unwrap(),
+            "https://files.pythonhosted.org/packages/source/x/x/x-1.6.0rc1.tar.gz"
+        );
+        // The first-release check still asks PyPI for the package.
+        assert_eq!(
+            package_url(&config("", sdist), "x").unwrap(),
+            "https://pypi.org/pypi/x/json"
+        );
+        // [publish].exists_url is for custom packages, not for the others.
+        assert_eq!(
+            version_url(
+                &config(
+                    "[publish]\nexists_url = \"https://r/{name}/{version}\"",
+                    "publish.registry = \"crates\""
+                ),
+                "x",
+                &v
+            )
+            .unwrap(),
+            "https://crates.io/api/v1/crates/x/1.6.0-rc.1"
         );
         assert_eq!(
             package_url(&config("", "publish.registry = \"pubdev\""), "x").unwrap(),

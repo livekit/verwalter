@@ -34,7 +34,20 @@ struct Cli {
 #[derive(clap::Subcommand)]
 enum Command {
     /// Per package: version, tag, GitHub release, pending changesets, open PRs, next step
-    Status,
+    Status {
+        /// Exit non-zero when the current version of a package is not completely released
+        #[arg(long)]
+        check: bool,
+        /// With --check: ask again every 15 seconds for this long, until every package is complete. `90s` or `5m`
+        #[arg(long, value_name = "TIME", value_parser = duration, requires = "check")]
+        wait: Option<std::time::Duration>,
+        /// Print one JSON list in place of the table
+        #[arg(long)]
+        json: bool,
+        /// Only this package
+        #[arg(long, value_name = "NAME")]
+        package: Option<String>,
+    },
     /// Print the release plan: next versions, dependencies first
     Plan,
     /// Create the release branch locally
@@ -75,6 +88,9 @@ enum Command {
         /// Publish the draft release
         #[arg(long)]
         publish: bool,
+        /// Upload assets even when HEAD changed a package's files since its tag. Without it, the release fails: build the assets from the tag instead
+        #[arg(long)]
+        allow_changed_source: bool,
         /// Delete this tag's GitHub release and the tag
         #[arg(long, value_name = "TAG", conflicts_with_all = ["assets", "package", "publish"])]
         abandon: Option<String>,
@@ -93,6 +109,12 @@ enum Command {
         /// Packages to publish at once
         #[arg(long, value_name = "N")]
         jobs: Option<usize>,
+        /// Publish even when HEAD changed a package's files since its tag. Without it, such a package fails: check out the tag instead
+        #[arg(long)]
+        allow_changed_source: bool,
+        /// How long to wait for the registry to show a version after its command passed: `90s`, `5m`, or `0` for no wait. npm scans a new version before it shows it
+        #[arg(long, value_name = "TIME", value_parser = duration, default_value = "5m")]
+        wait: std::time::Duration,
     },
     /// Open an rc PR for every package with a pending changeset
     PreRelease {
@@ -122,6 +144,18 @@ fn checkout(arg: &str) -> Result<PathBuf, String> {
 /// for a successful re-run.
 fn only(releases: Option<BTreeSet<String>>) -> Option<BTreeSet<String>> {
     releases.filter(|r| !r.is_empty())
+}
+
+/// `90s`, `5m`, or a plain number of seconds.
+fn duration(text: &str) -> Result<std::time::Duration, String> {
+    let (digits, per) = match text.strip_suffix('m') {
+        Some(d) => (d, 60),
+        None => (text.strip_suffix('s').unwrap_or(text), 1),
+    };
+    let n: u64 = digits
+        .parse()
+        .map_err(|_| format!("{text}: use seconds or minutes, such as 90s or 5m"))?;
+    Ok(std::time::Duration::from_secs(n * per))
 }
 
 fn releases(text: &str) -> Result<BTreeSet<String>, serde_json::Error> {
@@ -191,7 +225,7 @@ fn run(cli: Cli) -> Result<()> {
             "{:?}: affected {:?}, covered {:?}",
             c.status, c.affected, c.covered
         );
-        if c.status == check::Status::Failed {
+        if c.failed() {
             let mut why = Vec::new();
             if !c.missing().is_empty() {
                 why.push(format!("changeset missing for: {}", c.missing().join(", ")));
@@ -204,6 +238,14 @@ fn run(cli: Cli) -> Result<()> {
                     ),
                     None => format!("{}: the API check did not run: {}", f.package, f.output),
                 });
+            }
+            for f in &c.dry_run {
+                why.push(format!(
+                    "{}: publish dry run failed: {}\n{}",
+                    f.packages.join(", "),
+                    f.command,
+                    f.output
+                ));
             }
             bail!(why.join("\n"));
         }
@@ -284,10 +326,34 @@ fn run(cli: Cli) -> Result<()> {
             }
             Ok(())
         }
-        Command::Status => {
-            let rows = status::status(&repo, &remote, gh)?;
+        Command::Status {
+            check,
+            wait,
+            json,
+            package,
+        } => {
+            // Spec: surface ReleaseStatus. --wait asks again until every
+            // package is complete or the time is over: a registry can
+            // show a new version minutes after the publish.
+            let deadline = std::time::Instant::now() + wait.unwrap_or_default();
+            let rows = loop {
+                let mut rows = status::status(&repo, &remote, gh)?;
+                if let Some(only) = &package {
+                    rows.retain(|r| &r.package == only);
+                    ensure!(!rows.is_empty(), "{only}: no such package");
+                }
+                let left = deadline.saturating_duration_since(std::time::Instant::now());
+                if left.is_zero() || rows.iter().all(|r| r.incomplete.is_none()) {
+                    break rows;
+                }
+                eprintln!("not complete yet, asking again");
+                std::thread::sleep(verwalter::publish::POLL.min(left));
+            };
+            if json {
+                println!("{}", serde_json::to_string(&rows)?);
+            }
             let w = rows.iter().map(|r| r.package.len()).max().unwrap_or(0);
-            for r in &rows {
+            for r in rows.iter().filter(|_| !json) {
                 let pending = if r.pending_changesets.is_empty() {
                     String::new()
                 } else {
@@ -321,6 +387,21 @@ fn run(cli: Cli) -> Result<()> {
                 );
                 println!("{:w$}  -> {}", "", r.next_step);
             }
+            // Spec: surface ReleaseStatus, the end-state check.
+            if check {
+                for r in &rows {
+                    if let Some(why) = &r.incomplete {
+                        eprintln!(
+                            "{} {} is not completely released: {why}",
+                            r.package, r.version
+                        );
+                    }
+                }
+                ensure!(
+                    rows.iter().all(|r| r.incomplete.is_none()),
+                    "not every package is completely released"
+                );
+            }
             Ok(())
         }
         Command::PreRelease { target } => {
@@ -336,11 +417,18 @@ fn run(cli: Cli) -> Result<()> {
             }
             Ok(())
         }
-        Command::Publish { releases, jobs } => {
+        Command::Publish {
+            releases,
+            jobs,
+            allow_changed_source,
+            wait,
+        } => {
             let options = verwalter::publish::Options {
                 jobs,
                 dry_run,
                 only: only(releases),
+                allow_changed_source,
+                wait,
             };
             let outcomes =
                 verwalter::publish::run(&repo, &options, &verwalter::registry::curl, gh)?;
@@ -354,6 +442,7 @@ fn run(cli: Cli) -> Result<()> {
             assets,
             package,
             publish,
+            allow_changed_source,
             abandon,
         } => {
             if let Some(tag) = abandon {
@@ -366,6 +455,7 @@ fn run(cli: Cli) -> Result<()> {
                 assets,
                 package,
                 publish,
+                allow_changed_source,
                 dry_run,
             };
             let released = release::run(&repo, &remote, &options, gh)?;

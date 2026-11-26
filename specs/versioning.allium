@@ -163,6 +163,10 @@ entity Package {
     -- registry = goproxy), else false: a package with nothing to publish
     -- has nothing to wait for.
     release_as_draft: Boolean
+    -- The asset names the GitHub release must have before it is public,
+    -- with {version} and {tag} replaced. Exact names, no patterns. A
+    -- config error unless release_mode is tag_and_release.
+    required_assets: Set<String>
     -- Where the package is published: crates | npm | pypi | pubdev |
     -- goproxy | custom (an exists_url with {name} and {version}) | none. Defaults
     -- to config.publish.registry. The tool only asks whether a version is
@@ -323,6 +327,21 @@ entity Release {
     -- The release PR always writes one. A version with none was edited
     -- by hand, not released by a release PR.
     has_changelog_entry: changelog_has_entry(package.changelog_file, version)
+    -- RequiredAssetsBeforePublic: every name in package.required_assets
+    -- is on the GitHub release, or among the assets of the run that
+    -- creates it. The tool makes no release public without them: the run
+    -- fails for that package and names the missing ones, and a draft
+    -- stays a draft. A release that stays a draft is never refused.
+    has_required_assets: required_assets_present(package.required_assets, version)
+    -- The end state of a release: the tag is on the remote, the GitHub
+    -- release, when one is wanted, is public with its required assets,
+    -- and the registry, when one is configured, has the version. An
+    -- answer the tool cannot get, from GitHub or from the registry,
+    -- counts as not complete.
+    is_complete:
+        tag_on_remote(package, version)
+        and (package.release_mode = tag or (status = published and has_required_assets))
+        and package.on_registry(version) != false
 
     transitions status {
         committed -> tagged
@@ -668,6 +687,7 @@ rule ResumeTaggedReleasesWithoutGitHubRelease {
     for release in Releases where package.repository = repository and status = tagged:
         requires: named = null or release.package = named
         requires: release.package.release_mode = tag_and_release
+        requires: (release.package.release_as_draft and not publish_drafts) or release.has_required_assets
         ensures:
             if release.package.release_as_draft and not publish_drafts:
                 release.status = drafted
@@ -679,11 +699,13 @@ rule ResumeTaggedReleasesWithoutGitHubRelease {
 
 -- A run asked to publish flips every draft it handles once the assets
 -- are there: the WorkflowPublishesRelease step, from the command line.
+-- The assets this run uploads count (RequiredAssetsBeforePublic).
 rule PublishDraftsOnToolRun {
     when: ToolRunStarted(repository, named?, publish_drafts)
     for release in Releases where package.repository = repository and status = drafted:
         requires: publish_drafts
         requires: named = null or release.package = named
+        requires: release.has_required_assets
         ensures: release.status = published
 }
 
@@ -692,6 +714,7 @@ rule CreateGitHubRelease {
     when: release: Release.status transitions_to tagged
     requires: release.status = tagged
     requires: release.package.release_mode = tag_and_release
+    requires: release.package.release_as_draft or release.has_required_assets
     ensures:
         if release.package.release_as_draft:
             release.status = drafted
@@ -720,15 +743,25 @@ rule MaintainerAbandonsRelease {
 -- release has no GitHub release to attach to. An asset given as a
 -- directory stands for every file directly in it, so a matrix build
 -- names its download directory once.
+-- AssetsComeFromTheTaggedSource: the workflow built the assets from
+-- HEAD. When the tag existed before the run, changed_since_tag (see
+-- PublishBuildsTheTaggedSource) must be false for the package, or the
+-- run fails and uploads nothing. This also holds when the run creates
+-- the GitHub release for such a tag with assets. A tag made in the run
+-- points at HEAD and is not compared. A GitHub release without assets
+-- is created for an existing tag from any commit. allow_changed_source,
+-- from `release --allow-changed-source`, turns the check off.
 rule WorkflowAttachesAssets {
-    when: WorkflowAttachesAssets(workflow, release, assets, package_named)
+    when: WorkflowAttachesAssets(workflow, release, assets, package_named, allow_changed_source)
     requires: release.status = drafted or (release.status = published and package_named)
+    requires: allow_changed_source or not changed_since_tag(release.package)
     ensures: ReleaseAssetsAttached(release: release, assets: assets)
 }
 
 rule WorkflowPublishesDraftRelease {
     when: WorkflowPublishesRelease(workflow, release)
     requires: release.status = drafted
+    requires: release.has_required_assets
     ensures: release.status = published
 }
 
@@ -907,21 +940,43 @@ surface WorkflowReleaseGate {
 -- empty list counts as absent: it reaches publish only from a re-run
 -- by hand after a run that released nothing, and the re-run is for the
 -- versions a registry lacks.
+-- PublishBuildsTheTaggedSource: changed_since_tag(p) is true when HEAD
+-- changed a file of p since its tag, files of a package nested in p
+-- excluded. A run by hand from a later commit would otherwise publish
+-- newer source under the tagged version. The registry check comes
+-- first: a version it has runs no command. A goproxy package is not
+-- compared, because the proxy serves the tag. allow_changed_source,
+-- from `publish --allow-changed-source`, turns the check off.
+-- PublishWaitsForTheRegistry: registry_shows_in_time(p) is true when the
+-- registry answers for p.version within the time of `publish --wait`
+-- (five minutes by default) after the command passed. npm scans a new
+-- version before it shows it, and a read answers 404 in that time, as
+-- for a version that was never published. A dependent starts after the
+-- wait, so its dependency can be installed. A package without a
+-- registry, on a custom registry, or with a wait of zero counts as
+-- shown. `status --check --wait` asks the whole end state again in the
+-- same way.
 rule WorkflowPublishesInDependencyOrder {
-    when: WorkflowRunsPublish(workflow, repository, releases?)
+    when: WorkflowRunsPublish(workflow, repository, releases?, allow_changed_source)
     let candidates = filter(Packages, p => p.repository = repository and p.release_mode != none and GitTags.any(t => t.package = p and t.version = p.version) and (releases = none or p in releases))
     requires: candidates.all(p => p.publish_command != null or p.in_workspace_publish)
     ensures:
         for p in candidates:
             -- A version the registry has is skipped before the command runs.
+            -- A draft that lacks a required asset fails before the command
+            -- runs too (RequiredAssetsBeforePublic).
             -- Otherwise started only after every in-repo dependency among
             -- the candidates ended as published or exists. Independent
             -- packages run at the same time, up to the job limit.
             if p.on_registry(p.version) = true:
                 PublishOutcome.created(package: p, status: `exists`)
+            else if not allow_changed_source and changed_since_tag(p):
+                -- PublishBuildsTheTaggedSource. The command builds HEAD,
+                -- so HEAD must hold the tagged source of the package.
+                PublishOutcome.created(package: p, status: failed)
             else if p.dependencies.any(d => d in candidates and PublishOutcomes.any(o => o.package = d and o.status in {failed, blocked})):
                 PublishOutcome.created(package: p, status: blocked)
-            else if publish_command_succeeded(p):
+            else if publish_command_succeeded(p) and registry_shows_in_time(p):
                 PublishOutcome.created(package: p, status: published)
             else:
                 PublishOutcome.created(package: p, status: failed)
@@ -936,13 +991,16 @@ entity PublishOutcome {
 -- is public. After the commands, every outcome of published or `exists`
 -- whose release is a draft flips it. A flip that fails is a failed
 -- outcome: the job fails, and a re-run finds the version on the registry
--- and tries the flip again.
+-- and tries the flip again. A draft without a required asset is not
+-- flipped and is a failed outcome too (RequiredAssetsBeforePublic). For
+-- a version the registry does not have yet, that check comes before the
+-- publish command: the command does not run for such a draft.
 rule PublishFlipsDrafts {
-    when: WorkflowRunsPublish(workflow, repository, releases?)
+    when: WorkflowRunsPublish(workflow, repository, releases?, allow_changed_source)
     for o in PublishOutcomes where o.status in {published, `exists`}:
         for release in Releases where release.package = o.package and release.status = drafted:
             ensures:
-                if github_release_published(release.github_release):
+                if release.has_required_assets and github_release_published(release.github_release):
                     release.status = published
                 else:
                     o.status = failed
@@ -968,7 +1026,7 @@ surface ToolRun {
 
     provides:
         ToolRunStarted(repository, named, publish_drafts)
-        WorkflowRunsPublish(workflow, repository, releases)
+        WorkflowRunsPublish(workflow, repository, releases, allow_changed_source)
 }
 
 -- Every release the run tagged, created, published or attached assets
@@ -990,7 +1048,7 @@ surface WorkflowReleaseHandoff {
 
     provides:
         WorkflowPublishesRelease(workflow, release) when release.status = drafted
-        WorkflowAttachesAssets(workflow, release, assets, package_named) when release.status = drafted | published
+        WorkflowAttachesAssets(workflow, release, assets, package_named, allow_changed_source) when release.status = drafted | published
 
     @guidance
         -- Recommended order in the workflow: build, then tag and create
@@ -1000,7 +1058,15 @@ surface WorkflowReleaseHandoff {
 }
 
 -- Where every package stands and what finishes its release, so a
--- maintainer can take over from a failed workflow run.
+-- maintainer can take over from a failed workflow run. With `--check`
+-- the same read is the last job of a release run: it fails when the
+-- Release of a package's current version is not complete
+-- (Release.is_complete), and names what is missing and the command that
+-- finishes it. `--package` keeps the output and the check to one package.
+-- Not checked: a package with release_mode none, and a version that is
+-- no release (ReleaseNeedsChangelogEntry: no tag and no changelog entry).
+-- Pending changesets and an open release PR are later releases and never
+-- fail the check.
 surface ReleaseStatus {
     facing maintainer: Maintainer
     context package: Package
@@ -1010,6 +1076,7 @@ surface ReleaseStatus {
         package.pending_changesets
         package.open_release_pull_request
         package.release_pull_requests
+        package.required_assets
 
     @guidance
         -- The implementation derives the Release state from tags and the
