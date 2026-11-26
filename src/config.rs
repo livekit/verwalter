@@ -147,10 +147,30 @@ pub struct PackagePublish {
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 #[serde(default, deny_unknown_fields)]
 pub struct PackageCheck {
-    /// Spec: Package.api_command.
-    pub api: Option<String>,
+    /// Spec: Package.api_command. Overrides `[check].api`; `false` runs
+    /// none.
+    #[serde(deserialize_with = "api_or_off")]
+    pub api: Option<ApiCheck>,
     /// Overrides `[check].publish_dry_run`; `false` runs none.
     pub publish_dry_run: Option<DryRun>,
+}
+
+/// A package's `check.api`: a shell command, or `false` for none.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+#[serde(untagged)]
+pub enum ApiCheck {
+    Off(bool),
+    Command(String),
+}
+
+fn api_or_off<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<ApiCheck>, D::Error> {
+    match ApiCheck::deserialize(d)? {
+        ApiCheck::Off(true) => Err(serde::de::Error::custom(
+            "check.api: a command, or false for none",
+        )),
+        a => Ok(Some(a)),
+    }
 }
 
 /// `publish_dry_run`: `true` for the built-in dry run of the registry,
@@ -642,11 +662,11 @@ impl Config {
 
     /// Spec: Package.api_command. The package's own, else `[check].api`.
     pub fn api_command(&self, package: &str) -> Option<&str> {
-        self.packages[package]
-            .check
-            .api
-            .as_deref()
-            .or(self.check.api.as_deref())
+        match &self.packages[package].check.api {
+            Some(ApiCheck::Command(c)) => Some(c),
+            Some(ApiCheck::Off(_)) => None,
+            None => self.check.api.as_deref(),
+        }
     }
 
     /// Spec: Package.publish_dry_run. The command `check` runs for
@@ -1133,6 +1153,26 @@ release.mode = "tag_and_release"
             "[packages.a]\npath = \"a\"\nversioning.files = [\"Cargo.toml\"]\nversioning.changelog = true\n"
         )
         .is_err());
+    }
+
+    #[test]
+    fn package_api_check_overrides_or_turns_off_the_default() {
+        let c = Config::parse(
+            "[check]\napi = \"default\"\n\
+             [packages.a]\npath = \"a\"\nversioning.files = [\"Cargo.toml\"]\n\
+             [packages.b]\npath = \"b\"\nversioning.files = [\"Cargo.toml\"]\ncheck.api = \"own\"\n\
+             [packages.c]\npath = \"c\"\nversioning.files = [\"Cargo.toml\"]\ncheck.api = false\n",
+        )
+        .unwrap();
+        assert_eq!(c.api_command("a"), Some("default"));
+        assert_eq!(c.api_command("b"), Some("own"));
+        assert_eq!(c.api_command("c"), None);
+
+        let err = Config::parse(
+            "[packages.a]\npath = \"a\"\nversioning.files = [\"Cargo.toml\"]\ncheck.api = true\n",
+        )
+        .unwrap_err();
+        assert!(format!("{err:#}").contains("a command, or false for none"));
     }
 
     #[test]

@@ -444,12 +444,15 @@
       "type": "object",
       "properties": {
         "api": {
-          "description": "Spec: Package.api_command.",
-          "type": [
-            "string",
-            "null"
-          ],
-          "default": null
+          "description": "Spec: Package.api_command. Overrides `[check].api`; `false` runs\nnone.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ApiCheck"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "publish_dry_run": {
           "description": "Overrides `[check].publish_dry_run`; `false` runs none.",
@@ -464,6 +467,17 @@
         }
       },
       "additionalProperties": false
+    },
+    "ApiCheck": {
+      "description": "A package's `check.api`: a shell command, or `false` for none.",
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "string"
+        }
+      ]
     }
   }
 }

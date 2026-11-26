@@ -194,7 +194,8 @@ entity Package {
     in_workspace_publish: Boolean
     -- The shell command that checks the public API of this package on a
     -- contributor PR: the package's own, else config.check.api, else
-    -- none and the check only asks for a changeset. It runs in the
+    -- none and the check only asks for a changeset. A package that sets
+    -- it to false has none. It runs in the
     -- package's path with the claimed level and the baseline tag, and
     -- prints the lowest change kind it can prove the diff needs (major,
     -- minor or patch), or nothing when it cannot tell.
