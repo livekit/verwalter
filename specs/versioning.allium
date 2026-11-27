@@ -111,8 +111,9 @@ contract VersionedFileHandler {
     -- becomes <4.0.0, <2.5 for 2.5.0 becomes <2.6.0. Other bounds stay.
     -- A release that moves uv.lock also moves the pin in the
     -- pyproject.toml of every project uv.lock lists (an editable or
-    -- virtual source), also one that is no package, so that both files
-    -- agree.
+    -- virtual source), also one that is no package or is outside the
+    -- plan, so that both files agree. A path dependency outside the repo
+    -- is not moved.
 }
 
 ------------------------------------------------------------

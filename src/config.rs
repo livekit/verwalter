@@ -447,19 +447,31 @@ fn discover(table: &mut toml::Table, root: &Path, workspace: &Workspace) -> Resu
 }
 
 /// `file` relative to a package `path`, as a repo-relative path. `..`
-/// is resolved, so a sibling directory's file is `../sibling/file`.
+/// is resolved, so a sibling directory's file is `../sibling/file`. A
+/// `..` past the repo root is dropped; `inside` reports it instead.
 pub(crate) fn under(path: &str, file: &str) -> String {
+    resolve(path, file).0
+}
+
+/// Like `under`, but None when the path leaves the repo, such as a uv path
+/// dependency on `../sibling` from the root.
+pub(crate) fn inside(path: &str, file: &str) -> Option<String> {
+    let (resolved, left) = resolve(path, file);
+    (!left).then_some(resolved)
+}
+
+/// The repo-relative path, and whether a `..` went past the root.
+fn resolve(path: &str, file: &str) -> (String, bool) {
     let mut parts: Vec<&str> = Vec::new();
+    let mut left = false;
     for c in path.split('/').chain(file.split('/')) {
         match c {
             "" | "." => {}
-            ".." => {
-                parts.pop();
-            }
+            ".." => left |= parts.pop().is_none(),
             c => parts.push(c),
         }
     }
-    parts.join("/")
+    (parts.join("/"), left)
 }
 
 impl Config {
@@ -1081,6 +1093,25 @@ release.mode = "tag_and_release"
         assert!(
             std::fs::read_to_string(path).is_ok_and(|s| s == schema),
             "schemas/v1.json is stale: run UPDATE_SCHEMA=1 cargo test schema_is_current"
+        );
+    }
+
+    #[test]
+    fn inside_is_none_for_a_path_that_leaves_the_repo() {
+        assert_eq!(
+            inside(".", "livekit-api/pyproject.toml").as_deref(),
+            Some("livekit-api/pyproject.toml")
+        );
+        assert_eq!(
+            inside("python", "../rust/pyproject.toml").as_deref(),
+            Some("rust/pyproject.toml")
+        );
+        assert_eq!(inside(".", "../sibling/pyproject.toml"), None);
+        assert_eq!(inside("python", "../../sibling/pyproject.toml"), None);
+        // under drops the `..` past the root, as before.
+        assert_eq!(
+            under(".", "../sibling/pyproject.toml"),
+            "sibling/pyproject.toml"
         );
     }
 }

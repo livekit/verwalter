@@ -36,8 +36,10 @@ fn is_lock_file(path: &str) -> bool {
 /// every package in the repo, for the pins in dependents. Only dependents
 /// that are in `plan` are pinned: a release plan carries every dependent
 /// anyway, and an rc pins only the packages it carries, so a dependent
-/// outside the rc never points at it. Returns the paths whose content
-/// changed.
+/// outside the rc never points at it. uv.lock is the exception: uv needs
+/// it to agree with every pyproject.toml in the workspace, so a release
+/// moves the pin in uv.lock and in the pyproject.toml of every project it
+/// lists, in the plan or not. Returns the paths whose content changed.
 pub fn apply(
     root: &Path,
     config: &Config,
@@ -129,9 +131,13 @@ pub fn apply(
             && let Ok(lock) = fs::read_to_string(root.join(file))
         {
             let dir = file.rsplit_once('/').map_or(".", |(dir, _)| dir);
+            // A path dependency outside the repo is not ours to move.
             for project in handler::uv_lock_projects(&lock) {
-                let pyproject = crate::config::under(dir, &format!("{project}/pyproject.toml"));
-                rewrite(&pyproject, None, Some(key))?;
+                if let Some(pyproject) =
+                    crate::config::inside(dir, &format!("{project}/pyproject.toml"))
+                {
+                    rewrite(&pyproject, None, Some(key))?;
+                }
             }
         }
     }
@@ -554,7 +560,13 @@ versioning.changelog = "CHANGELOG.md"
             ),
             (
                 "uv.lock",
-                "version = 1\n\n[[package]]\nname = \"livekit-api\"\nsource = { editable = \"livekit-api\" }\n\n[package.metadata]\nrequires-dist = [{ name = \"livekit-protocol\", editable = \"livekit-protocol\", specifier = \">=2.0.1,<3.0.0\" }]\n\n[[package]]\nname = \"livekit-protocol\"\nsource = { editable = \"livekit-protocol\" }\n\n[[package]]\nname = \"python-sdks\"\nversion = \"0.1.0\"\nsource = { virtual = \".\" }\n\n[package.metadata.requires-dev]\ndev = [{ name = \"livekit-protocol\", editable = \"livekit-protocol\", specifier = \">=2.0.1,<3.0.0\" }]\n".into(),
+                "version = 1\n\n[[package]]\nname = \"livekit-api\"\nsource = { editable = \"livekit-api\" }\n\n[package.metadata]\nrequires-dist = [{ name = \"livekit-protocol\", editable = \"livekit-protocol\", specifier = \">=2.0.1,<3.0.0\" }]\n\n[[package]]\nname = \"livekit-protocol\"\nsource = { editable = \"livekit-protocol\" }\n\n[[package]]\nname = \"python-sdks\"\nversion = \"0.1.0\"\nsource = { virtual = \".\" }\n\n[package.metadata.requires-dev]\ndev = [{ name = \"livekit-protocol\", editable = \"livekit-protocol\", specifier = \">=2.0.1,<3.0.0\" }]\n\n[[package]]\nname = \"outside\"\nsource = { editable = \"../outside\" }\n".into(),
+            ),
+            // uv.lock names a path dependency outside the repo. A directory
+            // of the same name inside the repo is not that project.
+            (
+                "outside/pyproject.toml",
+                pyproject("outside", "\"livekit-protocol>=2.0.1,<3.0.0\""),
             ),
         ];
         for (rel, content) in files {
@@ -582,6 +594,7 @@ versioning.changelog = "CHANGELOG.md"
         let read = |rel: &str| fs::read_to_string(root.join(rel)).unwrap();
         assert!(read("livekit-api/pyproject.toml").contains("\"livekit-protocol>=3.0.0,<4.0.0\""));
         assert!(read("pyproject.toml").contains("\"livekit-protocol>=3.0.0,<4.0.0\""));
+        assert!(read("outside/pyproject.toml").contains("\"livekit-protocol>=2.0.1,<3.0.0\""));
         let lock = read("uv.lock");
         assert!(
             !lock.contains("<3.0.0"),
