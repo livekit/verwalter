@@ -25,5 +25,11 @@ command = "cargo publish --locked"
 [check]
 publish_dry_run = "cargo publish --dry-run --locked"   # the release PR tries the publish command
 # The changeset level is the contributor's claim; cargo-semver-checks compares
-# the library API against the last release and fails a claim that is too low.
-api = "cargo semver-checks --baseline-rev $VERWALTER_BASELINE_TAG 2>&1 | tee /dev/stderr | sed -n 's/.*requires new \\([a-z]*\\) version.*/\\1/p'"
+# the library API against the baseline and fails a claim that is too low.
+# The baseline is the base of the PR, not the last release tag. A changeset
+# makes a claim for the changes of its own PR. Against the tag, a breaking
+# change that is on `main` and not released would count against each later
+# PR for the same crate.
+# No `pipefail`: the tool exits with 100 for a finding and 101 for a build
+# failure, and verwalter takes an exit code that is not 0 as a failed check.
+api = "cargo semver-checks --baseline-rev $(git merge-base origin/${GITHUB_BASE_REF:-main} HEAD) 2>&1 | tee /dev/stderr | sed -n 's/.*requires new \\([a-z]*\\) version.*/\\1/p'"
