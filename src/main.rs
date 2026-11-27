@@ -1,10 +1,12 @@
 use std::{
     collections::BTreeSet,
+    io::IsTerminal,
     path::{Path, PathBuf},
 };
 
 use anyhow::{Context, Result, anyhow, bail, ensure};
 use clap::Parser;
+use tracing_subscriber::EnvFilter;
 use verwalter::{
     branches, check, gate, git, github, plan::plan, prerelease, release, repo::Repo, status,
     version::BumpLevel, workspace,
@@ -180,7 +182,22 @@ fn releases(text: &str) -> Result<BTreeSet<String>, serde_json::Error> {
 // Returning the error prints `Error: ` with its `Caused by:` chain (and a
 // backtrace under RUST_BACKTRACE=1), and exits 1.
 fn main() -> Result<()> {
+    init_tracing();
     run(Cli::parse())
+}
+
+fn init_tracing() {
+    let filter = EnvFilter::builder()
+        .with_env_var("VERWALTER_LOG")
+        .from_env_lossy();
+    let ansi = std::io::stderr().is_terminal()
+        && std::env::var_os("NO_COLOR").is_none_or(|value| value.is_empty());
+    tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_writer(std::io::stderr)
+        .with_ansi(ansi)
+        .with_timer(tracing_subscriber::fmt::time::Uptime::default())
+        .init();
 }
 
 fn run(cli: Cli) -> Result<()> {

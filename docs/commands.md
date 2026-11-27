@@ -23,6 +23,16 @@ still regenerated.
 There is no `--help` and no `--version`. The usage line prints on a
 wrong argument.
 
+## Internal tracing
+
+Internal tracing is off by default. Set `VERWALTER_LOG` to enable them:
+
+```sh
+VERWALTER_LOG=verwalter=debug verwalter status
+```
+
+The value uses the _tracing-subscriber_ filter [syntax](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.EnvFilter.html#example-syntax).
+
 ## Running locally
 
 Every command reads `verwalter.toml` in the checkout. `plan` works
