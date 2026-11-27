@@ -89,7 +89,7 @@ file takes a regex: `{ path = "version.go", regex = 'Version = "(?<version>[^"]+
 Each one is a single step of the action:
 
 ```yaml
-- uses: livekit/verwalter@v0.31.0
+- uses: livekit/verwalter@v0.32.0
   with:
     command: pr        # check | pr | release | publish | pre-release | status
 ```
@@ -160,4 +160,4 @@ or install it with `npx skills add livekit/verwalter`.
 
 Install the binary from the
 [releases page](https://github.com/livekit/verwalter/releases) to run any
-command locally, or `cargo install --git https://github.com/livekit/verwalter --tag v0.31.0`.
+command locally, or `cargo install --git https://github.com/livekit/verwalter --tag v0.32.0`.
