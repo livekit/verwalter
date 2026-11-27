@@ -1,7 +1,7 @@
 # The GitHub Action
 
 ```yaml
-- uses: livekit/verwalter@v0.31.0
+- uses: livekit/verwalter@v0.32.0
   with:
     command: pr        # check | changeset | plan | pr | gate | release | publish | pre-release | status
     app-client-id: ${{ secrets.VERWALTER_RELEASE_CLIENT_ID }}

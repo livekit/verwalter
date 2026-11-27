@@ -37,6 +37,6 @@ jobs:
           node-version: 24
       - uses: dart-lang/setup-dart@v1     # dart pub publish --dry-run
       - uses: astral-sh/setup-uv@v7       # a PyPI command: uv build && uvx twine check dist/*
-      - uses: livekit/verwalter@v0.31.0
+      - uses: livekit/verwalter@v0.32.0
         with:
           command: check
