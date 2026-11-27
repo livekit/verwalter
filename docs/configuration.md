@@ -39,7 +39,7 @@ pin_files = ["Cargo.toml"]       # workspace manifests; each release updates its
 
 [check]                          # contributor and release PRs, for `verwalter check`
 exempt_label = "internal"       # default: PRs with this label need no changeset
-api = "cargo semver-checks --baseline-rev $VERWALTER_BASELINE_TAG 2>&1 | tee /dev/stderr | sed -n 's/.*requires new \\([a-z]*\\) version.*/\\1/p'"
+api = "cargo semver-checks --baseline-rev $(git merge-base origin/${GITHUB_BASE_REF:-main} HEAD) 2>&1 | tee /dev/stderr | sed -n 's/.*requires new \\([a-z]*\\) version.*/\\1/p'"
 publish_dry_run = true          # release PRs: dry-run each publish command. Default: off
 
 [versioning]                     # what a release changes
@@ -79,7 +79,7 @@ release.draft = false            # public on creation, before the publish
 publish.registry = "npm"         # "none" with no command: released on GitHub only
 publish.command = "pnpm publish --no-git-checks"   # else the built-in one for the registry
 publish.exists_url = "https://r/{name}/{version}"   # replaces the built-in check of any registry but goproxy. {version} is PEP 440 on PyPI
-check.api = "griffe check pkg -a $VERWALTER_BASELINE_TAG >/dev/null || echo major"   # or false
+check.api = "griffe check pkg -a $(git merge-base origin/${GITHUB_BASE_REF:-main} HEAD) >/dev/null || echo major"   # or false
 check.publish_dry_run = "uv build && twine check dist/*"   # or false
 ```
 

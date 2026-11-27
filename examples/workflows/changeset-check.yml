@@ -3,8 +3,8 @@
 # The `internal` label (config: [check] exempt_label) skips the check.
 # With `[check].api` in verwalter.toml, the same run checks the public
 # API of each covered package against its changeset level. The tool it
-# names must be installed first, and the baseline tag must be in the
-# checkout. With `[check].publish_dry_run`, the run on the release PR
+# names must be installed first, and the checkout needs the full history
+# for the merge base with the PR base. With `[check].publish_dry_run`, the run on the release PR
 # dry-runs each publish command and fails the PR when one fails, before
 # the version reaches main. Install the toolchains it needs below, and
 # open the release PR with an App token so this workflow runs on it.
@@ -25,7 +25,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          fetch-depth: 0                       # the API check needs the baseline tag, the dry run the tags
+          fetch-depth: 0                       # the API check needs the merge base, the dry run the tags
       - uses: taiki-e/install-action@v2   # only with [check].api
         with:
           tool: cargo-semver-checks
