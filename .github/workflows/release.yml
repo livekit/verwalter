@@ -13,9 +13,27 @@ permissions:
   id-token: write # crates.io trusted publishing
 
 jobs:
+  # Only a run by hand, or a merged release PR or rc PR that the
+  # verwalter-release App opened. The tool decides, from the source of
+  # this checkout: no release has `gate` before this one.
+  gate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      release: ${{ steps.verwalter.outputs.release }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
+      - uses: actions-rust-lang/setup-rust-toolchain@a188e68d0fd2bd36ad51dccb2b07ba6e75105f30 # v2.0.1
+      - id: verwalter
+        run: cargo run --quiet -- gate
+
   # Build first: nothing is written anywhere until the binaries exist.
   build:
-    if: github.event_name == 'workflow_dispatch' || (github.event.pull_request.merged == true && startsWith(github.event.pull_request.head.ref, 'release/'))
+    needs: gate
+    if: needs.gate.outputs.release == 'true'
     strategy:
       matrix:
         include:
