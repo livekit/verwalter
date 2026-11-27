@@ -93,9 +93,31 @@
             "null"
           ],
           "default": null
+        },
+        "publish_dry_run": {
+          "description": "Release PRs: the dry run of the publish command, for each package\nthe PR releases. `true` takes the built-in dry run of each\nregistry. A command applies to the packages on the default\nregistry, in the package's path; the others take the built-in.\nA package's `check.publish_dry_run` overrides it. Default: off.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DryRun"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "additionalProperties": false
+    },
+    "DryRun": {
+      "description": "`publish_dry_run`: `true` for the built-in dry run of the registry,\nor a shell command.",
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "string"
+        }
+      ]
     },
     "Versioning": {
       "description": "What a release changes. `files` and `changelog` are defaults for\nevery package, relative to each package's own `path`.",
@@ -134,7 +156,7 @@
           "$ref": "#/$defs/BumpLevel"
         },
         "prerelease_label": {
-          "description": "Pre-release label: `1.6.0-rc.1`. Written as PEP 440 in pyproject.toml\n(`1.6.0rc1`; `alpha` and `beta` become `a` and `b`).",
+          "description": "Pre-release label: `1.6.0-rc.1`. Written as PEP 440 in pyproject.toml and .py files\n(`1.6.0rc1`; `alpha` and `beta` become `a` and `b`).",
           "type": "string",
           "default": "rc"
         }
@@ -244,7 +266,7 @@
           "$ref": "#/$defs/Registry"
         },
         "exists_url": {
-          "description": "For `registry = \"custom\"`: a URL with `{name}` and `{version}` that\nanswers 200 when the version exists and 404 when it does not.",
+          "description": "For `registry = \"custom\"`: a URL with `{name}` and `{version}` that\nanswers 200 when the version exists and 404 when it does not. A\npackage on another registry sets its own `publish.exists_url`.",
           "type": [
             "string",
             "null"
@@ -377,6 +399,14 @@
             "null"
           ],
           "default": null
+        },
+        "required_assets": {
+          "description": "Asset names the GitHub release must have before it becomes public,\nwith `{version}` and `{tag}`. Exact names, no globs. A draft that\nlacks one stays a draft.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
         }
       },
       "additionalProperties": false
@@ -396,6 +426,7 @@
           ]
         },
         "exists_url": {
+          "description": "A URL with `{name}` and `{version}` that answers 200 when the\nversion exists and 404 when it does not. Replaces the built-in\ncheck of the registry, except goproxy. `{version}` is PEP 440 on\nPyPI (`1.6.0rc1`), semver elsewhere.",
           "type": [
             "string",
             "null"
@@ -418,15 +449,40 @@
       "type": "object",
       "properties": {
         "api": {
-          "description": "Spec: Package.api_command.",
-          "type": [
-            "string",
-            "null"
-          ],
-          "default": null
+          "description": "Spec: Package.api_command. Overrides `[check].api`; `false` runs\nnone.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ApiCheck"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "publish_dry_run": {
+          "description": "Overrides `[check].publish_dry_run`; `false` runs none.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DryRun"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "additionalProperties": false
+    },
+    "ApiCheck": {
+      "description": "A package's `check.api`: a shell command, or `false` for none.",
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "string"
+        }
+      ]
     }
   }
 }

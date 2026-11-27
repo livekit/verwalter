@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.31.0
+
+### Minor Changes
+
+- Automatic config discovery - [#98](https://github.com/livekit/verwalter/pull/98) ([@ladvoc](https://github.com/ladvoc))
+- `publish` fails a package whose files changed since its tag, before its publish command runs. The reason names `ref=<tag>`: a run by hand from a later commit no longer publishes newer source under the tagged version. `publish --allow-changed-source` turns the check off. Versions the registry has are skipped before the check. - [#105](https://github.com/livekit/verwalter/pull/105) ([@lukasIO](https://github.com/lukasIO))
+- `release` refuses to attach or upload assets for a tag from an earlier run when the package's files changed since the tag, and names `ref=<tag>`. A release without assets is still created. `release --allow-changed-source` turns the check off. - [#109](https://github.com/livekit/verwalter/pull/109) ([@lukasIO](https://github.com/lukasIO))
+- `release.required_assets` on a package lists the asset names its GitHub release must have: `release --publish` and `publish` leave the release a draft and fail while one is missing. `publish` then does not run the publish command. - [#110](https://github.com/livekit/verwalter/pull/110) ([@lukasIO](https://github.com/lukasIO))
+- `status --check [--package <name>]` exits non-zero when the current version of a package is not completely released: a tag that is not on the remote, a missing or draft GitHub release, a missing required asset, or a version the registry does not have. - [#111](https://github.com/livekit/verwalter/pull/111) ([@lukasIO](https://github.com/lukasIO))
+- `status --json` prints the status of every package as one JSON list, for a tool that reads it - [#118](https://github.com/livekit/verwalter/pull/118) ([@lukasIO](https://github.com/lukasIO))
+
+### Patch Changes
+
+- A file in a nested package, such as `webrtc-sys/build` inside `webrtc-sys`, counts as a change of that package only. Before, the changeset check also required a changeset for the package around it. - [#101](https://github.com/livekit/verwalter/pull/101) ([@lukasIO](https://github.com/lukasIO))
+
 ## 0.30.0
 
 ### Minor Changes

@@ -6,8 +6,7 @@ has a reason and a check. The failures behind them are in
 [release-pitfalls.md](release-pitfalls.md).
 
 [examples/workflows/release.yml](../examples/workflows/release.yml) is
-the starting point. It has no job that checks the end state, because
-the required assets and registries differ per repository.
+the starting point.
 
 Three terms:
 
@@ -20,6 +19,11 @@ Three terms:
 - **One run owns one release.** Build, tag, release and publish are
   jobs of one workflow run, linked with `needs`.
   - Why: a failure in one job stops the next, and the run is red.
+  - The trigger covers every branch that can release. An rc PR or a
+    maintenance release can target another branch than `main`. A
+    `branches` filter on the trigger then starts no run for it: the
+    branch has the version, but no tag and no publish. Let the
+    condition on the first job decide which PRs release.
   - Check: can you reach every job of the release from one run page?
 
 - **Call, do not chain by event.** A shared build is a reusable
@@ -78,19 +82,45 @@ Three terms:
     is: the `release` job makes the draft, the build jobs follow, and
     a last job runs
     `verwalter release --package <name> --asset <dir> --publish`.
+  - verwalter enforces the asset part with `release.required_assets`
+    on the package. `release --publish` and `publish` do not make the
+    release public while a listed name is missing. They fail and list
+    the missing names, and the release stays a draft.
   - A version number on the default branch is public too. If a
     consumer reads the version from a file there, the merge announces
     the release before the assets exist.
   - Check: list everything that a consumer reads. For each item, when
     does it become visible, and is the release complete then?
 
+- **Try the publish before the merge.** The release PR runs the dry
+  run of each publish command, and a failed dry run blocks the merge.
+  - Why: a registry can reject a version that builds and passes the
+    tests. pub.dev treats every warning as an error, and npm refuses a
+    pre-release without a dist-tag. After the merge, the base branch
+    names a version that has no tag and is on no registry.
+  - With verwalter: `[check].publish_dry_run = true` in `verwalter.toml`.
+    `check` runs the dry runs on the release PR. Its job must have the
+    toolchain of each registry, and the release PR must be opened with
+    an [App token](action.md#a-github-app-token), or no check runs on it.
+  - A dry run does not prove the upload: a token or a trusted publisher
+    can still fail. The end-state check below finds that case.
+  - Check: break a field that the registry validates, such as the
+    license in the manifest, on the release branch. Does the release PR
+    go red?
+
 - **Check the end state.** The last job of the run asserts the result:
   the tag exists, the release is public, each required asset is there,
   and each registry has the version.
   - Why: this job fails on every silent skip, whatever caused it.
-  - With verwalter, `publish` already fails the job when a registry
-    lacks the version or the draft cannot become public. The assets
-    and the registries that verwalter does not handle need the job.
+  - With verwalter, the last job is one step: `verwalter status --check`.
+    The tag must be on the remote. The release must be public and
+    have each name in `release.required_assets`. The registry must
+    have the version. A registry that verwalter does not handle needs
+    a step of its own.
+  - A registry can show a version minutes after the publish. npm scans
+    a new version first. `verwalter publish` waits for it, five minutes
+    by default. For a registry with a longer delay, such as Maven
+    Central, give the check time: `status --check --wait 30m`.
     See [Check the end state](#check-the-end-state).
   - Check: delete one upload step in your head. Does the run go red?
 
@@ -106,6 +136,13 @@ Three terms:
   - Why: their failure makes the run red, but the release jobs stay
     green, so it is clear that the release is complete.
   - Do not use `continue-on-error` for them: it hides the failure.
+  - A step that writes to one shared place, such as a docs site with
+    one version, checks three facts first: this run released the
+    package that the place belongs to, the version is not a
+    pre-release, and the run is for the main line. Read these from the
+    fields of the handoff, such as `package` and `prerelease` in
+    `releases`. Do not search the handoff for a substring: after an
+    rc, `previous_version` of the stable release contains `-rc.`.
   - A publish to a second registry is not such a step. It is part of
     the release.
 
@@ -133,10 +170,19 @@ Three terms:
     evaluated when the run starts and can use only `github`, `inputs`
     and `vars`.
   - Never use a constant group, or a group per branch, on a workflow
-    that also starts for other events. A group holds one running and
-    one waiting run. A third run cancels the waiting one, also with
-    `cancel-in-progress: false`. A closed pull request or a push can
-    then cancel a waiting release.
+    that also starts for other events. By default, a group holds one
+    running and one waiting run. A third run cancels the waiting one,
+    also with `cancel-in-progress: false`. A closed pull request or a
+    push can then cancel a waiting release. `queue: max` keeps every
+    waiting run.
+  - A registry with a moving pointer needs one group for all
+    versions. npm moves `latest` to the version that was published
+    last. With a group per tag, the publish jobs of two versions
+    overlap, and the older one can finish last and take `latest`. Give
+    the publish job one group per registry, with `queue: max`. A
+    waiting job checks out after the running one ends, so it sees the
+    newer tag. verwalter then gives the older version another
+    dist-tag. See [One publish at a time](#one-publish-at-a-time).
   - A run without a tag, such as a build on each push, gets a group of
     its own: `inputs.tag_name || github.run_id`.
   - Check: start the workflow twice for one tag in your head. Does the
@@ -148,6 +194,11 @@ Three terms:
   - A run by hand checks out the branch head. Give it a `ref` input,
     as the example workflow does, and set it to the merge commit or to
     any tag of that release.
+  - `verwalter publish` fails a package whose files changed since its
+    tag, and the reason names `ref=<tag>`. `verwalter release --asset`
+    does the same before it uploads to a tag from an earlier run.
+    Neither compares files outside the package path, such as a root
+    lock file, so pin the commit anyway.
   - A later release run can finish an older release: verwalter reports
     a draft on every run until it is public. A job that finishes such
     a draft checks out the tag of that release, not the commit of the
@@ -227,6 +278,27 @@ jobs:
       cancel-in-progress: false
 ```
 
+### One publish at a time
+
+For a registry with a moving pointer, such as `latest` on npm.
+
+```yaml
+jobs:
+  publish:
+    needs: release
+    concurrency:
+      group: npm-publish
+      cancel-in-progress: false
+      queue: max
+    steps:
+      # The checkout is a step of this job. It runs after the wait,
+      # so it sees the tags of a release that finished in between.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha || inputs.ref || github.sha }}
+          fetch-depth: 0
+```
+
 ### Pin a run by hand
 
 ```yaml
@@ -248,28 +320,26 @@ jobs:
 
 ```yaml
 verify:
-  needs: [release, publish]
-  if: needs.release.outputs.released == 'true'
+  needs: publish
   runs-on: ubuntu-latest
-  env:
-    GH_TOKEN: ${{ github.token }}
-    GH_REPO: ${{ github.repository }}
-    TAG: ${{ needs.release.outputs.tag }}
-    REQUIRED: "app-linux.zip app-macos.zip app-windows.zip"
+  permissions:
+    contents: write # a draft release is visible only with write access
   steps:
-    - run: |
-        set -euo pipefail
-        if [ "$(gh release view "$TAG" --json isDraft --jq .isDraft)" != "false" ]; then
-          echo "::error::release $TAG is not public"
-          exit 1
-        fi
-        gh release view "$TAG" --json assets --jq '.assets[].name' > on-release.txt
-        for asset in $REQUIRED; do
-          grep -qxF "$asset" on-release.txt || { echo "::error::$asset is missing on $TAG"; exit 1; }
-        done
-        # One request per registry that verwalter does not handle.
-        npm view "my-package@${TAG#v}" version
+    - uses: actions/checkout@v7
+      with:
+        ref: ${{ github.event.pull_request.merge_commit_sha || inputs.ref || github.sha }}
+        fetch-depth: 0
+    - uses: livekit/verwalter@v0.31.0
+      with:
+        command: status
+        args: --check
+    # A registry that verwalter does not handle gets one request of its
+    # own here, such as: npm view "my-package@<version>" version
 ```
+
+The required assets are the names in `release.required_assets` of each
+package. The step prints the status of every package, then one line
+for each package that is not completely released.
 
 ## Recovery
 
@@ -281,7 +351,8 @@ First find the cause of the failure. It decides the path.
 |---|---|
 | Transient: a runner, the network, a registry that was down | Re-run the failed jobs of the same run: `gh run rerun <run-id> --failed`. The run keeps its event, its inputs and its commit. Only the failed jobs and the jobs after them run again. GitHub permits this for 30 days after the first run. The build artifacts of the first run must still exist. |
 | The workflow file was wrong: a missing secret, a wrong setup step | A re-run uses the old workflow file. Merge the fix, then start a new run by hand with the tag: `gh workflow run <file> -f ref=<tag>`. The workflow file comes from the branch, and the source comes from the tag. Every job builds again. |
-| The release configuration was wrong: a publish command in `verwalter.toml` | A run with `ref=<tag>` reads the old configuration from the tag. Merge the fix. If `git diff <tag> HEAD -- <package path>` is empty, start a run by hand from the branch head. If it is not empty, release the next version. |
+| The release configuration was wrong: a publish command in `verwalter.toml` | A run with `ref=<tag>` reads the old configuration from the tag. Merge the fix, then start a run by hand from the branch head. verwalter compares the package's files with the tag. If they changed, `publish` and `release --asset` fail and name the tag. Then release the next version. |
+| The publish command rejects the version, before the tag: a registry rule, a validation warning | The base branch has the version, but nothing has a tag. Merge the fix without a changeset. Then run `verwalter release --package <name>` on the fix commit, or start a run by hand from the branch head. `[check].publish_dry_run` finds most of these causes on the release PR, before the merge. |
 | The released commit is wrong: the source does not build or the package is broken | Do not publish a fixed copy of that version. If no registry has the version, remove the release and the tag (`verwalter release --abandon <tag>`). Then merge the fix with a changeset and release the next version. |
 
 A workflow supports these paths when it follows three rules above.

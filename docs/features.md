@@ -7,14 +7,15 @@ What the tool does, what it catches, and what to do when a step fails.
 | Feature | What it does | Where |
 |---|---|---|
 | Changeset check | Fails a PR that changes a package without a changeset. It posts one comment with a prefilled new-file link and updates it in place. On a passing PR the comment lists the bump each changeset claims, per package, and the dependents and fixed-group members that are released with them, so the reviewer sees the release the merge causes. It is deleted when the PR claims nothing. An invalid changeset is reported in the same comment. | `check`, `[check].exempt_label` |
+| Publish dry run | On the release PR, runs the dry run of the publish command for each package the merge releases, and fails the PR when one fails. One cargo run covers every crate in the release. | `[check].publish_dry_run`, `check.publish_dry_run` |
 | API check | Runs a configured command (cargo-semver-checks, griffe, break-check) for every changed package that a changeset covers, and fails the PR when the changeset level is below what the command proves. 0.x versions are translated: a breaking change needs `minor`. | `[check].api`, `check.api` |
 | Changeset command | Writes a changeset for the packages the branch changes and no pending changeset covers, or for named packages. | `changeset --level --package --summary` |
 | One release PR | Every package with a pending bump goes in one PR. Each push regenerates the branch from `main` and updates the PR in place. With nothing pending, the PR is closed. | `pr`, `[release].branch_prefix` |
 | Dependent bumps | A package whose in-repo dependency is released gets a bump too, transitively. Its dependency floor moves in its manifest and the lock files. | `[versioning].dependent_bump_level`, `[workspace].pin_files` |
 | Dependency order | Releases, tags and the handoff list go dependencies first. A failure stops before any dependent. | `release` |
-| Publish scheduler | Runs each package's publish command for the packages the run released, from the `releases` output, dependencies first, independent packages in parallel. A package with `publish.registry = "none"` and no command is released on GitHub only and left out. A failure blocks its transitive dependents and nothing else. A version the registry has is skipped before the command runs. Without `releases`, every tagged package runs. | `publish`, `[publish]`, `publish.registry`, `publish.command` |
+| Publish scheduler | Runs each package's publish command for the packages the run released, from the `releases` output, dependencies first, independent packages in parallel. A package with `publish.registry = "none"` and no command is released on GitHub only and left out. A failure blocks its transitive dependents and nothing else. A version the registry has is skipped before the command runs. A package whose files changed since its tag fails before the command runs. Without `releases`, every tagged package runs. | `publish`, `[publish]`, `publish.registry`, `publish.command`, `publish --allow-changed-source` |
 | Workspace publish | One recursive command for every package on the default registry, run once from the root, with per-package reporting from the registry afterwards. Per-package commands resolve workspace ranges too: the npm default is `pnpm publish` in a pnpm workspace. | `[publish].workspace` |
-| Registry check | One GET per registry answers whether a version exists. 200 skips, 404 publishes, anything else fails. On `goproxy` the GET is the publish: 200 is published, 404 or 410 fails and is re-run. `status` shows the answer. | `publish.registry`, `publish.exists_url` |
+| Registry check | One GET per registry answers whether a version exists. 200 skips, 404 publishes, anything else fails. On `goproxy` the GET is the publish: 200 is published, 404 or 410 fails and is re-run. `status` shows the answer. After a publish command passes, `publish` asks until the registry shows the version, for up to five minutes (`--wait`): npm scans a new version first and answers 404 in that time. | `publish.registry`, `publish.exists_url` |
 | Fixed groups | Members release at one version: the highest in the group, bumped by the highest level any member needs. A member without a changeset gets a "Released with" line. | `[versioning].fixed` |
 | 0.x rule | `major` on `0.x` gives `1.0.0`, as changesets does. | |
 | Pre-releases | An rc PR for every package with a pending changeset and the fixed groups they are in, each group at its own rc version and pinned to each other, from any branch. Nothing is chosen by hand. Dependents without a changeset are untouched. Numbering continues from the tags. The final release follows the pending level. It is never lower than the rc. | `pre-release`, `[versioning].prerelease_label` |
@@ -26,6 +27,7 @@ What the tool does, what it catches, and what to do when a step fails.
 | Abandon | Removes a GitHub release and its tag, local and remote. The registry is not touched. | `release --abandon <tag>` |
 | Dry run | Every push, tag and GitHub write is printed instead of done. | `--dry-run`, action `dry-run` |
 | Status | Per package: version, tag, release, pending changesets, open PRs, next step. | `status` |
+| End-state check | The last job of a release run asserts the result. The tag must be on the remote. The GitHub release must be public and have its required assets. The registry must have the version. Each failure names what is missing and the command that finishes it. A package with `release.mode = "none"` is not checked. A version edited by hand is not checked. | `status --check`, `release.required_assets` |
 
 ## Failure paths
 
@@ -46,8 +48,11 @@ What the tool does, what it catches, and what to do when a step fails.
 | An rc is requested twice, or by another member of the group | One branch per package or group, updated in place. The number continues. |
 | A GitHub release is deleted but the tag remains | The next release run recreates it from the changelog. |
 | Two release runs race on the same tag | The run that loses the create sees the existing release and reports it. |
+| A draft release lacks a file that consumers download | The package lists the file in `release.required_assets`. `release --publish` and `publish` then fail for the package and list the missing names. The release stays a draft. `publish` checks this before the publish command, so the command does not run for such a package. |
 | A publish fails for one package | Its transitive dependents are blocked and reported with the cause. Every other package publishes. The run exits non-zero. |
 | A publish is re-run | Versions the registry has are skipped before the command runs. The rest publish. |
+| A run by hand publishes from a commit after the release | A package whose files changed since its tag fails before its command runs. The reason names `ref=<tag>`. Its dependents are blocked. `publish --allow-changed-source` publishes the newer source anyway. |
+| A recovery run attaches assets from a commit after the release | `release` fails for a package whose files changed since its tag, when the tag is from an earlier run. Nothing is uploaded. The error names `ref=<tag>`. A release without assets is still created. `release --allow-changed-source` uploads the assets anyway. |
 | The registry is down during a publish | A 503 is an error, not "not there yet". The package fails, its dependents are blocked. |
 
 ### When a step fails
@@ -60,9 +65,10 @@ and finishes what is missing. Start with `verwalter status`. Add
 |---|---|
 | Build or test job before the tag | Fix, merge, run the workflow by hand (`workflow_dispatch`) from the branch head. Nothing was written, so the fix is part of the release. |
 | Tag push | `verwalter release --package <name>` tags and pushes. |
-| GitHub release creation | `verwalter release --package <name> [--asset <file>...]` creates it from the existing tag. |
-| Asset upload | `verwalter release --package <name> --asset <file\|dir>... [--publish]` uploads with `--clobber`. A directory stands for every file directly in it. |
+| GitHub release creation | `verwalter release --package <name> [--asset <file>...]` creates it from the existing tag. With `--asset`, the checkout must hold the package as tagged. |
+| Asset upload | `verwalter release --package <name> --asset <file\|dir>... [--publish]` uploads with `--clobber`. A directory stands for every file directly in it. The checkout must hold the package as tagged. |
 | Draft never published | `verwalter release --package <name> --publish`. |
+| Registry publish rejects the version | The base branch has the version, but no tag and nothing on the registry. Merge the fix without a changeset, then run `verwalter release --package <name>` on the fix commit, or the workflow by hand from the branch head. A fix with a changeset releases the next version instead, and the failed version keeps a changelog entry with no tag. `[check].publish_dry_run` finds most of these causes on the release PR. |
 | Registry publish | Re-run the publish job with "Re-run failed jobs" on the same run. The tag and release stay. The tool does not touch registries. The publish runs in dependency order and stops at the first failure, so dependents were not published. The re-run picks them up. Or dispatch the workflow with `package=<dependent>` and `ref=<tag>` once the dependency is on the registry. |
 | The commit itself is broken | `verwalter release --abandon <tag>` removes the release and the tag. Add a changeset and release the next version. |
 | Release PR missing or stale | `verwalter pr`. The branch is regenerated, the PR updated in place. |
@@ -75,8 +81,9 @@ it keeps the merge commit. A run by hand (`workflow_dispatch`) takes the
 workflow file from the branch, so use it when the workflow file needed
 a fix, and set its `ref` input to the release tag. Without `ref`, the
 run checks out the branch head. The tool then tags that commit if the
-tag is missing, and the publish command uploads its source under the
-released version.
+tag is missing. If the tag exists and the branch head changed a package
+since the tag, `publish` fails that package and names the tag, and
+`release --asset` fails the same way before it uploads.
 
 Running locally needs push rights and `gh auth login`. Fetch first so tags
 and `origin/<base>` are current.

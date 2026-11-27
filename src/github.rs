@@ -424,6 +424,9 @@ pub struct Release {
     #[serde(rename = "isDraft")]
     pub draft: bool,
     pub asset_count: usize,
+    /// The names of the first 100 assets.
+    #[serde(default)]
+    pub assets: Vec<String>,
 }
 
 /// Look up the release behind a tag, drafts included, through `gh api
@@ -450,7 +453,7 @@ impl<'a> Command for ReleaseView<'a> {
             "-f".into(),
             "query=query($owner:String!,$repo:String!,$tag:String!){repository(owner:$owner,name:$repo){release(tagName:$tag){isDraft releaseAssets(first:100){nodes{name}}}}}".into(),
             "--jq".into(),
-            ".data.repository.release | if . then {isDraft, asset_count: (.releaseAssets.nodes | length)} else empty end".into(),
+            ".data.repository.release | if . then {isDraft, asset_count: (.releaseAssets.nodes | length), assets: [.releaseAssets.nodes[].name]} else empty end".into(),
         ])
     }
 
