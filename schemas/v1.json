@@ -208,6 +208,11 @@
           "type": "string",
           "default": "release"
         },
+        "author": {
+          "description": "The login that opens the release PR. `gate` accepts no other.",
+          "type": "string",
+          "default": "verwalter-release[bot]"
+        },
         "tag": {
           "description": "Default for `release.tag` of every package.",
           "type": [

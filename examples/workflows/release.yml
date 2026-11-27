@@ -7,7 +7,7 @@ name: Release
 on:
   # No `branches` filter: an rc PR from pre-release.yml targets the branch
   # the workflow was run on, and a maintenance branch has its own release
-  # PR. The condition on the first job decides which PRs release.
+  # PR. The `gate` job decides which PRs release.
   pull_request:
     types: [closed]
   # A failed job is re-run with "Re-run failed jobs" on the run itself:
@@ -32,11 +32,28 @@ permissions:
   id-token: write # trusted publishing
 
 jobs:
+  # Only a run by hand, or a merged release PR or rc PR that the tool
+  # opened: the branch name alone would let any pushed `release/*` branch
+  # trigger a publish. The author is `[release].author` in verwalter.toml:
+  # the GitHub App of `app-client-id`, or github-actions[bot] without one.
+  gate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      release: ${{ steps.verwalter.outputs.release }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha || inputs.ref || github.sha }}
+      - id: verwalter
+        uses: livekit/verwalter@v0.31.0
+        with:
+          command: gate
+
   build:
-    # Only a release PR the tool opened: the branch prefix alone would let
-    # any pushed `release/*` branch trigger a publish. The author is the
-    # GitHub App of `app-client-id`. Without an App, it is github-actions[bot].
-    if: github.event_name == 'workflow_dispatch' || (github.event.pull_request.merged == true && startsWith(github.event.pull_request.head.ref, 'release/') && github.event.pull_request.user.login == 'verwalter-release[bot]' && contains(github.event.pull_request.body, '<!-- verwalter release -->'))
+    needs: gate
+    if: needs.gate.outputs.release == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -95,13 +112,13 @@ jobs:
     if: needs.release.outputs.released == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     permissions:
-      contents: write   # drafts: the tool flips them; gh release upload for assets built here
-      id-token: write   # trusted publishing
+      contents: write # drafts: the tool flips them; gh release upload for assets built here
+      id-token: write # trusted publishing
     steps:
       - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.merge_commit_sha || inputs.ref || github.sha }}
-          fetch-depth: 0  # tags decide what is published
+          fetch-depth: 0 # tags decide what is published
       - uses: actions/download-artifact@v8
         with:
           name: dist
@@ -133,7 +150,7 @@ jobs:
     needs: publish
     runs-on: ubuntu-latest
     permissions:
-      contents: write   # reads only. A draft release is visible only with write access
+      contents: write # reads only. A draft release is visible only with write access
     steps:
       - uses: actions/checkout@v7
         with:
