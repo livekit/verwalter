@@ -47,7 +47,7 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.merge_commit_sha || inputs.ref || github.sha }}
       - id: verwalter
-        uses: livekit/verwalter@v0.22.0
+        uses: livekit/verwalter@v0.31.0
         with:
           command: gate
 
@@ -112,13 +112,13 @@ jobs:
     if: needs.release.outputs.released == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     permissions:
-      contents: write   # drafts: the tool flips them; gh release upload for assets built here
-      id-token: write   # trusted publishing
+      contents: write # drafts: the tool flips them; gh release upload for assets built here
+      id-token: write # trusted publishing
     steps:
       - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.merge_commit_sha || inputs.ref || github.sha }}
-          fetch-depth: 0  # tags decide what is published
+          fetch-depth: 0 # tags decide what is published
       - uses: actions/download-artifact@v8
         with:
           name: dist
@@ -150,7 +150,7 @@ jobs:
     needs: publish
     runs-on: ubuntu-latest
     permissions:
-      contents: write   # reads only. A draft release is visible only with write access
+      contents: write # reads only. A draft release is visible only with write access
     steps:
       - uses: actions/checkout@v7
         with:
