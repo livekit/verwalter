@@ -10,6 +10,26 @@ use anyhow::{Context, Result, bail};
 
 use crate::{Version, changeset::Changeset, config::Config, handler, plan::PackageState};
 
+/// The package's own `pyproject.toml` when its version is dynamic and
+/// versioning.files leaves it out: it carries no version, but its
+/// requirements still make dependencies and move as pins. A missing file
+/// is no error, an unreadable one is.
+pub fn dynamic_pyproject(
+    root: &Path,
+    package: &crate::config::Package,
+) -> Result<Option<(String, String)>> {
+    let file = crate::config::under(&package.path, "pyproject.toml");
+    if package.versioning.files.iter().any(|f| f.path() == file) {
+        return Ok(None);
+    }
+    let content = match fs::read_to_string(root.join(&file)) {
+        Ok(content) => content,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(e).with_context(|| format!("read {file}")),
+    };
+    Ok(handler::pyproject_dynamic_version(&content).map(|_| (file, content)))
+}
+
 pub const CONFIG_FILE: &str = "verwalter.toml";
 pub const CHANGESET_DIR: &str = ".changeset";
 
@@ -59,6 +79,24 @@ impl Repo {
             // Spec: Package.dependencies. The configured ones, then the
             // ones the manifests name.
             let mut dependencies = package.dependencies.clone();
+            let others: Vec<String> = names
+                .iter()
+                .filter(|n| *n != name)
+                .map(|n| key_of(n))
+                .collect();
+            let others: Vec<&str> = others.iter().map(String::as_str).collect();
+            let mut add_dependencies = |file: &str, content: &str| -> Result<()> {
+                for key in handler::internal_dependencies(file, content, &others)? {
+                    let dep = names
+                        .iter()
+                        .find(|n| key_of(n) == key)
+                        .map_or(key, |n| n.to_string());
+                    if !dependencies.contains(&dep) {
+                        dependencies.push(dep);
+                    }
+                }
+                Ok(())
+            };
             for file in &package.versioning.files {
                 let (file, regex) = (file.path(), file.regex());
                 let content =
@@ -78,21 +116,10 @@ impl Repo {
                     )),
                     _ => {}
                 }
-                let others: Vec<String> = names
-                    .iter()
-                    .filter(|n| *n != name)
-                    .map(|n| key_of(n))
-                    .collect();
-                let others: Vec<&str> = others.iter().map(String::as_str).collect();
-                for key in handler::internal_dependencies(file, &content, &others)? {
-                    let dep = names
-                        .iter()
-                        .find(|n| key_of(n) == key)
-                        .map_or(key, |n| n.to_string());
-                    if !dependencies.contains(&dep) {
-                        dependencies.push(dep);
-                    }
-                }
+                add_dependencies(file, &content)?;
+            }
+            if let Some((file, content)) = dynamic_pyproject(root, package)? {
+                add_dependencies(&file, &content)?;
             }
             // A go.mod before its first release with the tool has no version
             // comment: the latest tag of the module, else 0.0.0.

@@ -36,8 +36,10 @@ fn is_lock_file(path: &str) -> bool {
 /// every package in the repo, for the pins in dependents. Only dependents
 /// that are in `plan` are pinned: a release plan carries every dependent
 /// anyway, and an rc pins only the packages it carries, so a dependent
-/// outside the rc never points at it. Returns the paths whose content
-/// changed.
+/// outside the rc never points at it. uv.lock is the exception: uv needs
+/// it to agree with every pyproject.toml in the workspace, so a release
+/// moves the pin in uv.lock and in the pyproject.toml of every project it
+/// lists, in the plan or not. Returns the paths whose content changed.
 pub fn apply(
     root: &Path,
     config: &Config,
@@ -82,13 +84,16 @@ pub fn apply(
     // without being listed. Only its own format: a Python package can be
     // named like a crate from crates.io, whose lock entry is not ours.
     let key = config.dependency_key(name);
-    let manifests: Vec<&str> = package
+    let mut manifests: Vec<&str> = package
         .versioning
         .files
         .iter()
         .filter(|f| f.regex().is_none())
         .filter_map(|f| f.path().rsplit('/').next())
         .collect();
+    if crate::repo::dynamic_pyproject(root, package)?.is_some() {
+        manifests.push("pyproject.toml");
+    }
     let locks = ROOT_LOCKS
         .iter()
         .filter(|(manifest, _)| manifests.contains(manifest))
@@ -119,6 +124,22 @@ pub fn apply(
                 rewrite(file, None, Some(&member.name))?;
             }
         }
+        // uv.lock moves the pin of every project in the workspace, also a
+        // dev group or a project that is no package here. Their
+        // pyproject.toml must move with it, or `uv sync --locked` fails.
+        if file.rsplit('/').next() == Some("uv.lock")
+            && let Ok(lock) = fs::read_to_string(root.join(file))
+        {
+            let dir = file.rsplit_once('/').map_or(".", |(dir, _)| dir);
+            // A path dependency outside the repo is not ours to move.
+            for project in handler::uv_lock_projects(&lock) {
+                if let Some(pyproject) =
+                    crate::config::inside(dir, &format!("{project}/pyproject.toml"))
+                {
+                    rewrite(&pyproject, None, Some(key))?;
+                }
+            }
+        }
     }
     let dependents = packages.iter().filter(|p| {
         p.dependencies.iter().any(|d| d == name) && plan.iter().any(|r| r.package == p.name)
@@ -132,6 +153,9 @@ pub fn apply(
                 .filter(|f| !is_lock_file(f.path()))
             {
                 rewrite(file.path(), file.regex(), Some(key))?;
+            }
+            if let Some((file, _)) = crate::repo::dynamic_pyproject(root, d)? {
+                rewrite(&file, None, Some(key))?;
             }
         }
     }
@@ -500,6 +524,85 @@ versioning.changelog = "CHANGELOG.md"
         assert!(
             lock.contains("name = \"krisp-sys\"\nversion = \"1.2.0\""),
             "a crate with its own version stays"
+        );
+    }
+
+    // Issue #128: python-sdks keeps each version in version.py, so the
+    // dynamic pyproject.toml is in no versioning.files list. Its
+    // requirement still makes livekit-api a dependent, and a major release
+    // moves the whole range in pyproject.toml and uv.lock.
+    #[test]
+    fn dynamic_pyproject_requirement_is_a_dependency_and_moves() {
+        let root =
+            std::env::temp_dir().join(format!("verwalter-{}-dynamic-py", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let _cleanup = Repo(root.clone());
+        let pyproject = |name: &str, deps: &str| {
+            format!(
+                "[project]\nname = \"{name}\"\ndynamic = [\"version\"]\ndependencies = [{deps}]\n"
+            )
+        };
+        let files = [
+            // A dev group on livekit-api makes no dependency, so no cycle.
+            (
+                "livekit-protocol/pyproject.toml",
+                pyproject("livekit-protocol", "")
+                    + "\n[dependency-groups]\ndev = [\"livekit-api>=1.0.0\"]\n",
+            ),
+            ("livekit-protocol/livekit/protocol/version.py", "__version__ = \"2.0.1\"\n".into()),
+            ("livekit-api/pyproject.toml", pyproject("livekit-api", "\"livekit-protocol>=2.0.1,<3.0.0\"")),
+            ("livekit-api/livekit/api/version.py", "__version__ = \"1.0.0\"\n".into()),
+            // The workspace root is no package, but its dev group pins
+            // livekit-protocol in pyproject.toml and in uv.lock.
+            (
+                "pyproject.toml",
+                "[project]\nname = \"python-sdks\"\nversion = \"0.1.0\"\n\n[dependency-groups]\ndev = [\"livekit-protocol>=2.0.1,<3.0.0\"]\n".into(),
+            ),
+            (
+                "uv.lock",
+                "version = 1\n\n[[package]]\nname = \"livekit-api\"\nsource = { editable = \"livekit-api\" }\n\n[package.metadata]\nrequires-dist = [{ name = \"livekit-protocol\", editable = \"livekit-protocol\", specifier = \">=2.0.1,<3.0.0\" }]\n\n[[package]]\nname = \"livekit-protocol\"\nsource = { editable = \"livekit-protocol\" }\n\n[[package]]\nname = \"python-sdks\"\nversion = \"0.1.0\"\nsource = { virtual = \".\" }\n\n[package.metadata.requires-dev]\ndev = [{ name = \"livekit-protocol\", editable = \"livekit-protocol\", specifier = \">=2.0.1,<3.0.0\" }]\n\n[[package]]\nname = \"outside\"\nsource = { editable = \"../outside\" }\n".into(),
+            ),
+            // uv.lock names a path dependency outside the repo. A directory
+            // of the same name inside the repo is not that project.
+            (
+                "outside/pyproject.toml",
+                pyproject("outside", "\"livekit-protocol>=2.0.1,<3.0.0\""),
+            ),
+        ];
+        for (rel, content) in files {
+            let p = root.join(rel);
+            fs::create_dir_all(p.parent().unwrap()).unwrap();
+            fs::write(p, content).unwrap();
+        }
+        let config = Config::parse(
+            "[packages.livekit-protocol]\npath = \"livekit-protocol\"\nversioning.files = [{ path = \"livekit/protocol/version.py\", regex = '__version__ = \"(?<version>[^\"]+)\"' }]\nversioning.changelog = false\n\n[packages.livekit-api]\npath = \"livekit-api\"\nversioning.files = [{ path = \"livekit/api/version.py\", regex = '__version__ = \"(?<version>[^\"]+)\"' }]\nversioning.changelog = false\n",
+        )
+        .unwrap();
+        let (state, _) = crate::repo::Repo::load_packages(&root, &config).unwrap();
+        let api = state.iter().find(|p| p.name == "livekit-api").unwrap();
+        assert_eq!(api.dependencies, vec!["livekit-protocol"]);
+        let protocol = state.iter().find(|p| p.name == "livekit-protocol").unwrap();
+        assert!(protocol.dependencies.is_empty());
+
+        let changesets =
+            [Changeset::parse("a.md", "---\nlivekit-protocol: major\n---\nx\n").unwrap()];
+        let p = plan(&state, &changesets, BumpLevel::Patch);
+        assert_eq!(p.len(), 2, "livekit-api gets a dependent bump");
+        for release in &p {
+            apply(&root, &config, &state, &changesets, &p, release).unwrap();
+        }
+        let read = |rel: &str| fs::read_to_string(root.join(rel)).unwrap();
+        assert!(read("livekit-api/pyproject.toml").contains("\"livekit-protocol>=3.0.0,<4.0.0\""));
+        assert!(read("pyproject.toml").contains("\"livekit-protocol>=3.0.0,<4.0.0\""));
+        assert!(read("outside/pyproject.toml").contains("\"livekit-protocol>=2.0.1,<3.0.0\""));
+        let lock = read("uv.lock");
+        assert!(
+            !lock.contains("<3.0.0"),
+            "requires-dist and requires-dev move: {lock}"
+        );
+        assert!(
+            !lock.contains("version = \"3.0.0\""),
+            "uv leaves dynamic versions out"
         );
     }
 }
